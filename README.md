@@ -8,8 +8,9 @@ security services.
 
 > Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
 > collection, detector rule matching, confidence scoring V1, initial Turnstile
-> and reCAPTCHA detectors, and text/JSON reports are implemented. Browser, DNS,
-> and TLS analyzers and broader detector coverage are not available yet.
+> and reCAPTCHA detectors, text/JSON reports, and internal sandboxed Chromium/CDP
+> session startup are implemented. Browser page analysis, DNS and TLS analyzers,
+> and broader detector coverage are not available yet.
 
 ## What Hemera aims to provide
 
@@ -138,7 +139,7 @@ built-in rules, and scoring semantics.
 
 ## Development
 
-Hemera requires Go 1.25 or later. Because it processes untrusted network input,
+Hemera requires Go 1.26 or later. Because it processes untrusted network input,
 build it with the latest supported Go patch release. From the repository root:
 
 ```sh
@@ -146,6 +147,17 @@ go run ./cmd/hemera --help
 go run ./cmd/hemera scan https://example.com/
 go test ./...
 ```
+
+The internal browser package uses `chromedp` but does not download a browser.
+Its opt-in integration test requires a locally installed Chromium or Chrome that
+can run with its sandbox enabled:
+
+```sh
+go test -tags=browser_integration ./internal/browser
+```
+
+Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The current CLI does
+not start Chromium; browser navigation and signal capture remain planned.
 
 ## Documentation
 

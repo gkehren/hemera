@@ -86,6 +86,23 @@ scripts and iframes, JavaScript-created cookies, browser redirects, visible
 challenges, and a small set of relevant JavaScript globals. Navigation remains
 normal: the analyzer must not implement bypass behavior.
 
+The first browser vertical slice is implemented in `internal/browser`. It starts
+a locally installed Chromium through `chromedp`, creates a fresh temporary
+profile, binds the random CDP port to `127.0.0.1`, and verifies the connection
+with `Browser.getVersion`. Startup is limited to a positive configurable timeout
+with a hard ceiling of 10 seconds. Session shutdown is idempotent, bounded, tied
+to the caller's context, and removes the temporary profile after the process
+stops. The package deliberately overrides `chromedp`'s root behavior so Chromium
+is never launched with `--no-sandbox`. It also verifies Chromium's effective
+command line and rejects sandbox-disabling switches added by a launcher;
+environments that cannot prove and preserve the sandbox fail startup.
+
+This slice exposes only the browser product and CDP protocol version. It neither
+navigates nor captures DOM, network, cookies, or signals, and it is not connected
+to `internal/scanner` or either report format. Browser destination validation,
+navigation budgets, resource limits, and deterministic page fixtures remain
+requirements for the next slices before browser analysis can become user-facing.
+
 ### Signal model
 
 Every analyzer emits the common model implemented in `pkg/model`:
@@ -190,7 +207,7 @@ cmd/hemera/               CLI entry point
 internal/scanner/         scan orchestration
 internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
-internal/browser/         Chromium/CDP collection
+internal/browser/         Chromium/CDP session lifecycle; collection planned
 internal/dns/             DNS and TLS collection
 internal/signals/         normalization
 internal/rules/           rule loading and matching
