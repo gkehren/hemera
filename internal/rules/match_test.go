@@ -74,6 +74,42 @@ func TestMatchMinimumEvidenceCountsDistinctGroups(t *testing.T) {
 	}
 }
 
+func TestMatchRealisticBrowserSignalContracts(t *testing.T) {
+	t.Parallel()
+	browser := "browser_analyzer"
+	evidence := []Evidence{
+		{ID: "request", Group: "browser_network", Type: model.SignalTypeNetworkRequest, Source: exact(browser), Key: exact("POST"), Value: exact("https://api.example.test/challenge?redacted"), Weight: 20},
+		{ID: "response", Group: "browser_network", Type: model.SignalTypeNetworkResponse, Source: exact(browser), Key: exact("status"), Value: exact("403"), URL: exact("https://api.example.test/challenge?redacted"), Weight: 20},
+		{ID: "dom", Group: "browser_integration", Type: model.SignalTypePageContent, Source: exact(browser), Key: exact("dom"), Value: &TextPattern{Contains: stringPointer("challenge-marker")}, Weight: 20},
+		{ID: "script", Group: "browser_integration", Type: model.SignalTypeScriptURL, Source: exact(browser), Key: exact("src"), Value: exact("https://cdn.example.test/challenge.js"), Weight: 20},
+		{ID: "iframe", Group: "browser_integration", Type: model.SignalTypeIframeURL, Source: exact(browser), Key: exact("src"), Value: exact("https://frame.example.test/widget"), Weight: 20},
+		{ID: "cookie", Group: "browser_cookie", Type: model.SignalTypeCookie, Source: exact(browser), Key: exact("challenge_cookie"), Value: exact("example.test"), Weight: 20},
+	}
+	conditions := make([]Condition, 0, len(evidence))
+	for index := range evidence {
+		conditions = append(conditions, Condition{Signal: &evidence[index]})
+	}
+	ruleSet := RuleSet{SchemaVersion: CurrentSchemaVersion, Rules: []Rule{{
+		ID: "browser.contract", Name: "Browser contract", Category: CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 3, MinimumScore: 50, Match: Condition{All: conditions},
+	}}}
+	signals := []model.Signal{
+		{Type: model.SignalTypeNetworkRequest, Source: browser, Key: "POST", Value: "https://api.example.test/challenge?redacted", URL: "https://example.test/", Confidence: 1},
+		{Type: model.SignalTypeNetworkResponse, Source: browser, Key: "status", Value: "403", URL: "https://api.example.test/challenge?redacted", Confidence: 1},
+		{Type: model.SignalTypePageContent, Source: browser, Key: "dom", Value: `<div id="challenge-marker"></div>`, URL: "https://example.test/", Confidence: 1},
+		{Type: model.SignalTypeScriptURL, Source: browser, Key: "src", Value: "https://cdn.example.test/challenge.js", URL: "https://example.test/", Confidence: 1},
+		{Type: model.SignalTypeIframeURL, Source: browser, Key: "src", Value: "https://frame.example.test/widget", URL: "https://example.test/", Confidence: 1},
+		{Type: model.SignalTypeCookie, Source: browser, Key: "challenge_cookie", Value: "example.test", URL: "https://example.test/", Confidence: 1},
+	}
+	results, err := Match(ruleSet, signals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Candidate() || len(results[0].PositiveEvidence) != len(evidence) {
+		t.Fatalf("browser contract match = %#v", results)
+	}
+}
+
 func TestMatchExplainsMissingANDAndANYEvidence(t *testing.T) {
 	t.Parallel()
 	ruleSet := loadFixture(t)

@@ -206,7 +206,7 @@ func TestRecordNetworkEventIncludesRedirectAndPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestCaptureSnapshotExtractsResourcesAndCookieNames(t *testing.T) {
+func TestCaptureSnapshotExtractsResourcesAndCookieProvenance(t *testing.T) {
 	t.Parallel()
 	collector := newCaptureCollector()
 	dom := `<html><head><base href="https://cdn.example.test/assets/?key=secret">` +
@@ -215,7 +215,13 @@ func TestCaptureSnapshotExtractsResourcesAndCookieNames(t *testing.T) {
 	result := collector.snapshot(
 		"https://name:password@example.test/page?secret=yes#private",
 		dom,
-		[]string{"zeta", "alpha", "zeta", "bad\nname", ""},
+		[]CaptureCookie{
+			{Name: "zeta", Domain: "example.test"},
+			{Name: "alpha", Domain: "example.test"},
+			{Name: "alpha", Domain: ".third.example.test"},
+			{Name: "bad\nname", Domain: "example.test"},
+			{Name: "omitted", Domain: "bad_domain"},
+		},
 	)
 	if result.FinalURL != "https://example.test/page?redacted" {
 		t.Errorf("FinalURL = %q", result.FinalURL)
@@ -226,8 +232,12 @@ func TestCaptureSnapshotExtractsResourcesAndCookieNames(t *testing.T) {
 	if want := []string{"https://cdn.example.test/frame?redacted"}; !reflect.DeepEqual(result.IframeURLs, want) {
 		t.Errorf("IframeURLs = %#v, want %#v", result.IframeURLs, want)
 	}
-	if want := []string{"alpha", "zeta"}; !reflect.DeepEqual(result.CookieNames, want) {
-		t.Errorf("CookieNames = %#v, want %#v", result.CookieNames, want)
+	if want := []CaptureCookie{
+		{Name: "alpha", Domain: ".third.example.test"},
+		{Name: "alpha", Domain: "example.test"},
+		{Name: "zeta", Domain: "example.test"},
+	}; !reflect.DeepEqual(result.Cookies, want) {
+		t.Errorf("Cookies = %#v, want %#v", result.Cookies, want)
 	}
 	if !strings.Contains(result.DOM, "session=secret") {
 		t.Error("bounded in-memory DOM should retain page markup")
@@ -242,12 +252,12 @@ func TestCaptureOmitsNonWebAndInvalidMetadata(t *testing.T) {
 	collector.addRequest("GET", "HTTPS://EXAMPLE.TEST/path", "Document")
 	collector.addResponse("javascript:secret", 200, "text/html", "Document")
 	collector.addResponse("https://example.test/", 200, "bad\rvalue", "Document")
-	result := collector.snapshot("about:blank", "<script src='blob:secret'></script>", []string{"bad\x00cookie"})
+	result := collector.snapshot("about:blank", "<script src='blob:secret'></script>", []CaptureCookie{{Name: "bad\x00cookie", Domain: "example.test"}})
 	if result.FinalURL != "" || len(result.Requests) != 2 || result.Requests[0].ResourceType != "" ||
 		result.Requests[1].URL != "https://EXAMPLE.TEST/path" || len(result.Responses) != 1 || result.Responses[0].MIMEType != "" {
 		t.Fatalf("invalid metadata was retained: %#v", result)
 	}
-	if len(result.ScriptURLs) != 0 || len(result.CookieNames) != 0 {
+	if len(result.ScriptURLs) != 0 || len(result.Cookies) != 0 {
 		t.Fatalf("non-web resource or invalid cookie retained: %#v", result)
 	}
 }
@@ -270,16 +280,16 @@ func TestCaptureCollectionLimits(t *testing.T) {
 	}
 	dom.WriteString(strings.Repeat("x", maxDOMBytes))
 	dom.WriteString("</body></html>")
-	cookies := make([]string, maxCaptureItems+1)
+	cookies := make([]CaptureCookie, maxCaptureItems+1)
 	for i := range cookies {
-		cookies[i] = fmt.Sprintf("cookie-%04d", i)
+		cookies[i] = CaptureCookie{Name: fmt.Sprintf("cookie-%04d", i), Domain: "example.test"}
 	}
 	result := collector.snapshot("https://example.test/", dom.String(), cookies)
 	if len(result.Requests) != maxCaptureItems || len(result.Responses) != maxCaptureItems ||
 		len(result.ScriptURLs) != maxCaptureItems || len(result.IframeURLs) != maxCaptureItems ||
-		len(result.CookieNames) != maxCaptureItems {
+		len(result.Cookies) != maxCaptureItems {
 		t.Fatalf("item limits = requests %d responses %d scripts %d iframes %d cookies %d",
-			len(result.Requests), len(result.Responses), len(result.ScriptURLs), len(result.IframeURLs), len(result.CookieNames))
+			len(result.Requests), len(result.Responses), len(result.ScriptURLs), len(result.IframeURLs), len(result.Cookies))
 	}
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Errorf("DOM truncation = %t, %d bytes", result.DOMTruncated, len(result.DOM))
@@ -322,15 +332,15 @@ func TestCaptureResultSlicesAreCloned(t *testing.T) {
 	original := CaptureResult{
 		Requests: []CaptureRequest{{URL: "request"}}, Responses: []CaptureResponse{{URL: "response"}},
 		ScriptURLs: []string{"script"}, IframeURLs: []string{"iframe"},
-		CookieNames: []string{"cookie"}, Warnings: []string{"warning"},
+		Cookies: []CaptureCookie{{Name: "cookie", Domain: "example.test"}}, Warnings: []string{"warning"},
 	}
 	clone := cloneCaptureResult(original)
 	clone.Requests[0].URL = "x"
 	clone.Responses[0].URL = "x"
-	clone.ScriptURLs[0], clone.IframeURLs[0], clone.CookieNames[0], clone.Warnings[0] = "x", "x", "x", "x"
+	clone.ScriptURLs[0], clone.IframeURLs[0], clone.Cookies[0].Name, clone.Warnings[0] = "x", "x", "x", "x"
 	if original.Requests[0].URL != "request" || original.Responses[0].URL != "response" ||
 		original.ScriptURLs[0] != "script" || original.IframeURLs[0] != "iframe" ||
-		original.CookieNames[0] != "cookie" || original.Warnings[0] != "warning" {
+		original.Cookies[0].Name != "cookie" || original.Warnings[0] != "warning" {
 		t.Fatalf("clone aliases original: %#v", original)
 	}
 }

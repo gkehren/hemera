@@ -64,6 +64,27 @@
       "file": "negative/page.html"
     },
     {
+      "name": "delayed-page",
+      "path": "/delayed/page",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "delayed/page.html"
+    },
+    {
+      "name": "delayed-api",
+      "path": "/delayed/api",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "delayed/api.txt"
+    },
+    {
+      "name": "delayed-script",
+      "path": "/delayed/injected.js",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "file": "delayed/injected.js"
+    },
+    {
       "name": "limit-bounded-dom",
       "path": "/limits/bounded-dom",
       "status": 200,
@@ -146,6 +167,181 @@
       "status": 200,
       "content_type": "text/plain; charset=utf-8",
       "behavior": "private-trap"
+    },
+    {
+      "name": "limit-continuous",
+      "path": "/limits/continuous",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/continuous.html"
+    },
+    {
+      "name": "limit-ping",
+      "path": "/limits/ping",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/ping.txt"
+    },
+    {
+      "name": "limit-worker",
+      "path": "/limits/worker",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/worker.html"
+    },
+    {
+      "name": "limit-worker-script",
+      "path": "/limits/worker.js",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "file": "limits/worker.js"
+    },
+    {
+      "name": "limit-worker-api-one",
+      "path": "/limits/worker-api-one",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-worker-api-two",
+      "path": "/limits/worker-api-two",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-popup",
+      "path": "/limits/popup",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/popup.html"
+    },
+    {
+      "name": "limit-popup-child",
+      "path": "/limits/popup-child",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/popup-child.html"
+    },
+    {
+      "name": "limit-compressed",
+      "path": "/limits/compressed",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "compressed-response"
+    },
+    {
+      "name": "limit-large-postload-dom",
+      "path": "/limits/large-postload-dom",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/large-postload-dom.html"
+    },
+    {
+      "name": "limit-recursive-frame",
+      "path": "/limits/recursive-frame",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/recursive-frame.html"
+    },
+    {
+      "name": "limit-websocket",
+      "path": "/limits/websocket",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/websocket.html"
+    },
+    {
+      "name": "limit-download",
+      "path": "/limits/download",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/download.html"
+    },
+    {
+      "name": "limit-download-body",
+      "path": "/limits/download.bin",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-redirect-loop",
+      "path": "/limits/redirect-loop",
+      "status": 302,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "redirect-loop"
+    },
+    {
+      "name": "limit-credential-redirect",
+      "path": "/limits/credential-redirect",
+      "status": 302,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "credential-redirect"
+    },
+    {
+      "name": "limit-postload-redirect",
+      "path": "/limits/postload-redirect",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/postload-redirect.html"
+    },
+    {
+      "name": "limit-postload-transfer",
+      "path": "/limits/postload-transfer",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/postload-transfer.html"
+    },
+    {
+      "name": "limit-postload-decoded",
+      "path": "/limits/postload-decoded",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/postload-decoded.html"
+    },
+    {
+      "name": "limit-postload-concurrency",
+      "path": "/limits/postload-concurrency",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/postload-concurrency.html"
+    },
+    {
+      "name": "limit-large-response",
+      "path": "/limits/large-response",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "large-response"
+    },
+    {
+      "name": "limit-worker-large",
+      "path": "/limits/worker-large",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/worker-large.html"
+    },
+    {
+      "name": "limit-worker-large-script",
+      "path": "/limits/worker-large.js",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "behavior": "large-worker-script"
+    },
+    {
+      "name": "limit-long-poll",
+      "path": "/limits/long-poll",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/long-poll.html"
+    },
+    {
+      "name": "limit-long-poll-api",
+      "path": "/limits/long-poll-api",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "long-poll"
     }
   ],
   "cases": [
@@ -208,6 +404,31 @@
       "iframes": [],
       "cookies": [],
       "forbidden_metadata": []
+    },
+    {
+      "name": "delayed-post-load",
+      "entry_route": "delayed-page",
+      "final_route": "delayed-page",
+      "completion_selector": "#late-browser-marker",
+      "dom_markers": [
+        "id=\"late-browser-marker\"",
+        "data-late-script=\"loaded\""
+      ],
+      "traffic": [
+        "delayed-page",
+        "delayed-api",
+        "delayed-script"
+      ],
+      "scripts": [
+        "/delayed/injected.js"
+      ],
+      "iframes": [],
+      "cookies": [
+        "late_browser_cookie"
+      ],
+      "forbidden_metadata": [
+        "synthetic-value"
+      ]
     }
   ]
 }

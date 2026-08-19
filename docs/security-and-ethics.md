@@ -141,7 +141,11 @@ The package explicitly sets the `no-sandbox` allocator option to false. This
 prevents `chromedp` from silently adding `--no-sandbox` when Hemera runs as root;
 the effective Chromium command line is then read through CDP and rejected if a
 launcher added any sandbox-disabling switch. Startup fails when this verification
-is unavailable or the environment cannot launch Chromium with its sandbox. A
+is unavailable or the environment cannot launch Chromium with its sandbox. The
+same runtime check requires the exact per-session Hemera proxy address,
+`proxy-bypass-list=<-loopback>`, direct-DNS suppression, QUIC disable, and the
+non-proxied WebRTC UDP restriction. Missing, duplicate, unexpected, or
+conflicting values fail startup before untrusted navigation. A
 startup timeout of at most 10 seconds covers process launch and the
 `Browser.getVersion` handshake. Caller cancellation, startup failure, loss of
 the CDP session, and explicit close all stop the process and remove the profile;
@@ -153,9 +157,11 @@ Requests and responses retain only cleaned HTTP(S) URLs, methods, statuses, MIME
 types, and resource types. Redirect responses are recorded, but headers, bodies,
 POST data,
 timestamps, CDP identifiers, remote addresses, and cookie values are never
-retained. Final cookie values are discarded immediately while names are sorted
-and deduplicated. URL credentials and fragments are removed, queries are reduced
-to `?redacted`, and invalid or non-web metadata is omitted.
+retained. Final cookie values are discarded immediately; only validated domains
+are retained with names, sorted, and deduplicated. This minimum provenance keeps
+same-name first- and third-party cookies distinguishable. URL credentials and
+fragments are removed, queries are reduced to `?redacted`, and invalid or
+non-web metadata is omitted.
 
 The internal result has fixed per-collection and URL ceilings. A Hemera-owned
 serializer runs in an isolated JavaScript world and stops appending after 2 MiB
@@ -191,6 +197,22 @@ addresses fail before page loading. Browser URLs also have a fixed byte limit,
 and proxy transfer accounting includes headers, uploads, downloads, and opaque
 tunnel traffic.
 
+The validated proxy, CDP Fetch/Network interception, request lifecycle tracker,
+and all budgets stay active after `load` until 250 ms of network quiet or a hard
+1.5-second post-load deadline. Configured values can only be lowered within
+three-second and one-second hard ceilings. Activity resets the quiet timer;
+active long polls wait only until the hard deadline, continuous traffic cannot
+extend it, and caller cancellation remains immediate. This bounded window may
+miss behavior intentionally delayed beyond the deadline; extending it without a
+detector-driven need would increase scan cost and exposure.
+
+Dedicated/shared workers and service workers are fail-closed as paused child
+targets before their code executes. Their startup requests still pass through
+the proxy and count toward request, concurrency, transfer, and decoded-byte
+limits. Popup attempts fail navigation before child loading. WebSockets are
+rejected, and attempted downloads may transfer only through the bounded proxy
+but are denied filesystem output.
+
 The tagged integration test uses a checked-in synthetic browser corpus, injects
 a synthetic public DNS answer, and maps only the validated dial to its loopback
 `httptest` server. Its test-only loader caps files and the complete corpus,
@@ -203,11 +225,14 @@ destination is contacted.
 
 Browser observations are not reported as a raw inventory. The browser adapter
 emits only normalized requests, responses, final DOM, script and iframe URLs,
-and cookie names. It sorts and deduplicates these signals, never emits cookie
-values, and uses generic warnings for incomplete or unavailable coverage. Page
+and cookie names with validated domains. It sorts and deduplicates these signals,
+never emits cookie values, and uses generic warnings for incomplete or
+unavailable coverage. Page
 content remains bounded and in memory for rule matching, while reporters
 suppress its value even when a rule selects it as evidence. Raw analyzer errors
-are retained only internally.
+are retained only internally. Report V4 distinguishes `insufficient_coverage`
+from `not_detected` when a rule requires a source that was partial, failed, or
+absent, preventing browser failure from masquerading as evidence absence.
 
 The browser analyzer uses a continue policy so local Chromium absence or a
 browser-local resource failure cannot erase valid HTTP and DNS/TLS results.

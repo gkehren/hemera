@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"sort"
@@ -44,6 +45,13 @@ type CaptureResponse struct {
 	ResourceType string
 }
 
+// CaptureCookie is a minimized cookie observation. Values are discarded by
+// the CDP boundary before this type is constructed.
+type CaptureCookie struct {
+	Name   string
+	Domain string
+}
+
 // CaptureResult contains bounded observations from one browser target. It is
 // internal to the browser integration and is not a report or detection model.
 type CaptureResult struct {
@@ -54,7 +62,7 @@ type CaptureResult struct {
 	Responses    []CaptureResponse
 	ScriptURLs   []string
 	IframeURLs   []string
-	CookieNames  []string
+	Cookies      []CaptureCookie
 	Warnings     []string
 }
 
@@ -130,7 +138,7 @@ func cloneCaptureResult(result CaptureResult) CaptureResult {
 	result.Responses = slices.Clone(result.Responses)
 	result.ScriptURLs = slices.Clone(result.ScriptURLs)
 	result.IframeURLs = slices.Clone(result.IframeURLs)
-	result.CookieNames = slices.Clone(result.CookieNames)
+	result.Cookies = slices.Clone(result.Cookies)
 	result.Warnings = slices.Clone(result.Warnings)
 	return result
 }
@@ -179,15 +187,15 @@ func (c *captureCollector) addResponse(rawURL string, status int64, mimeType, re
 	})
 }
 
-func (c *captureCollector) snapshot(finalURL, dom string, cookieNames []string) CaptureResult {
-	return c.snapshotInternal(finalURL, boundedDOMSnapshot{DOM: dom}, cookieNames, false)
+func (c *captureCollector) snapshot(finalURL, dom string, cookies []CaptureCookie) CaptureResult {
+	return c.snapshotInternal(finalURL, boundedDOMSnapshot{DOM: dom}, cookies, false)
 }
 
-func (c *captureCollector) snapshotBounded(finalURL string, snapshot boundedDOMSnapshot, cookieNames []string) CaptureResult {
-	return c.snapshotInternal(finalURL, snapshot, cookieNames, true)
+func (c *captureCollector) snapshotBounded(finalURL string, snapshot boundedDOMSnapshot, cookies []CaptureCookie) CaptureResult {
+	return c.snapshotInternal(finalURL, snapshot, cookies, true)
 }
 
-func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOMSnapshot, cookieNames []string, resourcesCaptured bool) CaptureResult {
+func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOMSnapshot, cookies []CaptureCookie, resourcesCaptured bool) CaptureResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	result := CaptureResult{
@@ -222,7 +230,7 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 			c.warn(warningDOMLimit)
 		}
 	}
-	result.CookieNames = c.cleanCookieNames(cookieNames)
+	result.Cookies = c.cleanCookies(cookies)
 	result.Warnings = slices.Clone(c.warnings)
 	return result
 }
@@ -364,25 +372,56 @@ func attribute(token html.Token, name string) string {
 	return ""
 }
 
-func (c *captureCollector) cleanCookieNames(names []string) []string {
-	set := make(map[string]struct{}, min(len(names), maxCaptureItems))
-	for _, name := range names {
-		name = cleanMetadata(name)
-		if name == "" {
+func (c *captureCollector) cleanCookies(cookies []CaptureCookie) []CaptureCookie {
+	set := make(map[CaptureCookie]struct{}, min(len(cookies), maxCaptureItems))
+	for _, cookie := range cookies {
+		cookie.Name = cleanMetadata(cookie.Name)
+		cookie.Domain = cleanCookieDomain(cookie.Domain)
+		if cookie.Name == "" || cookie.Domain == "" {
 			continue
 		}
-		set[name] = struct{}{}
+		set[cookie] = struct{}{}
 	}
-	cleaned := make([]string, 0, min(len(set), maxCaptureItems))
-	for name := range set {
-		cleaned = append(cleaned, name)
+	cleaned := make([]CaptureCookie, 0, min(len(set), maxCaptureItems))
+	for cookie := range set {
+		cleaned = append(cleaned, cookie)
 	}
-	sort.Strings(cleaned)
+	sort.Slice(cleaned, func(i, j int) bool {
+		if cleaned[i].Name != cleaned[j].Name {
+			return cleaned[i].Name < cleaned[j].Name
+		}
+		return cleaned[i].Domain < cleaned[j].Domain
+	})
 	if len(cleaned) > maxCaptureItems {
 		cleaned = cleaned[:maxCaptureItems]
 		c.warn(warningCookieLimit)
 	}
 	return cleaned
+}
+
+func cleanCookieDomain(domain string) string {
+	if cleanMetadata(domain) == "" || domain != strings.ToLower(domain) {
+		return ""
+	}
+	host := strings.TrimPrefix(domain, ".")
+	if host == "" || len(host) > 253 || strings.HasSuffix(host, ".") {
+		return ""
+	}
+	if address := net.ParseIP(host); address != nil {
+		return domain
+	}
+	labels := strings.Split(host, ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return ""
+			}
+		}
+	}
+	return domain
 }
 
 func (c *captureCollector) warn(warning string) {

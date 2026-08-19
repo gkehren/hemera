@@ -3,6 +3,7 @@
 package browser
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -13,13 +14,16 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/chromedp/chromedp"
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/networkguard"
+	"github.com/gkehren/hemera/pkg/model"
 )
 
 func TestSandboxedChromiumLifecycle(t *testing.T) {
@@ -116,14 +120,6 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 			if err := session.Navigate(ctx, entry); err != nil {
 				t.Fatalf("navigate validated fixture: %v", err)
 			}
-			waitCtx, cancelWait := context.WithTimeout(ctx, 5*time.Second)
-			waitErr := waitForFixtureSelector(waitCtx, recorder, fixtureCase.CompletionSelector)
-			cancelWait()
-			if waitErr != nil {
-				served, unexpected := fixture.snapshot()
-				t.Fatalf("wait for fixture completion selector %q: %v; served=%#v unexpected=%#v",
-					fixtureCase.CompletionSelector, waitErr, served, unexpected)
-			}
 			result, err := recorder.Finish(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -132,6 +128,201 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 			assertFixtureCapture(t, fixture, fixtureCase, result)
 		})
 	}
+}
+
+func TestBrowserAnalyzerCapturesDelayedPostLoadActivity(t *testing.T) {
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newFixtureServer(t, corpus, nil)
+	config, explicit := integrationConfig(t)
+	targetURL := configureIntegrationFixture(t, &config, fixture.server)
+	analyzer, err := NewAnalyzer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	observation, err := analyzer.Observe(ctx, analysis.Target{URL: targetURL + "/delayed/page"})
+	if err != nil {
+		if !explicit {
+			t.Skipf("sandboxed Chromium is unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	wants := []struct {
+		typeValue model.SignalType
+		key       string
+		value     string
+	}{
+		{model.SignalTypeNetworkRequest, "GET", targetURL + "/delayed/api"},
+		{model.SignalTypeCookie, "late_browser_cookie", "fixture.test"},
+		{model.SignalTypeScriptURL, "src", targetURL + "/delayed/injected.js"},
+		{model.SignalTypePageContent, "dom", "late-browser-marker"},
+	}
+	for _, want := range wants {
+		matched := false
+		for _, signal := range observation.Signals {
+			if signal.Type == want.typeValue && signal.Key == want.key && strings.Contains(signal.Value, want.value) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("missing delayed %s signal %q/%q in %#v", want.typeValue, want.key, want.value, observation.Signals)
+		}
+	}
+}
+
+func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		path        string
+		maxRequests int
+		concurrency int
+		wantErr     error
+	}{
+		{name: "worker request budget", path: "/limits/worker", maxRequests: 2, concurrency: 1, wantErr: ErrRequestLimit},
+		{name: "worker concurrency budget", path: "/limits/worker", maxRequests: 10, concurrency: 1, wantErr: ErrConcurrencyLimit},
+		{name: "worker blocked", path: "/limits/worker", maxRequests: 10, concurrency: 4, wantErr: ErrUnsupportedTarget},
+		{name: "worker response byte budget", path: "/limits/worker-large", maxRequests: 10, concurrency: 4, wantErr: ErrTransferLimit},
+		{name: "popup blocked", path: "/limits/popup", maxRequests: 10, concurrency: 4, wantErr: ErrUnsupportedTarget},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+				"large-worker-script": func(writer http.ResponseWriter, _ *http.Request) {
+					_, _ = writer.Write([]byte("//" + strings.Repeat(" ", 64<<10)))
+				},
+			})
+			config, explicit := integrationConfig(t)
+			targetURL := configureIntegrationFixture(t, &config, fixture.server)
+			config.MaxRequests = test.maxRequests
+			config.MaxConcurrentRequests = test.concurrency
+			if test.name == "worker response byte budget" {
+				config.MaxTransferBytes = 4096
+			}
+			client, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := client.Start(ctx)
+			if err != nil {
+				if !explicit {
+					t.Skipf("sandboxed Chromium is unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+			defer session.Close()
+			if err := session.Navigate(ctx, targetURL+test.path); !errors.Is(err, test.wantErr) {
+				t.Fatalf("Navigate() error = %v, want %v", err, test.wantErr)
+			}
+			served, _ := fixture.snapshot()
+			for _, forbidden := range []string{"limit-worker-api-one", "limit-worker-api-two", "limit-popup-child"} {
+				if slices.Contains(served, forbidden) {
+					t.Errorf("blocked child target reached %q: %#v", forbidden, served)
+				}
+			}
+		})
+	}
+
+	t.Run("continuous traffic hard deadline", func(t *testing.T) {
+		fixture := newFixtureServer(t, corpus, nil)
+		config, explicit := integrationConfig(t)
+		targetURL := configureIntegrationFixture(t, &config, fixture.server)
+		config.PostLoadTimeout = 400 * time.Millisecond
+		config.NetworkIdleTime = 80 * time.Millisecond
+		client, err := New(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		session, err := client.Start(ctx)
+		if err != nil {
+			if !explicit {
+				t.Skipf("sandboxed Chromium is unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		defer session.Close()
+		started := time.Now()
+		if err := session.Navigate(ctx, targetURL+"/limits/continuous"); err != nil {
+			t.Fatal(err)
+		}
+		elapsed := time.Since(started)
+		if elapsed < 350*time.Millisecond || elapsed > 2*time.Second {
+			t.Errorf("continuous observation duration = %s, want bounded near hard deadline", elapsed)
+		}
+	})
+
+	t.Run("post-load request budget", func(t *testing.T) {
+		fixture := newFixtureServer(t, corpus, nil)
+		config, explicit := integrationConfig(t)
+		targetURL := configureIntegrationFixture(t, &config, fixture.server)
+		config.MaxRequests = 3
+		client, err := New(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		session, err := client.Start(ctx)
+		if err != nil {
+			if !explicit {
+				t.Skipf("sandboxed Chromium is unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		defer session.Close()
+		if err := session.Navigate(ctx, targetURL+"/limits/continuous"); !errors.Is(err, ErrRequestLimit) {
+			t.Fatalf("post-load request error = %v, want ErrRequestLimit", err)
+		}
+	})
+
+	t.Run("long polling hard deadline", func(t *testing.T) {
+		fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+			"long-poll": func(writer http.ResponseWriter, request *http.Request) {
+				select {
+				case <-request.Context().Done():
+				case <-time.After(2 * time.Second):
+					_, _ = writer.Write([]byte("late"))
+				}
+			},
+		})
+		config, explicit := integrationConfig(t)
+		targetURL := configureIntegrationFixture(t, &config, fixture.server)
+		config.PostLoadTimeout = 400 * time.Millisecond
+		config.NetworkIdleTime = 80 * time.Millisecond
+		client, err := New(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		session, err := client.Start(ctx)
+		if err != nil {
+			if !explicit {
+				t.Skipf("sandboxed Chromium is unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		defer session.Close()
+		started := time.Now()
+		if err := session.Navigate(ctx, targetURL+"/limits/long-poll"); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(started); elapsed < 350*time.Millisecond || elapsed > 2*time.Second {
+			t.Errorf("long-poll observation duration = %s, want bounded near hard deadline", elapsed)
+		}
+	})
 }
 
 func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
@@ -189,6 +380,20 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Fatalf("DOM snapshot = %d bytes, truncated=%t", len(result.DOM), result.DOMTruncated)
 	}
+	recorder, err = session.BeginCapture(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Navigate(ctx, targetURL+"/limits/large-postload-dom"); err != nil {
+		t.Fatal(err)
+	}
+	postLoadResult, err := recorder.Finish(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !postLoadResult.DOMTruncated || len(postLoadResult.DOM) > maxDOMBytes {
+		t.Fatalf("post-load DOM snapshot = %d bytes, truncated=%t", len(postLoadResult.DOM), postLoadResult.DOMTruncated)
+	}
 	if err := session.Navigate(ctx, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
 		t.Fatalf("concurrent resource navigation error = %v, want ErrConcurrencyLimit", err)
 	}
@@ -213,6 +418,16 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 		{"transfer budget", "/limits/large", func(config *Config) { config.MaxTransferBytes = 1 }, ErrTransferLimit},
 		{"navigation timeout", "/limits/slow", func(config *Config) { config.NavigationTimeout = 150 * time.Millisecond }, context.DeadlineExceeded},
 		{"private subresource", "/limits/private", func(config *Config) {}, networkguard.ErrForbiddenDestination},
+		{"recursive iframe", "/limits/recursive-frame", func(config *Config) { config.MaxRequests = 4 }, ErrRequestLimit},
+		{"WebSocket", "/limits/websocket", func(config *Config) {}, networkguard.ErrInvalidURL},
+		{"compressed decoded bytes", "/limits/compressed", func(config *Config) { config.MaxTransferBytes = 2048 }, ErrTransferLimit},
+		{"download denied", "/limits/download", func(config *Config) {}, ErrUnsupportedTarget},
+		{"redirect loop", "/limits/redirect-loop", func(config *Config) { config.MaxRedirects = 2 }, ErrRedirectLimit},
+		{"credential redirect", "/limits/credential-redirect", func(config *Config) {}, networkguard.ErrInvalidURL},
+		{"post-load redirect budget", "/limits/postload-redirect", func(config *Config) { config.MaxRedirects = 2 }, ErrRedirectLimit},
+		{"post-load transfer budget", "/limits/postload-transfer", func(config *Config) { config.MaxTransferBytes = 4096 }, ErrTransferLimit},
+		{"post-load decoded budget", "/limits/postload-decoded", func(config *Config) { config.MaxTransferBytes = 8192 }, ErrTransferLimit},
+		{"post-load concurrency budget", "/limits/postload-concurrency", func(config *Config) { config.MaxConcurrentRequests = 1 }, ErrConcurrencyLimit},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -236,6 +451,23 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 					writer.WriteHeader(http.StatusOK)
 					_, _ = fmt.Fprint(writer, "unsafe")
 				},
+				"compressed-response": func(writer http.ResponseWriter, _ *http.Request) {
+					writer.Header().Set("Content-Encoding", "gzip")
+					archive := gzip.NewWriter(writer)
+					_, _ = archive.Write([]byte(strings.Repeat("x", 64<<10)))
+					_ = archive.Close()
+				},
+				"redirect-loop": func(writer http.ResponseWriter, _ *http.Request) {
+					writer.Header().Set("Location", "/limits/redirect-loop")
+					writer.WriteHeader(http.StatusFound)
+				},
+				"credential-redirect": func(writer http.ResponseWriter, request *http.Request) {
+					writer.Header().Set("Location", "http://user:password@"+request.Host+"/limits/ping")
+					writer.WriteHeader(http.StatusFound)
+				},
+				"large-response": func(writer http.ResponseWriter, _ *http.Request) {
+					_, _ = writer.Write([]byte(strings.Repeat("x", 64<<10)))
+				},
 			})
 			config, explicit := integrationConfig(t)
 			targetURL := configureIntegrationFixture(t, &config, fixture.server)
@@ -257,19 +489,26 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 			if err := session.Navigate(ctx, targetURL+test.path); !errors.Is(err, test.wantErr) {
 				t.Fatalf("Navigate() error = %v, want %v", err, test.wantErr)
 			}
+			if test.path == "/limits/download" {
+				runtime := integrationRuntime(t, session)
+				err := filepath.WalkDir(runtime.profileDir, func(path string, entry os.DirEntry, walkErr error) error {
+					if walkErr != nil {
+						return walkErr
+					}
+					if entry.Name() == "synthetic.bin" {
+						t.Errorf("download was written to %q", path)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			if test.path == "/limits/private" && privateHits.Load() != 0 {
 				t.Fatalf("private subresource reached loopback server %d times", privateHits.Load())
 			}
 		})
 	}
-}
-
-func waitForFixtureSelector(ctx context.Context, recorder *Recorder, selector string) error {
-	source, ok := recorder.source.(*chromedpCapture)
-	if !ok {
-		return fmt.Errorf("capture source type = %T, want *chromedpCapture", recorder.source)
-	}
-	return source.run(ctx, chromedp.WaitReady(selector, chromedp.ByQuery))
 }
 
 func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixtureCase, result CaptureResult) {
@@ -294,8 +533,15 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 	if fmt.Sprint(result.IframeURLs) != fmt.Sprint(wantIframes) {
 		t.Errorf("IframeURLs = %#v, want %#v", result.IframeURLs, wantIframes)
 	}
-	if fmt.Sprint(result.CookieNames) != fmt.Sprint(fixtureCase.Cookies) {
-		t.Errorf("CookieNames = %#v, want exclusively %#v", result.CookieNames, fixtureCase.Cookies)
+	gotCookieNames := make([]string, 0, len(result.Cookies))
+	for _, cookie := range result.Cookies {
+		gotCookieNames = append(gotCookieNames, cookie.Name)
+		if strings.TrimPrefix(cookie.Domain, ".") != fixture.corpus.manifest.Host {
+			t.Errorf("cookie provenance = %#v, want fixture host", cookie)
+		}
+	}
+	if fmt.Sprint(gotCookieNames) != fmt.Sprint(fixtureCase.Cookies) {
+		t.Errorf("cookie names = %#v, want exclusively %#v", gotCookieNames, fixtureCase.Cookies)
 	}
 
 	wantURLs := make([]string, 0, len(fixtureCase.Traffic))
@@ -337,7 +583,7 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 	}
 
 	metadata := fmt.Sprintf("requests=%#v responses=%#v scripts=%#v iframes=%#v cookies=%#v final=%q",
-		result.Requests, result.Responses, result.ScriptURLs, result.IframeURLs, result.CookieNames, result.FinalURL)
+		result.Requests, result.Responses, result.ScriptURLs, result.IframeURLs, result.Cookies, result.FinalURL)
 	for _, forbidden := range fixtureCase.ForbiddenMetadata {
 		if strings.Contains(metadata, forbidden) {
 			t.Errorf("minimized capture metadata contains synthetic secret or fragment %q: %s", forbidden, metadata)

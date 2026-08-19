@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><body><script>
+window.addEventListener("load", () => setTimeout(() => {
+  fetch("/limits/large-response").catch(() => {});
+}, 50));
+</script></body></html>

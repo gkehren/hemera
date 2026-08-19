@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <title>Delayed browser fixture</title>
+</head>
+<body>
+  <main id="initial">ready</main>
+  <script>
+    window.addEventListener("load", () => {
+      setTimeout(async () => {
+        await fetch("/delayed/api");
+        document.cookie = "late_browser_cookie=synthetic-value; SameSite=Lax";
+        const script = document.createElement("script");
+        script.src = "/delayed/injected.js";
+        document.head.appendChild(script);
+        const marker = document.createElement("div");
+        marker.id = "late-browser-marker";
+        document.body.appendChild(marker);
+      }, 100);
+    });
+  </script>
+</body>
+</html>

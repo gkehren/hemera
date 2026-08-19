@@ -18,7 +18,7 @@ import (
 
 const (
 	// SchemaVersion identifies the current experimental JSON report contract.
-	SchemaVersion = 3
+	SchemaVersion = 4
 )
 
 // Report is the deterministic representation shared by text and JSON renderers.
@@ -57,22 +57,24 @@ type AnalyzerReport struct {
 
 // DetectionReport is one fully explained detector result.
 type DetectionReport struct {
-	ID                     string           `json:"id"`
-	Name                   string           `json:"name"`
-	Category               rules.Category   `json:"category"`
-	Vendor                 string           `json:"vendor"`
-	Product                string           `json:"product,omitempty"`
-	Detected               bool             `json:"detected"`
-	ConditionMatched       bool             `json:"condition_matched"`
-	MinimumEvidenceMet     bool             `json:"minimum_evidence_met"`
-	EvidenceScore          float64          `json:"evidence_score"`
-	Score                  float64          `json:"score"`
-	Level                  scoring.Level    `json:"level"`
-	Evidence               EvidenceReport   `json:"evidence"`
-	PositiveEvidenceGroups []EvidenceGroup  `json:"positive_evidence_groups"`
-	MissingEvidence        []string         `json:"missing_evidence"`
-	MissingDependencies    []string         `json:"missing_dependencies"`
-	AppliedConflicts       []ConflictReport `json:"applied_conflicts"`
+	ID                     string                  `json:"id"`
+	Name                   string                  `json:"name"`
+	Category               rules.Category          `json:"category"`
+	Vendor                 string                  `json:"vendor"`
+	Product                string                  `json:"product,omitempty"`
+	Detected               bool                    `json:"detected"`
+	Status                 scanner.DetectionStatus `json:"status"`
+	IncompleteSources      []string                `json:"incomplete_sources"`
+	ConditionMatched       bool                    `json:"condition_matched"`
+	MinimumEvidenceMet     bool                    `json:"minimum_evidence_met"`
+	EvidenceScore          float64                 `json:"evidence_score"`
+	Score                  float64                 `json:"score"`
+	Level                  scoring.Level           `json:"level"`
+	Evidence               EvidenceReport          `json:"evidence"`
+	PositiveEvidenceGroups []EvidenceGroup         `json:"positive_evidence_groups"`
+	MissingEvidence        []string                `json:"missing_evidence"`
+	MissingDependencies    []string                `json:"missing_dependencies"`
+	AppliedConflicts       []ConflictReport        `json:"applied_conflicts"`
 }
 
 // EvidenceReport groups evidence by its scoring role.
@@ -154,8 +156,12 @@ func Build(toolVersion string, result scanner.Result) Report {
 		Analyzers:     analyzers,
 		Detections:    make([]DetectionReport, 0, len(result.Detections)),
 	}
+	coverage := make(map[string]scanner.DetectionCoverage, len(result.Coverage))
+	for _, entry := range result.Coverage {
+		coverage[entry.RuleID] = entry
+	}
 	for _, detection := range result.Detections {
-		report.Detections = append(report.Detections, buildDetection(detection))
+		report.Detections = append(report.Detections, buildDetection(detection, coverage[detection.RuleID]))
 	}
 	return report
 }
@@ -207,7 +213,7 @@ func WriteText(writer io.Writer, report Report) error {
 	fmt.Fprintln(&output, "\nNot detected:")
 	notDetected := 0
 	for _, detection := range report.Detections {
-		if detection.Detected {
+		if detection.Status != scanner.DetectionStatusNotDetected {
 			continue
 		}
 		notDetected++
@@ -215,6 +221,23 @@ func WriteText(writer io.Writer, report Report) error {
 		writeEvidence(&output, detection)
 	}
 	if notDetected == 0 {
+		fmt.Fprintln(&output, "  (none)")
+	}
+	fmt.Fprintln(&output, "\nInsufficient coverage:")
+	insufficient := 0
+	for _, detection := range report.Detections {
+		if detection.Status != scanner.DetectionStatusInsufficientCoverage {
+			continue
+		}
+		insufficient++
+		fmt.Fprintf(&output, "  %s", detection.Name)
+		if len(detection.IncompleteSources) > 0 {
+			fmt.Fprintf(&output, "  missing %s", strings.Join(detection.IncompleteSources, ", "))
+		}
+		fmt.Fprintln(&output)
+		writeEvidence(&output, detection)
+	}
+	if insufficient == 0 {
 		fmt.Fprintln(&output, "  (none)")
 	}
 	if report.HTTP != nil && len(report.HTTP.Warnings) > 0 {
@@ -248,10 +271,19 @@ func writeIncompleteAnalyzers(output *strings.Builder, analyzers []AnalyzerRepor
 	}
 }
 
-func buildDetection(detection scoring.Detection) DetectionReport {
+func buildDetection(detection scoring.Detection, coverage scanner.DetectionCoverage) DetectionReport {
+	status := coverage.Status
+	if status == "" {
+		if detection.Detected {
+			status = scanner.DetectionStatusDetected
+		} else {
+			status = scanner.DetectionStatusNotDetected
+		}
+	}
 	report := DetectionReport{
 		ID: detection.RuleID, Name: detection.Name, Category: detection.Category,
 		Vendor: detection.Vendor, Product: detection.Product, Detected: detection.Detected,
+		Status: status, IncompleteSources: append([]string{}, coverage.IncompleteSources...),
 		ConditionMatched: detection.ConditionMatched, MinimumEvidenceMet: detection.MinimumEvidenceMet,
 		EvidenceScore: detection.EvidenceScore, Score: detection.Score, Level: detection.Level,
 		Evidence: EvidenceReport{

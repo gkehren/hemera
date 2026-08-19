@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><body><script>
+window.addEventListener("load", () => setTimeout(() => {
+  fetch("/limits/held/one").catch(() => {});
+  fetch("/limits/held/two").catch(() => {});
+}, 50));
+</script></body></html>

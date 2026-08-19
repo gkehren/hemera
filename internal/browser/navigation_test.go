@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/gkehren/hemera/internal/networkguard"
@@ -92,6 +93,71 @@ func TestBrowserRequestTrackerRejectsAfterNavigationStops(t *testing.T) {
 	tracker.releaseAll()
 }
 
+func TestWaitForNetworkQuietEndsEarlyAndEnforcesHardDeadline(t *testing.T) {
+	t.Run("quiet page", func(t *testing.T) {
+		tracker := newBrowserRequestTracker(1)
+		started := time.Now()
+		if err := waitForNetworkQuiet(context.Background(), make(chan struct{}), tracker, 20*time.Millisecond, 200*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(started); elapsed < 15*time.Millisecond || elapsed >= 150*time.Millisecond {
+			t.Errorf("quiet wait = %s, want early idle completion", elapsed)
+		}
+	})
+
+	t.Run("continuous activity", func(t *testing.T) {
+		tracker := newBrowserRequestTracker(1)
+		activity := make(chan struct{}, 1)
+		stop := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(5 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case activity <- struct{}{}:
+				case <-stop:
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		started := time.Now()
+		err := waitForNetworkQuiet(context.Background(), activity, tracker, 20*time.Millisecond, 80*time.Millisecond)
+		close(stop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(started); elapsed < 65*time.Millisecond || elapsed > 250*time.Millisecond {
+			t.Errorf("continuous wait = %s, want hard-deadline completion", elapsed)
+		}
+	})
+
+	t.Run("long polling", func(t *testing.T) {
+		tracker := newBrowserRequestTracker(1)
+		stopped := make(chan struct{})
+		if err := tracker.acquire(context.Background(), stopped, network.RequestID("long-poll")); err != nil {
+			t.Fatal(err)
+		}
+		started := time.Now()
+		if err := waitForNetworkQuiet(context.Background(), make(chan struct{}), tracker, 15*time.Millisecond, 60*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		tracker.releaseAll()
+		if elapsed := time.Since(started); elapsed < 50*time.Millisecond || elapsed > 200*time.Millisecond {
+			t.Errorf("long-poll wait = %s, want hard-deadline completion", elapsed)
+		}
+	})
+
+	t.Run("caller cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := waitForNetworkQuiet(ctx, make(chan struct{}), newBrowserRequestTracker(1), time.Second, 2*time.Second)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("wait error = %v, want context.Canceled", err)
+		}
+	})
+}
+
 func TestSessionNavigateValidatesContextAndPreservesError(t *testing.T) {
 	t.Parallel()
 	wantErr := networkguard.ErrForbiddenDestination
@@ -168,6 +234,23 @@ func TestNavigationBudgetLimits(t *testing.T) {
 	}
 	if err := budget.authorizeProxy(); !errors.Is(err, ErrRequestLimit) {
 		t.Errorf("third proxy request error = %v, want ErrRequestLimit", err)
+	}
+}
+
+func TestParseBrowserURLRejectsAdversarialNavigationInputs(t *testing.T) {
+	t.Parallel()
+	tests := []string{
+		"file:///etc/passwd",
+		"ws://example.test/socket",
+		"https://user:password@example.test/",
+		"https://example.test/%zz",
+		"not a URL",
+		"https://example.test/" + strings.Repeat("x", maxBrowserURLBytes),
+	}
+	for _, rawURL := range tests {
+		if _, err := parseBrowserURL(rawURL); !errors.Is(err, networkguard.ErrInvalidURL) {
+			t.Errorf("parseBrowserURL(%q) error = %v, want ErrInvalidURL", rawURL, err)
+		}
 	}
 }
 

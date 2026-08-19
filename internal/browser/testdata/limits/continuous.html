@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><body>
+<script>
+  window.addEventListener("load", () => {
+    setInterval(() => fetch("/limits/ping").catch(() => {}), 40);
+  });
+</script>
+</body></html>

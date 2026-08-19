@@ -28,6 +28,12 @@ const (
 
 var allowedFixtureBehaviors = map[string]struct{}{
 	"completion-barrier":  {},
+	"compressed-response": {},
+	"redirect-loop":       {},
+	"credential-redirect": {},
+	"large-response":      {},
+	"large-worker-script": {},
+	"long-poll":           {},
 	"held-resource":       {},
 	"slow-response":       {},
 	"private-subresource": {},

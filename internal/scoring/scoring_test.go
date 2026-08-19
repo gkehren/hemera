@@ -100,6 +100,36 @@ func TestEvaluateCapsCorrelatedEvidenceAndAddsComplementaryGroups(t *testing.T) 
 	}
 }
 
+func TestEvaluateDoesNotCountDuplicateHTTPAndBrowserObservationAsIndependentProof(t *testing.T) {
+	t.Parallel()
+	httpSource := "http_analyzer"
+	browserSource := "browser_analyzer"
+	url := "https://cdn.example.test/vendor.js"
+	httpEvidence := groupedScoreEvidence("http-script", "client_integration", model.SignalTypeScriptURL, "src", 70)
+	httpEvidence.Source = &rules.TextPattern{Exact: &httpSource}
+	httpEvidence.Value = &rules.TextPattern{Exact: &url}
+	browserEvidence := groupedScoreEvidence("browser-script", "client_integration", model.SignalTypeScriptURL, "src", 70)
+	browserEvidence.Source = &rules.TextPattern{Exact: &browserSource}
+	browserEvidence.Value = &rules.TextPattern{Exact: &url}
+	ruleSet := rules.RuleSet{SchemaVersion: rules.CurrentSchemaVersion, Rules: []rules.Rule{
+		scoringRule("correlated", 1, 70, rules.Condition{Any: []rules.Condition{
+			{Signal: httpEvidence}, {Signal: browserEvidence},
+		}}),
+	}}
+	signals := []model.Signal{
+		{Type: model.SignalTypeScriptURL, Source: httpSource, Key: "src", Value: url, Confidence: 1},
+		{Type: model.SignalTypeScriptURL, Source: browserSource, Key: "src", Value: url, Confidence: 1},
+	}
+	detections, err := Evaluate(ruleSet, signals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detections[0]; got.Score != 70 || len(got.PositiveEvidenceGroups) != 1 ||
+		got.PositiveEvidenceGroups[0].RawContribution != 140 {
+		t.Fatalf("cross-analyzer correlation = %#v, want one 70-point group", got)
+	}
+}
+
 func TestEvaluateAppliesPenaltiesAfterPositiveGrouping(t *testing.T) {
 	t.Parallel()
 	rule := scoringRule("penalized", 1, 50, rules.Condition{Any: []rules.Condition{
