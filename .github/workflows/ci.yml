@@ -41,6 +41,12 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
+      - name: Verify generated network policy
+        shell: bash
+        run: |
+          go generate ./internal/networkguard
+          git diff --exit-code -- internal/networkguard/iana_registry_generated.go
+
       - name: Vet
         run: go vet ./...
 

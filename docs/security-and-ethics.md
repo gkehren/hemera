@@ -59,6 +59,43 @@ signals, stops extraction, and emits one warning.
 These controls apply to the HTTP analyzer only. Browser and separate DNS/TLS
 analyzers remain planned and must establish equivalent boundaries when added.
 
+### Special-purpose address policy
+
+`internal/networkguard` accepts an address only when all of these conditions
+hold:
+
+1. the address is valid, has no IPv6 zone, and Go classifies it as global
+   unicast;
+2. after normalizing an IPv4-mapped IPv6 address to IPv4, it is outside every
+   prefix in the pinned IANA IPv4 and IPv6 Special-Purpose Address Registries;
+3. it is outside every explicit Hemera policy override.
+
+Hemera rejects every IANA special-purpose entry, including entries whose
+`Globally Reachable` attribute is `True`. This deliberately conservative rule
+keeps translation, anycast, protocol-assignment, and other special-purpose
+infrastructure out of the scanner's destination set. IPv4-mapped IPv6 addresses
+are the one representation rule: they are classified according to their
+underlying IPv4 address, so mapped public IPv4 remains public while mapped
+private or special-purpose IPv4 remains forbidden.
+
+The registry-derived table retains each prefix's IANA name and normalized
+`Globally Reachable` value for review. Hemera-specific exclusions are declared
+separately in `policyOverrides`: IPv4 and IPv6 multicast, the deprecated IPv4-
+compatible IPv6 block, and deprecated IPv6 site-local addresses. Cloud metadata
+addresses remain blocked by the registry-derived link-local and unique-local
+ranges rather than by hostname assumptions.
+
+The pinned CSV snapshots and generated Go source are checked in, so normal
+scans are deterministic and make no IANA or other policy-network request. See
+the [snapshot maintenance instructions](../internal/networkguard/iana/README.md)
+for the authoritative source URLs and the refresh command. Maintainers must
+review snapshot and generated diffs together. `go generate
+./internal/networkguard` regenerates offline from the pinned snapshots, package
+tests verify that the generated output is current, and CI repeats generation
+and rejects any diff. The opt-in refresh download disables environment proxies,
+validates every IANA DNS answer with this same policy, and connects only to the
+validated IP while retaining `www.iana.org` for TLS verification.
+
 ## Browser isolation
 
 Browser analysis executes untrusted content. The implementation should use a

@@ -42,6 +42,14 @@ validation. The analyzer owns the TLS configuration, enforces TLS 1.2 or later,
 and accepts only an optional root CA pool for deterministic trust customization;
 callers cannot disable certificate verification.
 
+Destination classification uses generated Go data derived from checked-in
+snapshots of the IANA IPv4 and IPv6 Special-Purpose Address Registries. After
+normalizing IPv4-mapped IPv6 addresses to IPv4, the runtime rejects every
+matching listed prefix, even entries marked globally reachable, then applies
+separately declared Hemera exclusions and Go's global-unicast classification as
+final conservative checks. Generation and refresh are development-time
+operations; scan execution has no registry lookup or dependency on IANA.
+
 ### HTTP analyzer
 
 The low-cost first pass collects status codes, redirect chains, response headers,

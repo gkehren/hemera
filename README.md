@@ -112,11 +112,12 @@ go run ./cmd/hemera scan --format json https://example.com/
 ```
 
 The scan validates the initial destination and every redirect, blocks private
-and special-purpose networks, ignores environment proxy settings, and does not
-load page subresources. It reports HTTP status, redirects, response-header names,
-cookie names, and statically referenced scripts, iframes, and third-party hosts.
-Query values, cookie values, sensitive header values, and HTML content are not
-printed.
+and special-purpose networks using pinned IANA registry data plus conservative
+local exclusions, ignores environment proxy settings, and does not load page
+subresources. Runtime scans never download registry data. The scan reports HTTP
+status, redirects, response-header names, cookie names, and statically referenced
+scripts, iframes, and third-party hosts. Query values, cookie values, sensitive
+header values, and HTML content are not printed.
 
 HTTP configuration can tighten but cannot raise the built-in safety ceilings:
 15 seconds total, 5 seconds for connection, TLS, and response headers, 10

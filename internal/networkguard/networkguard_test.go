@@ -56,27 +56,96 @@ func TestParseURL(t *testing.T) {
 func TestAllowed(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		address string
+		name    string
+		address netip.Addr
 		want    bool
 	}{
-		{"8.8.8.8", true}, {"1.1.1.1", true}, {"2606:4700:4700::1111", true},
-		{"0.0.0.0", false}, {"10.0.0.1", false}, {"100.64.0.1", false},
-		{"127.0.0.1", false}, {"169.254.169.254", false}, {"172.16.0.1", false},
-		{"192.0.0.8", false}, {"192.0.2.1", false}, {"192.168.1.1", false},
-		{"198.18.0.1", false}, {"198.51.100.1", false}, {"203.0.113.1", false},
-		{"224.0.0.1", false}, {"240.0.0.1", false}, {"255.255.255.255", false},
-		{"::", false}, {"::1", false}, {"::127.0.0.1", false}, {"::ffff:127.0.0.1", false},
-		{"64:ff9b::808:808", false}, {"64:ff9b:1::1", false}, {"100::1", false}, {"2001:db8::1", false},
-		{"2001:2::1", false}, {"2002::1", false}, {"fc00::1", false},
-		{"3fff::1", false}, {"5f00::1", false}, {"fe80::1", false}, {"fec0::1", false}, {"ff02::1", false},
+		{"public IPv4", netip.MustParseAddr("8.8.8.8"), true},
+		{"second public IPv4", netip.MustParseAddr("1.1.1.1"), true},
+		{"public IPv6", netip.MustParseAddr("2606:4700:4700::1111"), true},
+		{"mapped public IPv4", netip.MustParseAddr("::ffff:8.8.8.8"), true},
+		{"invalid", netip.Addr{}, false},
+		{"zoned public IPv6", netip.MustParseAddr("2606:4700:4700::1111%eth0"), false},
+		{"unspecified IPv4", netip.MustParseAddr("0.0.0.0"), false},
+		{"private IPv4", netip.MustParseAddr("10.0.0.1"), false},
+		{"carrier-grade NAT", netip.MustParseAddr("100.64.0.1"), false},
+		{"loopback IPv4", netip.MustParseAddr("127.0.0.1"), false},
+		{"cloud metadata IPv4", netip.MustParseAddr("169.254.169.254"), false},
+		{"container metadata IPv4", netip.MustParseAddr("169.254.170.2"), false},
+		{"private IPv4 second block", netip.MustParseAddr("172.16.0.1"), false},
+		{"IETF protocol assignment", netip.MustParseAddr("192.0.0.8"), false},
+		{"documentation IPv4", netip.MustParseAddr("192.0.2.1"), false},
+		{"private IPv4 third block", netip.MustParseAddr("192.168.1.1"), false},
+		{"benchmarking IPv4", netip.MustParseAddr("198.18.0.1"), false},
+		{"documentation IPv4 second block", netip.MustParseAddr("198.51.100.1"), false},
+		{"documentation IPv4 third block", netip.MustParseAddr("203.0.113.1"), false},
+		{"multicast IPv4", netip.MustParseAddr("224.0.0.1"), false},
+		{"reserved IPv4", netip.MustParseAddr("240.0.0.1"), false},
+		{"limited broadcast IPv4", netip.MustParseAddr("255.255.255.255"), false},
+		{"unspecified IPv6", netip.MustParseAddr("::"), false},
+		{"loopback IPv6", netip.MustParseAddr("::1"), false},
+		{"IPv4-compatible loopback", netip.MustParseAddr("::127.0.0.1"), false},
+		{"mapped loopback IPv4", netip.MustParseAddr("::ffff:127.0.0.1"), false},
+		{"IPv4-IPv6 translation", netip.MustParseAddr("64:ff9b::808:808"), false},
+		{"local-use IPv4-IPv6 translation", netip.MustParseAddr("64:ff9b:1::1"), false},
+		{"discard-only IPv6", netip.MustParseAddr("100::1"), false},
+		{"dummy IPv6", netip.MustParseAddr("100:0:0:1::1"), false},
+		{"benchmarking IPv6", netip.MustParseAddr("2001:2::1"), false},
+		{"documentation IPv6", netip.MustParseAddr("2001:db8::1"), false},
+		{"6to4 IPv6", netip.MustParseAddr("2002::1"), false},
+		{"documentation IPv6 second block", netip.MustParseAddr("3fff::1"), false},
+		{"segment-routing IPv6", netip.MustParseAddr("5f00::1"), false},
+		{"unique-local IPv6", netip.MustParseAddr("fc00::1"), false},
+		{"cloud metadata IPv6", netip.MustParseAddr("fd00:ec2::254"), false},
+		{"link-local IPv6", netip.MustParseAddr("fe80::1"), false},
+		{"site-local IPv6", netip.MustParseAddr("fec0::1"), false},
+		{"multicast IPv6", netip.MustParseAddr("ff02::1"), false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.address, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := Allowed(netip.MustParseAddr(tt.address)); got != tt.want {
+			if got := Allowed(tt.address); got != tt.want {
 				t.Errorf("Allowed(%s) = %t, want %t", tt.address, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAllowedRejectsEveryIANASpecialPurposePrefix(t *testing.T) {
+	t.Parallel()
+	for _, entry := range ianaSpecialPurposePrefixes {
+		entry := entry
+		t.Run(entry.prefix.String(), func(t *testing.T) {
+			t.Parallel()
+			if entry.name == "" {
+				t.Fatal("generated registry entry has an empty name")
+			}
+			if got := Allowed(entry.prefix.Addr()); got {
+				t.Errorf("Allowed(%s) = true, want false for IANA %q prefix", entry.prefix.Addr(), entry.name)
+			}
+		})
+	}
+}
+
+func TestAllowedRejectsPolicyOverrides(t *testing.T) {
+	t.Parallel()
+	representatives := map[string]string{
+		"224.0.0.0/4": "224.0.0.1",
+		"::/96":       "::192.0.2.1",
+		"fec0::/10":   "fec0::1",
+		"ff00::/8":    "ff02::1",
+	}
+	if got, want := len(policyOverrides), len(representatives); got != want {
+		t.Fatalf("policy override count = %d, want %d documented representatives", got, want)
+	}
+	for _, prefix := range policyOverrides {
+		address, exists := representatives[prefix.String()]
+		if !exists {
+			t.Fatalf("policy override %s has no regression representative", prefix)
+		}
+		if Allowed(netip.MustParseAddr(address)) {
+			t.Errorf("Allowed(%s) = true, want false for Hemera override %s", address, prefix)
+		}
 	}
 }
 
