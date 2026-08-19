@@ -1,8 +1,8 @@
-# JSON report schema V4
+# JSON report schema V5
 
 `hemera scan --format json <url>` writes one JSON document to stdout. Input and
 scan errors are written to stderr and do not enter the JSON document. The
-top-level `schema_version` is mandatory and is currently `4`.
+top-level `schema_version` is mandatory and is currently `5`.
 
 > **Compatibility status: experimental.** Hemera has not published its first
 > stable release. JSON is the versioned automation interface, but the current
@@ -62,19 +62,34 @@ Each detection contains identity fields, `detected`, `status`,
 conflict penalties.
 
 `status` is one of `detected`, `not_detected`, or `insufficient_coverage`.
-`not_detected` is emitted only when every signal source required by all
-successful branches of the rule completed. `insufficient_coverage` means the
-rule did not reach its threshold and at least one mandatory source was partial,
-failed, or absent; `incomplete_sources` lists those stable source identities.
-A detected rule remains `detected` when retained evidence is sufficient even if
-another part of an analyzer result was partial. The `detected` boolean remains
-for convenient positive-result filtering, but consumers must use `status` to
-distinguish a conclusive negative from unavailable coverage.
+`not_detected` is emitted only when observation coverage was sufficient to
+conclusively prove that the detection criteria (`minimum_score`,
+`minimum_evidence`, and prerequisites) could not be satisfied.
+`insufficient_coverage` means the rule was not detected, but the upper bound of
+potential evidence achievable from incomplete observation channels could have
+satisfied `minimum_score`, `minimum_evidence`, and prerequisites;
+`incomplete_sources` lists those stable source identities. A detected rule
+remains `detected` when retained evidence is sufficient even if another part of
+an analyzer result was partial. The `detected` boolean remains for convenient
+positive-result filtering, but consumers must use `status` to distinguish a
+conclusive negative from unavailable coverage.
 
-Mandatory sources are derived from exact `source` predicates in rule condition
-trees, not from analyzer-specific flags. An `all` condition requires the union
-of its branches; an `any` condition requires only sources shared by every
-alternative. Rule dependencies contribute their mandatory sources as well.
+Observation capabilities are derived per `SignalType` and explicit source
+constraints in rule condition trees. Condition trees evaluate tri-state coverage
+(`matched`, `not_matched`, `unknown`) taking into account scoring thresholds:
+- An `all` condition short-circuits to conclusively `not_matched` when any branch
+  is conclusively false, even if other branches are unknown.
+- An `any` condition retains potential evidence from unknown branches even when
+  a supporting branch matched; if the observed match is below `minimum_score` and
+  an unknown branch could reach the threshold, coverage evaluates to
+  `insufficient_coverage`.
+- If the upper bound of achievable score or evidence groups cannot reach
+  `minimum_score` or `minimum_evidence` (e.g. unknown evidence is in the same
+  correlation group as an already observed match), coverage evaluates to
+  `not_detected`.
+- Rule dependencies propagate coverage uncertainty: if a required prerequisite
+  is `insufficient_coverage`, dependent rules that could otherwise detect also
+  become `insufficient_coverage`.
 
 Every evidence item includes its rule identifier, signal type/source/key,
 observation confidence, weight, `raw_contribution`, and `contribution`. Positive
@@ -139,14 +154,21 @@ changes.
 
 ### Schema history
 
-Report V4 adds detection `status` and `incomplete_sources`. This is a semantic
-change because an unavailable mandatory observation source is no longer
+Report V5 refines detection `status` and `incomplete_sources` with score-aware,
+capability-based condition coverage. An incomplete analyzer no longer causes
+false `not_detected` when supporting evidence is observed alongside unobserved
+decisive branches, and does not cause false `insufficient_coverage` when missing
+sources could not reach the detection score or group threshold. V4 consumers
+must not interpret V5 as V4.
+
+Report V4 added detection `status` and `incomplete_sources`. This was a semantic
+change because an unavailable mandatory observation source was no longer
 presented as a definitive negative result. V3 consumers must not interpret V4
 as V3.
 
-Fields documented here use `snake_case`. Report V3 adds the required `analyzers`
+Fields documented here use `snake_case`. Report V3 added the required `analyzers`
 array so partial multi-analyzer coverage is explicit and deterministic. It also
-allows `final_url` and `http` to be `null` when HTTP observations are unavailable;
+allowed `final_url` and `http` to be `null` when HTTP observations are unavailable;
 V2 always emitted a string and object because it only supported HTTP scans. V2
 consumers must not interpret V3 as V2. Detection and scoring fields retain their
 V2 semantics.
@@ -157,7 +179,7 @@ value, while V2 exposes zero for a non-selected correlated predicate and retains
 that weighted value in `raw_contribution`. V2 also added positive evidence
 `group` and `positive_evidence_groups`.
 
-Consumers must dispatch on `schema_version`. The current CLI emits V4; it does
+Consumers must dispatch on `schema_version`. The current CLI emits V5; it does
 not offer an older output mode. An incompatible future report requires a new
 `schema_version` even during pre-release development.
 

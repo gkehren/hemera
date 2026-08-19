@@ -936,4 +936,240 @@ func TestM2BuiltInDetectorCoverageRegressions(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("hcaptcha with HTTP supporting marker only is insufficient when browser failed", func(t *testing.T) {
+		t.Parallel()
+		// Observed supporting marker "h-captcha" (weight 30), decisive script (weight 75) is unknown in browser.
+		// Actual score is 30 < 75, but potential score is 75 >= 75.
+		httpObs := analysis.Observation{
+			Source: analysis.SourceHTTP,
+			Signals: []model.Signal{{
+				Type: model.SignalTypePageContent, Source: analysis.SourceHTTP, Key: "class", Value: "h-captcha", Confidence: 1,
+			}},
+		}
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceHTTP, observation: httpObs}, FailurePolicy: FailurePolicyContinue},
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: analysis.Observation{Source: analysis.SourceBrowser}, err: errors.New("browser unavailable")}, FailurePolicy: FailurePolicyContinue},
+			},
+			RuleSet: ruleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cov := range res.Coverage {
+			if cov.RuleID == "hcaptcha.challenge" {
+				if cov.Status != DetectionStatusInsufficientCoverage {
+					t.Fatalf("hcaptcha.challenge status = %s, want insufficient_coverage", cov.Status)
+				}
+				if !slices.Equal(cov.IncompleteSources, []string{analysis.SourceBrowser}) {
+					t.Fatalf("hcaptcha.challenge incomplete = %v, want [browser_analyzer]", cov.IncompleteSources)
+				}
+			}
+		}
+	})
+}
+
+func TestScoreAwareCoverageEvaluation(t *testing.T) {
+	t.Parallel()
+
+	markerKey := "supporting_marker"
+	scriptKey := "https://cdn.example.com/decisive.js"
+
+	// Rule 1: ANY with supporting marker (35) and decisive script (75), threshold 75, minimum_evidence 1
+	anyRule := rules.Rule{
+		ID: "any.supporting.and.decisive", Name: "Any Supporting and Decisive", Category: rules.CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
+		Match: rules.Condition{Any: []rules.Condition{
+			{Signal: &rules.Evidence{
+				ID: "marker", Group: "static", Type: model.SignalTypeResponseHeader,
+				Key: &rules.TextPattern{Exact: &markerKey}, Weight: 35,
+			}},
+			{Signal: &rules.Evidence{
+				ID: "script", Group: "static", Type: model.SignalTypeScriptURL,
+				Key: &rules.TextPattern{Exact: &scriptKey}, Weight: 75,
+			}},
+		}},
+	}
+
+	// Rule 2: Counter-example: observed 75 in group A, unknown 75 in group A, threshold 90
+	counterRule := rules.Rule{
+		ID: "counter.same.group", Name: "Counter Same Group", Category: rules.CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 90,
+		Match: rules.Condition{Any: []rules.Condition{
+			{Signal: &rules.Evidence{
+				ID: "marker_a", Group: "group_a", Type: model.SignalTypeResponseHeader,
+				Key: &rules.TextPattern{Exact: &markerKey}, Weight: 75,
+			}},
+			{Signal: &rules.Evidence{
+				ID: "script_a", Group: "group_a", Type: model.SignalTypeScriptURL,
+				Key: &rules.TextPattern{Exact: &scriptKey}, Weight: 75,
+			}},
+		}},
+	}
+
+	// Rule 3: minimum_evidence = 2 with two groups (50 each), threshold 100
+	twoGroupsRule := rules.Rule{
+		ID: "two.groups.rule", Name: "Two Groups Rule", Category: rules.CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 2, MinimumScore: 100,
+		Match: rules.Condition{All: []rules.Condition{
+			{Signal: &rules.Evidence{
+				ID: "g1_header", Group: "g1", Type: model.SignalTypeResponseHeader,
+				Key: &rules.TextPattern{Exact: &markerKey}, Weight: 50,
+			}},
+			{Signal: &rules.Evidence{
+				ID: "g2_script", Group: "g2", Type: model.SignalTypeScriptURL,
+				Key: &rules.TextPattern{Exact: &scriptKey}, Weight: 50,
+			}},
+		}},
+	}
+
+	// Rule 4: ANY with 2 groups, minimum_evidence = 2, threshold 50
+	anyTwoGroupsRule := rules.Rule{
+		ID: "any.two.groups", Name: "Any Two Groups", Category: rules.CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 2, MinimumScore: 50,
+		Match: rules.Condition{Any: []rules.Condition{
+			{Signal: &rules.Evidence{
+				ID: "g1_header", Group: "g1", Type: model.SignalTypeResponseHeader,
+				Key: &rules.TextPattern{Exact: &markerKey}, Weight: 50,
+			}},
+			{Signal: &rules.Evidence{
+				ID: "g2_script", Group: "g2", Type: model.SignalTypeScriptURL,
+				Key: &rules.TextPattern{Exact: &scriptKey}, Weight: 50,
+			}},
+		}},
+	}
+
+	testRuleSet := rules.RuleSet{
+		SchemaVersion: rules.CurrentSchemaVersion,
+		Rules:         []rules.Rule{anyRule, counterRule, twoGroupsRule, anyTwoGroupsRule},
+	}
+
+	t.Run("ANY observed supporting evidence 35 and unknown decisive 75 is insufficient_coverage", func(t *testing.T) {
+		t.Parallel()
+		httpObs := analysis.Observation{
+			Source: analysis.SourceHTTP,
+			Signals: []model.Signal{{
+				Type: model.SignalTypeResponseHeader, Source: analysis.SourceHTTP, Key: markerKey, Value: "1", Confidence: 1,
+			}},
+		}
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceHTTP, observation: httpObs}, FailurePolicy: FailurePolicyContinue},
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: analysis.Observation{Source: analysis.SourceBrowser}, err: errors.New("browser unavailable")}, FailurePolicy: FailurePolicyContinue},
+			},
+			RuleSet: testRuleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statusByRule := make(map[string]DetectionStatus)
+		for _, cov := range res.Coverage {
+			statusByRule[cov.RuleID] = cov.Status
+		}
+		if got := statusByRule["any.supporting.and.decisive"]; got != DetectionStatusInsufficientCoverage {
+			t.Errorf("any.supporting.and.decisive status = %s, want insufficient_coverage", got)
+		}
+	})
+
+	t.Run("counter-example: observed 75 in group A and unknown 75 in group A cannot reach 90 -> not_detected", func(t *testing.T) {
+		t.Parallel()
+		httpObs := analysis.Observation{
+			Source: analysis.SourceHTTP,
+			Signals: []model.Signal{{
+				Type: model.SignalTypeResponseHeader, Source: analysis.SourceHTTP, Key: markerKey, Value: "1", Confidence: 1,
+			}},
+		}
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceHTTP, observation: httpObs}, FailurePolicy: FailurePolicyContinue},
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: analysis.Observation{Source: analysis.SourceBrowser}, err: errors.New("browser unavailable")}, FailurePolicy: FailurePolicyContinue},
+			},
+			RuleSet: testRuleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statusByRule := make(map[string]DetectionStatus)
+		for _, cov := range res.Coverage {
+			statusByRule[cov.RuleID] = cov.Status
+		}
+		if got := statusByRule["counter.same.group"]; got != DetectionStatusNotDetected {
+			t.Errorf("counter.same.group status = %s, want not_detected", got)
+		}
+	})
+
+	t.Run("minimum_evidence 2 with one matched group and one unknown group -> insufficient_coverage", func(t *testing.T) {
+		t.Parallel()
+		httpObs := analysis.Observation{
+			Source: analysis.SourceHTTP,
+			Signals: []model.Signal{{
+				Type: model.SignalTypeResponseHeader, Source: analysis.SourceHTTP, Key: markerKey, Value: "1", Confidence: 1,
+			}},
+		}
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceHTTP, observation: httpObs}, FailurePolicy: FailurePolicyContinue},
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: analysis.Observation{Source: analysis.SourceBrowser}, err: errors.New("browser unavailable")}, FailurePolicy: FailurePolicyContinue},
+			},
+			RuleSet: testRuleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statusByRule := make(map[string]DetectionStatus)
+		for _, cov := range res.Coverage {
+			statusByRule[cov.RuleID] = cov.Status
+		}
+		if got := statusByRule["two.groups.rule"]; got != DetectionStatusInsufficientCoverage {
+			t.Errorf("two.groups.rule status = %s, want insufficient_coverage", got)
+		}
+	})
+
+	t.Run("minimum_evidence 2 with one matched group and second group absent in complete browser -> not_detected", func(t *testing.T) {
+		t.Parallel()
+		httpObs := analysis.Observation{
+			Source: analysis.SourceHTTP,
+			Signals: []model.Signal{{
+				Type: model.SignalTypeResponseHeader, Source: analysis.SourceHTTP, Key: markerKey, Value: "1", Confidence: 1,
+			}},
+		}
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceHTTP, observation: httpObs}, FailurePolicy: FailurePolicyContinue},
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: analysis.Observation{Source: analysis.SourceBrowser}}, FailurePolicy: FailurePolicyContinue},
+			},
+			RuleSet: testRuleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statusByRule := make(map[string]DetectionStatus)
+		for _, cov := range res.Coverage {
+			statusByRule[cov.RuleID] = cov.Status
+		}
+		if got := statusByRule["any.two.groups"]; got != DetectionStatusNotDetected {
+			t.Errorf("any.two.groups status = %s, want not_detected", got)
+		}
+	})
 }

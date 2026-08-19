@@ -1,46 +1,11 @@
 package rules
 
 import (
-	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/gkehren/hemera/pkg/model"
 )
-
-func TestRequiredSourcesFollowsConditionBranchesAndDependencies(t *testing.T) {
-	t.Parallel()
-	httpSource := "http_analyzer"
-	browserSource := "browser_analyzer"
-	ruleSet := RuleSet{SchemaVersion: CurrentSchemaVersion, Rules: []Rule{
-		{
-			ID: "dependency", Match: Condition{Signal: &Evidence{
-				Type: model.SignalTypeCookie, Source: &TextPattern{Exact: &browserSource},
-			}},
-		},
-		{
-			ID: "fixture", Requires: []string{"dependency"},
-			Match: Condition{All: []Condition{
-				{Signal: &Evidence{Type: model.SignalTypeScriptURL, Source: &TextPattern{Exact: &httpSource}}},
-				{Any: []Condition{
-					{Signal: &Evidence{Type: model.SignalTypeCookie, Source: &TextPattern{Exact: &browserSource}}},
-					{Signal: &Evidence{Type: model.SignalTypeCookie, Source: &TextPattern{Exact: &httpSource}}},
-				}},
-			}},
-		},
-	}}
-	got := RequiredSources(ruleSet.Rules[1], ruleSet)
-	want := []string{"browser_analyzer", "http_analyzer"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("RequiredSources() = %#v, want %#v", got, want)
-	}
-
-	withoutDependency := ruleSet.Rules[1]
-	withoutDependency.Requires = nil
-	if got := RequiredSources(withoutDependency, ruleSet); !reflect.DeepEqual(got, []string{"http_analyzer"}) {
-		t.Fatalf("alternative source intersection = %#v, want HTTP only", got)
-	}
-}
 
 func TestCapableSources(t *testing.T) {
 	t.Parallel()
@@ -158,9 +123,6 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 
 	t.Run("All short-circuits to NotMatched when one branch is conclusively absent", func(t *testing.T) {
 		t.Parallel()
-		// All: [header (HTTP-only), dom (Browser-only)]
-		// HTTP is complete (header absent -> NotMatched). Browser is failed (dom -> Unknown).
-		// Conjunction is conclusively NotMatched!
 		cond := Condition{All: []Condition{
 			{Signal: headerEvidence},
 			{Signal: domEvidence},
@@ -179,9 +141,6 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 
 	t.Run("Any evaluates to Unknown when one alternative is absent and another is unknown", func(t *testing.T) {
 		t.Parallel()
-		// Any: [header (HTTP-only), dom (Browser-only)]
-		// HTTP is complete (header absent -> NotMatched). Browser is failed (dom -> Unknown).
-		// Disjunction is Unknown!
 		cond := Condition{Any: []Condition{
 			{Signal: headerEvidence},
 			{Signal: domEvidence},
@@ -210,6 +169,103 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		}
 		if res.State != CoverageStateNotMatched {
 			t.Fatalf("State = %v, want CoverageStateNotMatched", res.State)
+		}
+	})
+}
+
+func TestEvaluateRuleCoverage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("observed supporting evidence with unknown decisive evidence is Unknown", func(t *testing.T) {
+		t.Parallel()
+		rule := Rule{
+			ID: "test.rule", MinimumEvidence: 1, MinimumScore: 75,
+		}
+		cRes := ConditionCoverageResult{
+			State:          CoverageStateUnknown,
+			CanBeSatisfied: true,
+			PotentialEvidence: []PotentialEvidence{
+				{ID: "marker", Group: "static", Score: 30, IsUnknown: false},
+				{ID: "script", Group: "static", Score: 75, IncompleteSources: []string{"browser_analyzer"}, IsUnknown: true},
+			},
+			IncompleteSources: []string{"browser_analyzer"},
+		}
+		state, incomplete := EvaluateRuleCoverage(rule, cRes, false, 0)
+		if state != CoverageStateUnknown {
+			t.Fatalf("state = %v, want CoverageStateUnknown", state)
+		}
+		if !slices.Equal(incomplete, []string{"browser_analyzer"}) {
+			t.Fatalf("incomplete = %v, want [browser_analyzer]", incomplete)
+		}
+	})
+
+	t.Run("counter-example: unknown evidence in same group cannot reach higher threshold", func(t *testing.T) {
+		t.Parallel()
+		// Observed 75 in group_a, unknown 75 in group_a, threshold 90
+		rule := Rule{
+			ID: "test.rule", MinimumEvidence: 1, MinimumScore: 90,
+		}
+		cRes := ConditionCoverageResult{
+			State:          CoverageStateUnknown,
+			CanBeSatisfied: true,
+			PotentialEvidence: []PotentialEvidence{
+				{ID: "marker_a", Group: "group_a", Score: 75, IsUnknown: false},
+				{ID: "marker_b", Group: "group_a", Score: 75, IncompleteSources: []string{"browser_analyzer"}, IsUnknown: true},
+			},
+			IncompleteSources: []string{"browser_analyzer"},
+		}
+		state, incomplete := EvaluateRuleCoverage(rule, cRes, false, 0)
+		if state != CoverageStateNotMatched {
+			t.Fatalf("state = %v, want CoverageStateNotMatched", state)
+		}
+		if len(incomplete) != 0 {
+			t.Fatalf("incomplete = %v, want empty on NotMatched", incomplete)
+		}
+	})
+
+	t.Run("minimum_evidence 2 with one matched group and one unknown group is Unknown", func(t *testing.T) {
+		t.Parallel()
+		rule := Rule{
+			ID: "test.rule", MinimumEvidence: 2, MinimumScore: 100,
+		}
+		cRes := ConditionCoverageResult{
+			State:          CoverageStateUnknown,
+			CanBeSatisfied: true,
+			PotentialEvidence: []PotentialEvidence{
+				{ID: "g1_e", Group: "g1", Score: 50, IsUnknown: false},
+				{ID: "g2_e", Group: "g2", Score: 50, IncompleteSources: []string{"browser_analyzer"}, IsUnknown: true},
+			},
+			IncompleteSources: []string{"browser_analyzer"},
+		}
+		state, incomplete := EvaluateRuleCoverage(rule, cRes, false, 0)
+		if state != CoverageStateUnknown {
+			t.Fatalf("state = %v, want CoverageStateUnknown", state)
+		}
+		if !slices.Equal(incomplete, []string{"browser_analyzer"}) {
+			t.Fatalf("incomplete = %v, want [browser_analyzer]", incomplete)
+		}
+	})
+
+	t.Run("minimum_evidence 2 with all evidence in one group is NotMatched", func(t *testing.T) {
+		t.Parallel()
+		rule := Rule{
+			ID: "test.rule", MinimumEvidence: 2, MinimumScore: 50,
+		}
+		cRes := ConditionCoverageResult{
+			State:          CoverageStateUnknown,
+			CanBeSatisfied: true,
+			PotentialEvidence: []PotentialEvidence{
+				{ID: "g1_e1", Group: "g1", Score: 75, IsUnknown: false},
+				{ID: "g1_e2", Group: "g1", Score: 75, IncompleteSources: []string{"browser_analyzer"}, IsUnknown: true},
+			},
+			IncompleteSources: []string{"browser_analyzer"},
+		}
+		state, incomplete := EvaluateRuleCoverage(rule, cRes, false, 0)
+		if state != CoverageStateNotMatched {
+			t.Fatalf("state = %v, want CoverageStateNotMatched", state)
+		}
+		if len(incomplete) != 0 {
+			t.Fatalf("incomplete = %v, want empty on NotMatched", incomplete)
 		}
 	})
 }

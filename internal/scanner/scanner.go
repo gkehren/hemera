@@ -67,8 +67,9 @@ const (
 	AnalyzerStatusFailed AnalyzerStatus = "failed"
 )
 
-// DetectionStatus distinguishes a negative result from a result that could not
-// be evaluated because a source required by every rule branch was incomplete.
+// DetectionStatus distinguishes a conclusive positive or negative result from a
+// result that could not be conclusively evaluated because observation coverage was
+// insufficient to determine whether the detection criteria could be satisfied.
 type DetectionStatus string
 
 const (
@@ -300,6 +301,27 @@ func buildDetectionCoverage(
 			return state
 		}
 
+		observedPenalties := 0.0
+		for _, ne := range det.NegativeEvidence {
+			if ne.RawContribution < 0 {
+				observedPenalties += -ne.RawContribution
+			} else {
+				observedPenalties += ne.RawContribution
+			}
+		}
+		for _, ae := range det.AmbiguousEvidence {
+			if ae.RawContribution < 0 {
+				observedPenalties += -ae.RawContribution
+			} else {
+				observedPenalties += ae.RawContribution
+			}
+		}
+		for _, ac := range det.AppliedConflicts {
+			observedPenalties += ac.Penalty
+		}
+
+		ruleCovState, ruleIncomplete := rules.EvaluateRuleCoverage(rule, cRes, det.Detected, observedPenalties)
+
 		depUnknown := false
 		depNotDetected := false
 		var depIncomplete []string
@@ -317,7 +339,7 @@ func buildDetectionCoverage(
 			}
 		}
 
-		if cRes.State == rules.CoverageStateNotMatched {
+		if ruleCovState == rules.CoverageStateNotMatched {
 			state := ruleCoverageState{
 				status:            DetectionStatusNotDetected,
 				incompleteSources: nil,
@@ -339,7 +361,7 @@ func buildDetectionCoverage(
 
 		if depUnknown {
 			var combinedIncomplete []string
-			combinedIncomplete = append(combinedIncomplete, cRes.IncompleteSources...)
+			combinedIncomplete = append(combinedIncomplete, ruleIncomplete...)
 			combinedIncomplete = append(combinedIncomplete, depIncomplete...)
 			state := ruleCoverageState{
 				status:            DetectionStatusInsufficientCoverage,
@@ -350,20 +372,10 @@ func buildDetectionCoverage(
 			return state
 		}
 
-		if cRes.State == rules.CoverageStateUnknown {
+		if ruleCovState == rules.CoverageStateUnknown {
 			state := ruleCoverageState{
 				status:            DetectionStatusInsufficientCoverage,
-				incompleteSources: deduplicateSorted(cRes.IncompleteSources),
-				requiredSources:   deduplicateSorted(allRequired),
-			}
-			evaluated[id] = state
-			return state
-		}
-
-		if len(cRes.IncompleteSources) > 0 {
-			state := ruleCoverageState{
-				status:            DetectionStatusInsufficientCoverage,
-				incompleteSources: deduplicateSorted(cRes.IncompleteSources),
+				incompleteSources: deduplicateSorted(ruleIncomplete),
 				requiredSources:   deduplicateSorted(allRequired),
 			}
 			evaluated[id] = state

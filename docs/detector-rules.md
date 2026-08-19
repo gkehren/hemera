@@ -371,13 +371,15 @@ maximum of one shared group rather than two additive proofs.
 
 ### Coverage-sensitive negative results
 
-Rules remain independent of Go analyzer implementations. The scanner derives
-mandatory coverage from exact signal `source` predicates: `all` combines source
-requirements, while `any` requires only sources common to every alternative.
-Dependencies also contribute their source requirements. When a rule is not
-detected and a mandatory source is partial, failed, or absent, report V4 emits
-`insufficient_coverage` instead of `not_detected`. A partial source can still
-produce a positive detection when its retained signals satisfy the rule.
+Rules remain independent of Go analyzer implementations. The scanner evaluates
+tri-state condition coverage and scoring potential across capable observation
+channels. In `all` conditions, a conclusively false branch proves the conjunction
+false regardless of unknown branches. In `any` conditions, potential evidence
+from unknown branches is preserved; when a rule is not detected and an incomplete
+channel could have allowed the rule to reach its detection score or evidence
+gates, report V5 emits `insufficient_coverage` instead of `not_detected`. A
+partial source can still produce a positive detection when its retained signals
+satisfy the rule.
 
 Each selected signal field contains exactly one text operation:
 
