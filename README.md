@@ -143,7 +143,7 @@ remain coupled only to normalized source names, not analyzer implementations.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V4](docs/report-schema.md). The JSON schema is
+documented in [JSON report schema V5](docs/report-schema.md). The JSON schema is
 experimental while Hemera is pre-release: intentional breaking changes require
 a documented `schema_version` increment, but historical schemas are not yet
 promised long-term support. Text output is intended for people and may evolve

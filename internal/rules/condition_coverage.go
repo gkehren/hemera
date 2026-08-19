@@ -1,14 +1,15 @@
 package rules
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/gkehren/hemera/pkg/model"
 )
 
-// DefaultCapableSources maps normalized signal types to the standard observation
+// defaultCapableSources maps normalized signal types to the standard observation
 // sources capable of producing them.
-var DefaultCapableSources = map[model.SignalType][]string{
+var defaultCapableSources = map[model.SignalType][]string{
 	model.SignalTypeResponseHeader:  {"http_analyzer"},
 	model.SignalTypeCookie:          {"browser_analyzer", "http_analyzer"},
 	model.SignalTypeScriptURL:       {"browser_analyzer", "http_analyzer"},
@@ -31,7 +32,7 @@ func CapableSources(evidence Evidence) []string {
 	if evidence.Source != nil && evidence.Source.Exact != nil {
 		return []string{*evidence.Source.Exact}
 	}
-	candidates, ok := DefaultCapableSources[evidence.Type]
+	candidates, ok := defaultCapableSources[evidence.Type]
 	if !ok {
 		if evidence.Source != nil && evidence.Source.Exact != nil {
 			return []string{*evidence.Source.Exact}
@@ -59,26 +60,36 @@ func CapableSources(evidence Evidence) []string {
 type CoverageState int
 
 const (
-	// CoverageStateNotMatched indicates the condition was conclusively evaluated
+	// CoverageStateNotMatched indicates the condition or rule was conclusively evaluated
 	// as negative by complete observation channels.
 	CoverageStateNotMatched CoverageState = iota
-	// CoverageStateMatched indicates the condition was satisfied by observed evidence.
+	// CoverageStateMatched indicates the condition or rule was satisfied by observed evidence.
 	CoverageStateMatched
-	// CoverageStateUnknown indicates the condition could not be conclusively
+	// CoverageStateUnknown indicates the condition or rule could not be conclusively
 	// evaluated as negative because one or more capable observation channels were incomplete.
 	CoverageStateUnknown
 )
 
-// ConditionCoverageResult describes the tri-state result of evaluating a condition.
+// PotentialEvidence records an actual or potential evidence item from a condition branch.
+type PotentialEvidence struct {
+	ID                string
+	Group             string
+	Score             float64
+	IncompleteSources []string
+	IsUnknown         bool
+}
+
+// ConditionCoverageResult describes the tri-state result and potential evidence of a condition.
 type ConditionCoverageResult struct {
 	State             CoverageState
-	MatchedEvidence   []EvidenceMatch
+	CanBeSatisfied    bool
+	PotentialEvidence []PotentialEvidence
 	IncompleteSources []string
 	RequiredSources   []string
 }
 
 // EvaluateConditionCoverage evaluates a condition against normalized signals and complete
-// source statuses, returning a tri-state result with incomplete and required sources.
+// source statuses, returning a tri-state result with potential evidence and required sources.
 func EvaluateConditionCoverage(
 	condition Condition,
 	signals []model.Signal,
@@ -104,9 +115,16 @@ func evaluateConditionCoverageCached(
 			return ConditionCoverageResult{}, err
 		}
 		if ok {
+			score := evidence.Weight * match.Signal.Confidence
 			return ConditionCoverageResult{
-				State:           CoverageStateMatched,
-				MatchedEvidence: []EvidenceMatch{match},
+				State:          CoverageStateMatched,
+				CanBeSatisfied: true,
+				PotentialEvidence: []PotentialEvidence{{
+					ID:        evidence.ID,
+					Group:     evidence.Group,
+					Score:     score,
+					IsUnknown: false,
+				}},
 				RequiredSources: capable,
 			}, nil
 		}
@@ -119,12 +137,22 @@ func evaluateConditionCoverageCached(
 		if len(incomplete) == 0 {
 			return ConditionCoverageResult{
 				State:           CoverageStateNotMatched,
+				CanBeSatisfied:  false,
 				RequiredSources: capable,
 			}, nil
 		}
+		dedupIncomplete := deduplicateSorted(incomplete)
 		return ConditionCoverageResult{
-			State:             CoverageStateUnknown,
-			IncompleteSources: deduplicateSorted(incomplete),
+			State:          CoverageStateUnknown,
+			CanBeSatisfied: true,
+			PotentialEvidence: []PotentialEvidence{{
+				ID:                evidence.ID,
+				Group:             evidence.Group,
+				Score:             evidence.Weight,
+				IncompleteSources: dedupIncomplete,
+				IsUnknown:         true,
+			}},
+			IncompleteSources: dedupIncomplete,
 			RequiredSources:   capable,
 		}, nil
 	}
@@ -137,7 +165,7 @@ func evaluateConditionCoverageCached(
 	}
 
 	if all {
-		var matchedEvidence []EvidenceMatch
+		var potentialEvidence []PotentialEvidence
 		var incompleteSources []string
 		var requiredSources []string
 		hasUnknown := false
@@ -147,10 +175,11 @@ func evaluateConditionCoverageCached(
 				return ConditionCoverageResult{}, err
 			}
 			requiredSources = append(requiredSources, childRes.RequiredSources...)
-			if childRes.State == CoverageStateNotMatched {
+			if !childRes.CanBeSatisfied {
 				// Short-circuit: false AND anything == false
 				return ConditionCoverageResult{
 					State:           CoverageStateNotMatched,
+					CanBeSatisfied:  false,
 					RequiredSources: deduplicateSorted(requiredSources),
 				}, nil
 			}
@@ -158,61 +187,128 @@ func evaluateConditionCoverageCached(
 				hasUnknown = true
 				incompleteSources = append(incompleteSources, childRes.IncompleteSources...)
 			}
-			matchedEvidence = append(matchedEvidence, childRes.MatchedEvidence...)
+			potentialEvidence = append(potentialEvidence, childRes.PotentialEvidence...)
 		}
+		state := CoverageStateMatched
 		if hasUnknown {
-			return ConditionCoverageResult{
-				State:             CoverageStateUnknown,
-				MatchedEvidence:   matchedEvidence,
-				IncompleteSources: deduplicateSorted(incompleteSources),
-				RequiredSources:   deduplicateSorted(requiredSources),
-			}, nil
+			state = CoverageStateUnknown
 		}
 		return ConditionCoverageResult{
-			State:           CoverageStateMatched,
-			MatchedEvidence: matchedEvidence,
-			RequiredSources: deduplicateSorted(requiredSources),
+			State:             state,
+			CanBeSatisfied:    true,
+			PotentialEvidence: potentialEvidence,
+			IncompleteSources: deduplicateSorted(incompleteSources),
+			RequiredSources:   deduplicateSorted(requiredSources),
 		}, nil
 	}
 
 	// Any (OR)
-	var matchedEvidence []EvidenceMatch
+	var potentialEvidence []PotentialEvidence
 	var incompleteSources []string
 	var requiredSources []string
 	hasMatched := false
-	allNotMatched := true
+	hasUnknown := false
+	atLeastOneSatisfiable := false
+
 	for _, child := range children {
 		childRes, err := evaluateConditionCoverageCached(child, signals, completeSources)
 		if err != nil {
 			return ConditionCoverageResult{}, err
 		}
 		requiredSources = append(requiredSources, childRes.RequiredSources...)
-		if childRes.State == CoverageStateMatched {
-			hasMatched = true
-			matchedEvidence = append(matchedEvidence, childRes.MatchedEvidence...)
-		} else if childRes.State == CoverageStateUnknown {
-			allNotMatched = false
+		if childRes.CanBeSatisfied {
+			atLeastOneSatisfiable = true
+			if childRes.State == CoverageStateMatched {
+				hasMatched = true
+			}
+			if childRes.State == CoverageStateUnknown {
+				hasUnknown = true
+			}
+			potentialEvidence = append(potentialEvidence, childRes.PotentialEvidence...)
 			incompleteSources = append(incompleteSources, childRes.IncompleteSources...)
 		}
 	}
-	if hasMatched {
-		return ConditionCoverageResult{
-			State:           CoverageStateMatched,
-			MatchedEvidence: matchedEvidence,
-			RequiredSources: deduplicateSorted(requiredSources),
-		}, nil
-	}
-	if allNotMatched {
+
+	if !atLeastOneSatisfiable {
 		return ConditionCoverageResult{
 			State:           CoverageStateNotMatched,
+			CanBeSatisfied:  false,
 			RequiredSources: deduplicateSorted(requiredSources),
 		}, nil
 	}
+
+	state := CoverageStateMatched
+	if hasUnknown || !hasMatched {
+		state = CoverageStateUnknown
+	}
 	return ConditionCoverageResult{
-		State:             CoverageStateUnknown,
+		State:             state,
+		CanBeSatisfied:    true,
+		PotentialEvidence: potentialEvidence,
 		IncompleteSources: deduplicateSorted(incompleteSources),
 		RequiredSources:   deduplicateSorted(requiredSources),
 	}, nil
+}
+
+// EvaluateRuleCoverage determines the coverage state and incomplete sources for a rule
+// taking into account the condition tree, correlation groups, minimum evidence, and minimum score.
+func EvaluateRuleCoverage(
+	rule Rule,
+	cRes ConditionCoverageResult,
+	detected bool,
+	observedPenalties float64,
+) (CoverageState, []string) {
+	if detected {
+		return CoverageStateMatched, nil
+	}
+	if !cRes.CanBeSatisfied {
+		return CoverageStateNotMatched, nil
+	}
+
+	type groupSummary struct {
+		maxScore          float64
+		incompleteSources []string
+	}
+	groups := make(map[string]*groupSummary)
+	for i, pe := range cRes.PotentialEvidence {
+		groupKey := pe.Group
+		if groupKey == "" {
+			groupKey = fmt.Sprintf("__independent_%d", i)
+		}
+		g, ok := groups[groupKey]
+		if !ok {
+			g = &groupSummary{}
+			groups[groupKey] = g
+		}
+		if pe.Score > g.maxScore {
+			g.maxScore = pe.Score
+		}
+		if pe.IsUnknown {
+			g.incompleteSources = append(g.incompleteSources, pe.IncompleteSources...)
+		}
+	}
+
+	upperBoundScore := 0.0
+	var allIncomplete []string
+	for _, g := range groups {
+		upperBoundScore += g.maxScore
+		allIncomplete = append(allIncomplete, g.incompleteSources...)
+	}
+	upperBoundScore -= observedPenalties
+	if upperBoundScore < 0 {
+		upperBoundScore = 0
+	}
+	if upperBoundScore > 100 {
+		upperBoundScore = 100
+	}
+	upperBoundGroups := len(groups)
+
+	canReachThreshold := (upperBoundScore >= rule.MinimumScore) && (upperBoundGroups >= rule.MinimumEvidence)
+	if !canReachThreshold {
+		return CoverageStateNotMatched, nil
+	}
+
+	return CoverageStateUnknown, deduplicateSorted(allIncomplete)
 }
 
 func deduplicateSorted(items []string) []string {
