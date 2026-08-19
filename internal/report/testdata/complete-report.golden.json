@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "tool_version": "1.2.3",
+  "requested_url": "https://example.test/start?redacted",
+  "final_url": "https://example.test/final?redacted",
+  "http": {
+    "status_code": 403,
+    "body_truncated": true,
+    "redirects": [
+      {
+        "from": "https://example.test/start?redacted",
+        "to": "https://example.test/final?redacted",
+        "status": 302
+      }
+    ],
+    "warnings": [
+      "response body was truncated at 2097152 bytes"
+    ]
+  },
+  "detections": [
+    {
+      "id": "test.complete",
+      "name": "Complete synthetic detector",
+      "category": "captcha_challenge",
+      "vendor": "Example",
+      "product": "Widget",
+      "detected": true,
+      "condition_matched": true,
+      "minimum_evidence_met": true,
+      "evidence_score": 82.5,
+      "score": 82.5,
+      "level": "high",
+      "evidence": {
+        "positive": [
+          {
+            "id": "client-script",
+            "description": "Documented client script",
+            "type": "script_url",
+            "source": "http_analyzer",
+            "key": "src",
+            "value": "https://challenges.cloudflare.com/turnstile/v0/api.js?redacted",
+            "url": "https://example.test/final?redacted",
+            "confidence": 1,
+            "weight": 100,
+            "contribution": 100
+          }
+        ],
+        "negative": [
+          {
+            "id": "conflicting-cookie",
+            "description": "Synthetic conflicting cookie",
+            "type": "cookie",
+            "source": "http_analyzer",
+            "key": "session",
+            "url": "https://example.test/final?redacted",
+            "confidence": 0.8,
+            "weight": 12.5,
+            "contribution": -10
+          }
+        ],
+        "ambiguous": [
+          {
+            "id": "shared-host",
+            "description": "Shared infrastructure host",
+            "type": "resource_host",
+            "source": "http_analyzer",
+            "key": "host",
+            "value": "shared.example",
+            "url": "https://shared.example/frame?redacted",
+            "confidence": 0.5,
+            "weight": 5,
+            "contribution": -2.5
+          }
+        ]
+      },
+      "missing_evidence": [
+        "html-marker"
+      ],
+      "missing_dependencies": [],
+      "applied_conflicts": [
+        {
+          "rule_id": "other.product",
+          "penalty": 5
+        }
+      ]
+    }
+  ]
+}

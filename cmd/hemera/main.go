@@ -52,9 +52,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stdout)
 		return 0
 	}
-	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
-		printUsage(stdout)
-		return 0
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			printUsage(stdout)
+			return 0
+		}
 	}
 
 	if err := flags.Parse(args); err != nil {

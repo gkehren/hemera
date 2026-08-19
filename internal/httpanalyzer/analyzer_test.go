@@ -4,7 +4,9 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -64,7 +66,18 @@ func TestNewValidatesConfiguration(t *testing.T) {
 		{"redirects", func(c *Config) { c.MaxRedirects = -1 }},
 		{"body bytes", func(c *Config) { c.MaxBodyBytes = 0 }},
 		{"header bytes", func(c *Config) { c.MaxResponseHeaderBytes = 0 }},
+		{"HTML resources", func(c *Config) { c.MaxHTMLResources = 0 }},
 		{"User-Agent", func(c *Config) { c.UserAgent = " " }},
+		{"total timeout hard cap", func(c *Config) { c.TotalTimeout = maxTotalTimeout + time.Nanosecond }},
+		{"connect timeout hard cap", func(c *Config) { c.ConnectTimeout = maxConnectTimeout + time.Nanosecond }},
+		{"TLS timeout hard cap", func(c *Config) { c.TLSHandshakeTimeout = maxTLSHandshakeTimeout + time.Nanosecond }},
+		{"header timeout hard cap", func(c *Config) { c.ResponseHeaderTimeout = maxResponseHeaderTimeout + time.Nanosecond }},
+		{"redirect hard cap", func(c *Config) { c.MaxRedirects = maxRedirects + 1 }},
+		{"body hard cap", func(c *Config) { c.MaxBodyBytes = maxBodyBytes + 1 }},
+		{"header hard cap", func(c *Config) { c.MaxResponseHeaderBytes = maxResponseHeaderBytes + 1 }},
+		{"HTML resource hard cap", func(c *Config) { c.MaxHTMLResources = maxHTMLResources + 1 }},
+		{"User-Agent hard cap", func(c *Config) { c.UserAgent = strings.Repeat("a", maxUserAgentBytes+1) }},
+		{"User-Agent header injection", func(c *Config) { c.UserAgent = "Hemera/dev\r\nX-Injected: true" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,6 +88,17 @@ func TestNewValidatesConfiguration(t *testing.T) {
 				t.Errorf("New() error = %v, want ErrInvalidConfig", err)
 			}
 		})
+	}
+}
+
+func TestDefaultConfigUsesEveryHardLimit(t *testing.T) {
+	t.Parallel()
+	config := DefaultConfig()
+	if config.TotalTimeout != maxTotalTimeout || config.ConnectTimeout != maxConnectTimeout ||
+		config.TLSHandshakeTimeout != maxTLSHandshakeTimeout || config.ResponseHeaderTimeout != maxResponseHeaderTimeout ||
+		config.MaxRedirects != maxRedirects || config.MaxBodyBytes != maxBodyBytes ||
+		config.MaxResponseHeaderBytes != maxResponseHeaderBytes || config.MaxHTMLResources != maxHTMLResources {
+		t.Errorf("DefaultConfig() = %#v, want all hard limits", config)
 	}
 }
 
@@ -121,6 +145,152 @@ func TestAnalyzeAppliesFirstValidBaseToEntireDocument(t *testing.T) {
 	}
 	if got, want := strings.Join(resources, "|"), "http://example.test/assets/before.js|http://example.test/assets/after.html"; got != want {
 		t.Errorf("resource URLs = %q, want %q", got, want)
+	}
+}
+
+func TestHTMLTokenizerHandlesAdversarialDocuments(t *testing.T) {
+	t.Parallel()
+	deeplyNested := strings.Repeat("<div>", 10000) + `<script src="/deep.js"></script>`
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "duplicate attributes use the first value",
+			html: `<script src="/first.js" src="/ignored.js"></script>`,
+			want: "http://example.test/first.js",
+		},
+		{
+			name: "SVG and MathML content",
+			html: `<svg><script src="/svg.js"></script></svg><math><iframe src="/math.html"></iframe></math>`,
+			want: "http://example.test/svg.js|http://example.test/math.html",
+		},
+		{
+			name: "malformed doctype",
+			html: `<!DOCTYPE html PUBLIC ><script src="/doctype.js"></script>`,
+			want: "http://example.test/doctype.js",
+		},
+		{
+			name: "deep nesting",
+			html: deeplyNested,
+			want: "http://example.test/deep.js",
+		},
+		{
+			name: "imperfect HTML",
+			html: `<body><unknown><script src=/rough.js></script></mismatch><iframe src=/frame.html>`,
+			want: "http://example.test/rough.js|http://example.test/frame.html",
+		},
+	}
+	analyzer, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentURL, err := url.Parse("http://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			result := Result{}
+			if err := analyzer.collectHTML(context.Background(), &result, documentURL, "text/html; charset=utf-8", []byte(test.html)); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(htmlResourceValues(result), "|"); got != test.want {
+				t.Errorf("resources = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHTMLResourceLimitPreservesCollectedSignals(t *testing.T) {
+	t.Parallel()
+	var body strings.Builder
+	for i := 0; i < maxHTMLResources+32; i++ {
+		fmt.Fprintf(&body, `<script src="/%d.js"></script>`, i)
+	}
+	analyzer, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentURL, err := url.Parse("http://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Result{}
+	if err := analyzer.collectHTML(context.Background(), &result, documentURL, "text/html; charset=utf-8", []byte(body.String())); err != nil {
+		t.Fatal(err)
+	}
+	resources := htmlResourceValues(result)
+	if len(resources) != maxHTMLResources {
+		t.Fatalf("resource signals = %d, want %d", len(resources), maxHTMLResources)
+	}
+	if got, want := resources[0], "http://example.test/0.js"; got != want {
+		t.Errorf("first resource = %q, want %q", got, want)
+	}
+	if got, want := resources[len(resources)-1], fmt.Sprintf("http://example.test/%d.js", maxHTMLResources-1); got != want {
+		t.Errorf("last resource = %q, want %q", got, want)
+	}
+	warning := fmt.Sprintf("HTML resource extraction stopped at %d resources", maxHTMLResources)
+	if count := countString(result.Warnings, warning); count != 1 {
+		t.Errorf("limit warning count = %d, warnings = %v", count, result.Warnings)
+	}
+	if len(result.Signals) == 0 || result.Signals[0].Type != model.SignalTypePageContent {
+		t.Errorf("page-content signal was not preserved: %#v", result.Signals)
+	}
+}
+
+func TestHTMLAnalysisHonorsCancellation(t *testing.T) {
+	t.Parallel()
+	analyzer, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentURL, err := url.Parse("http://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := analyzer.collectHTML(canceled, &Result{}, documentURL, "text/html", []byte("<html></html>")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("collectHTML() error = %v, want context.Canceled", err)
+	}
+
+	body := []byte(`<base href="/assets/"><script src="one.js"></script><iframe src="two.html"></iframe>`)
+	if _, err := firstBaseURL(&cancelAfterChecksContext{Context: context.Background(), remaining: 1}, body, documentURL); !errors.Is(err, context.Canceled) {
+		t.Fatalf("firstBaseURL() error = %v, want context.Canceled during tokenization", err)
+	}
+	if _, err := collectHTMLResources(
+		&cancelAfterChecksContext{Context: context.Background(), remaining: 1},
+		&Result{}, body, documentURL, documentURL, maxHTMLResources,
+	); !errors.Is(err, context.Canceled) {
+		t.Fatalf("collectHTMLResources() error = %v, want context.Canceled during tokenization", err)
+	}
+}
+
+func TestContextReaderHonorsCancellationDuringDecodeRead(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := contextReader{ctx: ctx, reader: readerFunc(func(buffer []byte) (int, error) {
+		copy(buffer, "decoded HTML")
+		cancel()
+		return len("decoded HTML"), nil
+	})}
+	count, err := reader.Read(make([]byte, 32))
+	if count != len("decoded HTML") || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read() = %d, %v, want decoded bytes and context.Canceled", count, err)
+	}
+}
+
+func TestAnalyzeRejectsCanceledContextBeforeNavigation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := analyzerForServer(t, "http://127.0.0.1:1", nil).Analyze(ctx, "http://example.test/")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Analyze() error = %v, want context.Canceled", err)
 	}
 }
 
@@ -430,8 +600,9 @@ func TestAnalyzePreservesTLSServerName(t *testing.T) {
 	}}
 	server.StartTLS()
 	defer server.Close()
-	rootTLS := server.Client().Transport.(*http.Transport).TLSClientConfig
-	analyzer := analyzerForServer(t, server.URL, func(config *Config) { config.TLSConfig = rootTLS })
+	rootCAs := x509.NewCertPool()
+	rootCAs.AddCert(server.Certificate())
+	analyzer := analyzerForServer(t, server.URL, func(config *Config) { config.RootCAs = rootCAs })
 	if _, err := analyzer.Analyze(context.Background(), "https://example.com/"); err != nil {
 		t.Fatal(err)
 	}
@@ -440,4 +611,79 @@ func TestAnalyzePreservesTLSServerName(t *testing.T) {
 	if serverName != "example.com" {
 		t.Errorf("TLS ServerName = %q", serverName)
 	}
+}
+
+func TestAnalyzeValidatesTLSWithConfiguredRootCA(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	withoutRoot := analyzerForServer(t, server.URL, nil)
+	if _, err := withoutRoot.Analyze(context.Background(), "https://example.com/"); err == nil {
+		t.Fatal("Analyze() without local root CA error = nil")
+	}
+
+	rootCAs := x509.NewCertPool()
+	rootCAs.AddCert(server.Certificate())
+	withRoot := analyzerForServer(t, server.URL, func(config *Config) { config.RootCAs = rootCAs })
+	if _, err := withRoot.Analyze(context.Background(), "https://example.com/"); err != nil {
+		t.Fatalf("Analyze() with local root CA error = %v", err)
+	}
+}
+
+func TestAnalyzeRequiresTLS12OrLater(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.TLS = &tls.Config{MaxVersion: tls.VersionTLS11}
+	server.StartTLS()
+	defer server.Close()
+	rootCAs := x509.NewCertPool()
+	rootCAs.AddCert(server.Certificate())
+	analyzer := analyzerForServer(t, server.URL, func(config *Config) { config.RootCAs = rootCAs })
+	if _, err := analyzer.Analyze(context.Background(), "https://example.com/"); err == nil {
+		t.Fatal("Analyze() against TLS 1.1 server error = nil")
+	}
+}
+
+func htmlResourceValues(result Result) []string {
+	values := make([]string, 0)
+	for _, signal := range result.Signals {
+		if signal.Type == model.SignalTypeScriptURL || signal.Type == model.SignalTypeIframeURL {
+			values = append(values, signal.Value)
+		}
+	}
+	return values
+}
+
+func countString(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
+}
+
+type cancelAfterChecksContext struct {
+	context.Context
+	remaining int
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(buffer []byte) (int, error) {
+	return f(buffer)
+}
+
+func (c *cancelAfterChecksContext) Err() error {
+	if c.remaining == 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
 }

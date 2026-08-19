@@ -71,6 +71,54 @@ func TestRunShowsHelp(t *testing.T) {
 	}
 }
 
+func TestRunHelpTakesPriorityOverVersion(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"--version", "--help"},
+		{"--help", "--version"},
+	} {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("run() code = %d, want 0", code)
+			}
+			if !strings.Contains(stdout.String(), "Usage:") || strings.Contains(stdout.String(), "hemera dev") {
+				t.Errorf("run() stdout = %q, want root usage only", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("run() stderr = %q, want empty output", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunScanHelpTakesPriorityOverVersion(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"scan", "--version", "--help"},
+		{"scan", "--help", "--version"},
+	} {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("run() code = %d, want 0", code)
+			}
+			if !strings.Contains(stdout.String(), "hemera scan") || !strings.Contains(stdout.String(), "--format") {
+				t.Errorf("run() stdout = %q, want scan usage", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("run() stderr = %q, want empty output", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunRejectsUnexpectedArguments(t *testing.T) {
 	t.Parallel()
 
