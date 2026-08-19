@@ -96,7 +96,7 @@ The existing Turnstile and reCAPTCHA fixtures already cover positive, negative,
 ambiguous, and false-positive-oriented regression cases. This is a regression
 baseline, not yet a broad measurement of false-positive and false-negative rates.
 
-- [ ] Define and enforce a support standard for every detector family, including
+- [x] Define and enforce a support standard for every detector family, including
   where applicable:
   - positive fixtures;
   - hard negatives and ambiguous cases;

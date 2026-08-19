@@ -320,7 +320,8 @@ Milestone 0 includes product-specific rules for Cloudflare Turnstile and Google
 reCAPTCHA. They use documented client-script URLs as decisive evidence and
 static HTML markers only as supporting evidence. Related static observations
 share one `static_integration` group so their maximum, not their sum, contributes
-to confidence.
+to confidence. Every supported rule adheres to the quality, evidence, and fixture
+requirements in [Detector family support standard](detector-support-standard.md).
 
 ### Confidence engine
 
