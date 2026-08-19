@@ -38,8 +38,8 @@ func RequiredSources(rule Rule, ruleSet RuleSet) []string {
 func conditionRequiredSources(condition Condition) map[string]struct{} {
 	if condition.Signal != nil {
 		result := make(map[string]struct{})
-		if pattern := condition.Signal.Source; pattern != nil && pattern.Exact != nil {
-			result[*pattern.Exact] = struct{}{}
+		for _, source := range CapableSources(*condition.Signal) {
+			result[source] = struct{}{}
 		}
 		return result
 	}
