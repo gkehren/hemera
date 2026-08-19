@@ -1,5 +1,5 @@
-// Package report builds safe, stable scan reports and renders them as text or
-// versioned JSON without performing detection.
+// Package report builds safe scan reports and renders them as human-oriented
+// text or versioned, deterministic JSON without performing detection.
 package report
 
 import (
@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	// SchemaVersion identifies the stable JSON report contract.
+	// SchemaVersion identifies the current experimental JSON report contract.
 	SchemaVersion = 3
 )
 
-// Report is the stable representation shared by text and JSON renderers.
+// Report is the deterministic representation shared by text and JSON renderers.
 type Report struct {
 	SchemaVersion int               `json:"schema_version"`
 	ToolVersion   string            `json:"tool_version"`
@@ -160,7 +160,7 @@ func Build(toolVersion string, result scanner.Result) Report {
 	return report
 }
 
-// WriteJSON renders one report using the stable, versioned JSON contract.
+// WriteJSON renders one report using the versioned JSON contract.
 func WriteJSON(writer io.Writer, report Report) error {
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")

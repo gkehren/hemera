@@ -2,7 +2,12 @@
 
 `hemera scan --format json <url>` writes one JSON document to stdout. Input and
 scan errors are written to stderr and do not enter the JSON document. The
-top-level `schema_version` is the compatibility boundary; it is currently `3`.
+top-level `schema_version` is mandatory and is currently `3`.
+
+> **Compatibility status: experimental.** Hemera has not published its first
+> stable release. JSON is the versioned automation interface, but the current
+> schema does not yet carry a permanent public compatibility or support promise.
+> Consumers must inspect `schema_version` rather than assume a particular shape.
 
 ## Top-level fields
 
@@ -90,6 +95,27 @@ values before they reach reporting.
 
 ## Compatibility
 
+### Before the first stable release
+
+The report is versioned from the beginning so consumers can reject or adapt to
+incompatible output. During pre-release development:
+
+- `schema_version` remains present in every JSON report;
+- deterministic serialization and golden-fixture coverage remain required;
+- additive changes are preferred when consumers can safely ignore them;
+- field removal, type changes, and semantic changes are allowed only when an
+  architecture requirement justifies them;
+- every breaking change increments `schema_version` and updates this document,
+  golden fixtures, and migration notes where useful;
+- Hemera does not promise indefinite support or an output mode for historical
+  pre-release schemas.
+
+This policy permits deliberate schema evolution; it does not permit silently
+changing the meaning of an existing schema version or making gratuitous breaking
+changes.
+
+### Schema history
+
 Fields documented here use `snake_case`. Report V3 adds the required `analyzers`
 array so partial multi-analyzer coverage is explicit and deterministic. It also
 allows `final_url` and `http` to be `null` when HTTP observations are unavailable;
@@ -104,7 +130,21 @@ that weighted value in `raw_contribution`. V2 also added positive evidence
 `group` and `positive_evidence_groups`.
 
 Consumers must dispatch on `schema_version`. The current CLI emits V3; it does
-not offer an older output mode. Additive V3 fields may be introduced only when
-existing consumers can safely ignore them. Removing a field, changing its
-meaning or type, or changing the interpretation of existing values requires a
-new `schema_version` and migration documentation.
+not offer an older output mode. An incompatible future report requires a new
+`schema_version` even during pre-release development.
+
+### First stable release
+
+Before Hemera's first stable release, the project will define stronger public
+compatibility guarantees for reports, rules, and the CLI. That policy will keep
+schema-version dispatch and documented migrations for breaking report changes.
+It will also define the support lifecycle for historical stable schemas if the
+CLI supports more than one. This issue intentionally does not choose that
+lifecycle in advance.
+
+## Text output
+
+The default text report is designed for people, not parsers. Its wording,
+spacing, and presentation may change for readability without a JSON
+`schema_version` increment. Scripts and integrations should use
+`--format json` and dispatch on the reported schema version.

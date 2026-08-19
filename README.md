@@ -20,7 +20,9 @@ security services.
 - A confidence score that exposes grouped positive, missing, ambiguous, and
   conflicting signals without treating correlated observations as independent
   proof.
-- Human-readable CLI output and a stable JSON format for automation.
+- Human-readable CLI output and a versioned, deterministic JSON format for
+  automation. Its compatibility policy remains experimental before the first
+  stable Hemera release.
 - Data-driven detector rules that can evolve independently from the analyzers.
 - Reproducible fixtures and regression tests focused on false positives.
 
@@ -128,9 +130,13 @@ validation, hostname-derived SNI, and TLS 1.2 or later.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V3](docs/report-schema.md). A non-2xx response
-and a truncated body are successful observations; DNS, connection, TLS,
-timeout, read, and unsafe-redirect failures are reported as scan failures.
+documented in [JSON report schema V3](docs/report-schema.md). The JSON schema is
+experimental while Hemera is pre-release: intentional breaking changes require
+a documented `schema_version` increment, but historical schemas are not yet
+promised long-term support. Text output is intended for people and may evolve
+for readability; automation should consume JSON. A non-2xx response and a
+truncated body are successful observations; DNS, connection, TLS, timeout, read,
+and unsafe-redirect failures are reported as scan failures.
 
 Only scan public targets that you are authorized to assess.
 

@@ -94,7 +94,7 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesVersionedStableShape(t *testing.T) {
+func TestWriteJSONUsesVersionedDeterministicShape(t *testing.T) {
 	t.Parallel()
 	report := Build("1.2.3", scanResultWithHTTP(httpanalyzer.Result{
 		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,

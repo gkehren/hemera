@@ -49,7 +49,8 @@ Hemera is in early development. The repository currently contains:
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
 - deterministic multi-analyzer orchestration and typed HTTP metadata;
-- human-readable and stable JSON V3 reports;
+- human-readable reports and versioned, deterministic, experimental JSON V3
+  reports;
 - deterministic unit, integration, security, and detector fixture tests;
 - baseline GitHub Actions checks on Linux, macOS, and Windows.
 
@@ -157,7 +158,10 @@ conflict instead of implementing it.
 - Keep stdout machine-readable when a structured output mode is selected.
 - Do not mix logs or progress indicators into JSON output.
 - JSON field names use `snake_case` and are treated as a compatibility contract
-  once documented as stable.
+  within their declared schema version. Before the first stable release,
+  intentional breaking changes still require a documented `schema_version`
+  increment; stable support guarantees will be defined for the first stable
+  release.
 - Explain detections with evidence; never output an unqualified vendor/product
   assertion from ambiguous signals.
 

@@ -291,14 +291,17 @@ dependencies or mutable aliasing. The current CLI configures HTTP first with
 `abort`, then DNS/TLS with `continue`. Browser collection is not yet connected.
 
 `internal/report` converts scanner results into a secret-minimized report model.
-The CLI renders that model as text by default or as stable, versioned JSON with
-`--format json`. Both formats explain detected and non-detected rules, including
-raw positive evidence, its correlation group, the selected maximum contribution,
-and later penalties. JSON V3 also records each analyzer's source, coverage status,
-and producer-sanitized warnings. They omit HTML, header/cookie values, and
-analyzer error details and sanitize every emitted URL. The JSON contract is documented in
-[JSON report schema V3](report-schema.md). An exportable local HTML report remains
-a later goal.
+The CLI renders that model as human-oriented text by default or as versioned,
+deterministic JSON with `--format json`. Both formats explain detected and
+non-detected rules, including raw positive evidence, its correlation group, the
+selected maximum contribution, and later penalties. JSON V3 also records each
+analyzer's source, coverage status, and producer-sanitized warnings. They omit
+HTML, header/cookie values, and analyzer error details and sanitize every emitted
+URL. The JSON schema is experimental until the first stable release; breaking
+pre-release changes still require a documented schema-version increment. The
+contract and text-output expectations are documented in
+[JSON report schema V3](report-schema.md). An exportable local HTML report
+remains a later goal.
 
 ## Proposed repository layout
 
