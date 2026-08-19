@@ -148,6 +148,10 @@ go run ./cmd/hemera scan https://example.com/
 go test ./...
 ```
 
+GitHub Actions runs formatting, vetting, unit and race tests, vulnerability
+scanning, and a CLI build on Linux. It also runs tests and a CLI build on macOS
+and Windows.
+
 The internal browser package uses `chromedp` but does not download a browser.
 Its opt-in integration test requires a locally installed Chromium or Chrome that
 can run with its sandbox enabled:
@@ -160,6 +164,9 @@ Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The current CLI does
 not start Chromium; browser navigation and signal capture remain planned.
 
 ## Documentation
+
+The repository roadmap is the authoritative source for implementation order and
+status
 
 - [Documentation index](docs/README.md)
 - [Vision, direction, and objectives](docs/vision-and-goals.md)

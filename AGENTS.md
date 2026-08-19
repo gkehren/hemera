@@ -34,7 +34,8 @@ Read these documents before making architectural or security-sensitive changes:
 - `docs/roadmap.md` — current milestones and delivery order;
 - `docs/security-and-ethics.md` — mandatory safety and ethical boundaries.
 
-Repository documentation is authoritative for the implementation.
+Repository documentation is authoritative for the implementation, and
+`docs/roadmap.md` is the sole source for implementation order and status.
 
 ## Current project state
 
@@ -48,7 +49,8 @@ Hemera is in early development. The repository currently contains:
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
 - human-readable and stable JSON V1 reports;
-- deterministic unit, integration, security, and detector fixture tests.
+- deterministic unit, integration, security, and detector fixture tests;
+- baseline GitHub Actions checks on Linux, macOS, and Windows.
 
 Do not document planned behavior as implemented. Browser navigation and signal
 capture, separate DNS/TLS analysis, broader detector coverage, and release
