@@ -1,0 +1,128 @@
+# Detector Limitations and Operational Boundaries
+
+This document provides a comprehensive analysis of the operational limitations,
+blind spots, and detection boundaries of Hemera's 13 built-in detector rules across
+all 7 supported vendor families.
+
+## 1. General Scanner Principles & Architectural Boundaries
+
+Hemera is an open-source, passive-first security scanner. Its observations are
+strictly governed by security and ethical requirements:
+
+- **No Active Exploit or Attack Probing:** Hemera never sends malicious SQLi/XSS
+  payloads or abnormal traversal sequences to trigger WAF blocks.
+- **No Challenge Bypassing or Solving:** Hemera never solves CAPTCHAs, executes
+  turnstile tokens, or spoofs browser fingerprints for evasion.
+- **No Aggressive Crawling or DoS:** Requests are bounded, throttled, and respect
+  resource limits.
+
+Consequently, Hemera's detectors rely on observable, public signals:
+1. Standard response headers emitted on benign or challenge responses;
+2. Client-side SDK script and iframe URLs;
+3. Standard DOM markup (challenge widgets, error wrappers);
+4. Diagnostic and session cookies;
+5. Canonical DNS CNAME records and TLS certificate metadata.
+
+---
+
+## 2. Per-Detector Limitation Profiles
+
+### 2.1 Cloudflare (`cloudflare.proxy`, `cloudflare.waf`, `cloudflare.bot_management`, `cloudflare.turnstile`)
+
+#### `cloudflare.proxy` (Category: `cdn_reverse_proxy`)
+- **Plan Tier Invisibility:** Cannot determine whether the domain is on Free, Pro, Business, or Enterprise tiers from public headers alone.
+- **Header Stripping:** Enterprise customers using Cloudflare Workers or custom Transform Rules may strip or rename `Server: cloudflare` and `cf-ray`. In such cases, detection relies on DNS CNAME (`*.cloudflare.net`) or TLS certificates.
+- **No Product Implication:** Detecting `cloudflare.proxy` does *not* imply that WAF, Bot Management, or Turnstile are active.
+
+#### `cloudflare.waf` (Category: `waf`)
+- **Passive-Only Visibility:** WAF rules configured in `Count` / `Log` mode or rules that allow benign traffic without attaching custom headers cannot be detected on public GET requests.
+- **Custom Error Pages:** Sites that replace standard Cloudflare 403 challenge pages with custom origin error templates lacking `cf-mitigated` or Cloudflare error markup will not trigger WAF detection.
+
+#### `cloudflare.bot_management` (Category: `bot_management`)
+- **Server-Side-Only Bot Management:** If Bot Management is deployed solely via Cloudflare Ruleset Engine evaluating backend heuristics without client-side JavaScript telemetry (`/cdn-cgi/challenge-platform/...`) or `__cf_bm` cookies, it is invisible to passive analysis.
+- **Cookie Disabling:** If a domain disables telemetry cookies and relies exclusively on API rate-limiting, detection is not possible on benign requests.
+
+#### `cloudflare.turnstile` (Category: `captcha_challenge`)
+- **Self-Hosted Proxy Wrappers:** If a website proxies the Turnstile client library through a first-party path (e.g. `/assets/turnstile.js`) to prevent ad-blocker filtering, passive HTTP analysis will not detect the script URL unless DOM markers (`cf-turnstile`) are present.
+- **Post-Hydration Dynamic Loading:** In Single Page Applications (SPAs), if the Turnstile script and widget container are only created after user interaction (e.g. clicking a modal button), initial page analysis will not observe it.
+
+---
+
+### 2.2 Google reCAPTCHA (`google.recaptcha`)
+
+#### `google.recaptcha` (Category: `captcha_challenge`)
+- **Version Granularity:** Currently detects the presence of Google reCAPTCHA (v2, v3, invisible, and Enterprise) under a unified rule ID (`google.recaptcha`). It does not split into distinct product IDs for v2 vs. v3.
+- **Server-Side Token Assessment:** reCAPTCHA v3 score-based validation occurs entirely on the customer backend (`siteverify` or Cloud API). If client scripts are masked or loaded through Google Tag Manager (GTM) dynamic triggers without DOM markers, passive HTML analysis may miss it until dynamic browser evaluation runs.
+- **Custom Alternate Hosts:** While official hosts (`recaptcha.net`, `google.com/recaptcha`, `recaptcha.enterprise.com`) are supported, custom private reverse proxies are not detected statically.
+
+---
+
+### 2.3 Amazon Web Services (`aws.cloudfront`, `aws.waf`)
+
+#### `aws.cloudfront` (Category: `cdn_reverse_proxy`)
+- **Upstream S3 Passthrough:** Direct Amazon S3 origin buckets emit `x-amz-request-id` and `x-amz-id-2`. Hemera specifically requires CloudFront headers (`x-amz-cf-id`, `x-amz-cf-pop`, `Server: CloudFront`) to avoid false positives.
+- **Custom Header Masking:** CloudFront distributions configured with custom response header policies that remove `Server` and `x-amz-cf-id` rely on DNS CNAME (`*.cloudfront.net`) fallback.
+
+#### `aws.waf` (Category: `waf`)
+- **ALB / API Gateway Backend WAFs:** AWS WAF deployed on Application Load Balancers or API Gateways that inspect traffic silently in `Count` or `Allow` mode emit no public headers on benign requests.
+- **Passive Non-Interference:** Unless the site integrates the AWS WAF JavaScript SDK (`awswaf.com/.../sdk.js`), emits `x-amzn-waf-action`, or serves a standard 405/403 block interstitial, AWS WAF is invisible to passive analysis.
+
+---
+
+### 2.4 DataDome (`datadome.bot_protection`)
+
+#### `datadome.bot_protection` (Category: `bot_management`)
+- **Server-Side API Enforcer Mode:** DataDome modules running on NGINX/HAProxy or cloud middleware that only inspect backend requests and do not inject the client-side JavaScript tag (`js.datadome.co/tags.js`) or `x-datadome` headers cannot be detected on benign requests.
+- **Cookie Ambiguity Protection:** A standalone `datadome` cookie alone only awards a score of 40 (Low confidence), deliberately below the 75 threshold, to prevent false positives from stale cookies.
+
+---
+
+### 2.5 Akamai Technologies (`akamai.edge`, `akamai.bot_manager`, `akamai.app_and_api_protector`)
+
+#### `akamai.edge` (Category: `cdn_reverse_proxy`)
+- **Header Sanitization:** Enterprise edge configurations that strip `Server: AkamaiGHost` and `x-akamai-transformed` rely on DNS CNAME (`*.edgekey.net`, `*.akamaiedge.net`, `*.edgesuite.net`) or TLS certificate issuer verification.
+- **Prerequisite Role:** `akamai.edge` serves as an infrastructure prerequisite (`requires: ["akamai.edge"]`) for Akamai Bot Manager and App & API Protector.
+
+#### `akamai.bot_manager` (Category: `bot_management`)
+- **API-Only Endpoint Protections:** Backend API protections running without Akamai client sensor scripts (`/_sec/verify.js`, `/akam/13/`) or `_abck` cookies cannot be detected passively.
+- **Dynamic Sensor Obfuscation:** Custom sensor paths generated per-customer require correlation with `_abck` telemetry cookies.
+
+#### `akamai.app_and_api_protector` (Category: `waf`)
+- **Alert-Only Mode:** Rules configured in `Alert` mode without `x-akamai-session-info` headers or standard Reference Error block pages (`Reference #18...`) do not emit signals on benign traffic.
+- **Custom Origin Error Masking:** Block pages that do not preserve Akamai Reference numbers or GHost error structures will not trigger WAF detection.
+
+---
+
+### 2.6 hCaptcha (`hcaptcha.challenge`)
+
+#### `hcaptcha.challenge` (Category: `captcha_challenge`)
+- **First-Party Script Proxies:** Sites proxying `js.hcaptcha.com` through an internal domain without `h-captcha` DOM containers are not detected statically.
+- **Dynamic Post-Interaction Rendering:** SPAs that inject the hCaptcha script only upon form submission or checkout validation will not be observed on static page fetch.
+
+---
+
+### 2.7 Arkose Labs (`arkoselabs.matchkey`)
+
+#### `arkoselabs.matchkey` (Category: `captcha_challenge`)
+- **Custom Client API Hostnames:** Arkose MatchKey allows enterprise customers to configure custom CNAME subdomains for `client-api.arkoselabs.com`. If configured under a custom domain without `arkose-enforcement` DOM markers or `setupArkose` callbacks, static HTTP detection will not observe it.
+- **Server-Side Verify Mode:** Verification performed exclusively via backend API without client challenge frames on initial page view is invisible passively.
+
+---
+
+## 3. Summary Matrix of Limitations
+
+| Detector Rule | Primary Limitation | Evasion / Masking Vector | Mitigation in Hemera |
+| --- | --- | --- | --- |
+| `cloudflare.proxy` | Plan tier invisibility | Strip `Server` / `cf-ray` | Fallback to DNS CNAME / TLS |
+| `cloudflare.waf` | Invisible in Count/Log mode | Custom origin error pages | Requires decisive headers / block DOM |
+| `cloudflare.bot_management` | Invisible in server-only mode | No JS telemetry / no cookie | Requires SDK script or `__cf_bm` |
+| `cloudflare.turnstile` | Invisible if dynamically loaded | First-party script proxy | DOM marker correlation (`cf-turnstile`) |
+| `google.recaptcha` | Unified rule across v2/v3/Enterprise | Masked via GTM tag | Supports alternate hosts & DOM markers |
+| `aws.cloudfront` | Upstream S3 header passthrough | Strip `Server` header | Exact CloudFront header matching & DNS |
+| `aws.waf` | Invisible in silent ALB/API mode | No client SDK embedded | Matches SDK, action headers, block pages |
+| `datadome.bot_protection` | Invisible in server-only API mode | Masked JS tag | Requires JS tag, header, or cookie |
+| `akamai.edge` | Stripped `Server: AkamaiGHost` | Custom edge rules | Fallback to DNS CNAME / TLS |
+| `akamai.bot_manager` | Invisible on API-only endpoints | Obfuscated sensor path | Correlation with `_abck` cookie |
+| `akamai.app_and_api_protector` | Invisible in Alert-only mode | Custom error template | Requires Reference # or session info |
+| `hcaptcha.challenge` | Invisible if dynamically rendered | First-party reverse proxy | DOM container matching (`h-captcha`) |
+| `arkoselabs.matchkey` | Invisible on custom subdomains | Custom CNAME wrapper | DOM wrapper and callback matching |

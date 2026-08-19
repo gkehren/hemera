@@ -59,7 +59,7 @@ Detections:
 
 ## Detector coverage
 
-Hemera ships built-in detector rules with explicit product-level separation across 5 vendor families:
+Hemera ships built-in detector rules with explicit product-level separation across 7 vendor families:
 
 - **Cloudflare:**
   - `cloudflare.proxy` (Reverse Proxy / CDN edge infrastructure);
@@ -77,14 +77,14 @@ Hemera ships built-in detector rules with explicit product-level separation acro
   - `akamai.edge` (Akamai Edge reverse proxy infrastructure);
   - `akamai.bot_manager` (Akamai Bot Manager JavaScript sensors and telemetry cookies);
   - `akamai.app_and_api_protector` (App & API Protector / Kona Site Defender WAF reference error block pages).
+- **hCaptcha:**
+  - `hcaptcha.challenge` (hCaptcha client API script and challenge widget).
+- **Arkose Labs:**
+  - `arkoselabs.matchkey` (Arkose MatchKey / FunCAPTCHA client API script and enforcement challenge).
 
 Vendor infrastructure alone does not imply that a specific product is enabled.
 For example, detecting `aws.cloudfront` or `akamai.edge` never automatically
 produces an `aws.waf`, `akamai.bot_manager`, or `akamai.app_and_api_protector` detection.
-
-Later detector families are planned around:
-
-- hCaptcha and Arkose Labs, subject to signature quality.
 
 ## Architecture
 
@@ -259,6 +259,8 @@ status
 - [Roadmap](docs/roadmap.md)
 - [Security and ethical boundaries](docs/security-and-ethics.md)
 - [Detector family support standard](docs/detector-support-standard.md)
+- [Regression corpus and accuracy standards](docs/regression-and-accuracy.md)
+- [Detector limitations and operational boundaries](docs/detector-limitations.md)
 
 ## Contributing
 

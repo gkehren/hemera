@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>hCaptcha Positive Fixture</title>
+  <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+</head>
+<body>
+  <h1>Account Registration</h1>
+  <form action="/register" method="POST">
+    <input type="text" name="username" placeholder="Username" required>
+    <div class="h-captcha" data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>
+    <button type="submit">Submit</button>
+  </form>
+</body>
+</html>

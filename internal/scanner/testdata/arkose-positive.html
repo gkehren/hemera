@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Arkose MatchKey Positive Fixture</title>
+  <script src="https://client-api.arkoselabs.com/v2/api.js" data-callback="setupArkose" async defer></script>
+</head>
+<body>
+  <h1>Secure Login</h1>
+  <form action="/login" method="POST">
+    <input type="text" name="email" placeholder="Email" required>
+    <div id="arkose-enforcement"></div>
+    <button type="submit">Sign In</button>
+  </form>
+  <script>
+    function setupArkose(myArkose) {
+      myArkose.run();
+    }
+  </script>
+</body>
+</html>

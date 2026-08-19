@@ -354,3 +354,24 @@ func TestBuiltInRulesAreDocumentedInSupportStandard(t *testing.T) {
 		}
 	}
 }
+
+func TestBuiltInRulesHaveDocumentedLimitations(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	docPath := filepath.Join("..", "..", "docs", "detector-limitations.md")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+	docContent := string(data)
+
+	for _, rule := range ruleSet.Rules {
+		if !strings.Contains(docContent, rule.ID) {
+			t.Errorf("rule %q is not mentioned in %s", rule.ID, docPath)
+		}
+	}
+}

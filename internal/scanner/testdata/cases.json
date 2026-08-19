@@ -14,7 +14,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -27,7 +29,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -40,7 +44,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -58,7 +64,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -71,7 +79,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -84,7 +94,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -102,7 +114,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -115,7 +129,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -128,7 +144,109 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "hcaptcha documented client",
+    "fixture": "hcaptcha-positive.html",
+    "detected": ["hcaptcha.challenge"],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 75,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "high",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": ["hcaptcha-client-script", "hcaptcha-html-marker"],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "arkose matchkey documented client",
+    "fixture": "arkose-positive.html",
+    "detected": ["arkoselabs.matchkey"],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 75
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "high"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": ["arkose-client-script", "arkose-html-marker", "arkose-inline-call"]
     }
   },
   {
@@ -151,7 +269,9 @@
       "datadome.bot_protection": 35,
       "akamai.edge": 25,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 35,
+      "arkoselabs.matchkey": 35
     },
     "levels": {
       "cloudflare.proxy": "low",
@@ -164,7 +284,9 @@
       "datadome.bot_protection": "low",
       "akamai.edge": "low",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "low",
+      "arkoselabs.matchkey": "low"
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-cache-header"],
@@ -177,7 +299,9 @@
       "datadome.bot_protection": ["datadome-marker"],
       "akamai.edge": ["akamai-cacheable-header"],
       "akamai.bot_manager": ["akamai-bm-marker"],
-      "akamai.app_and_api_protector": ["akamai-waf-marker"]
+      "akamai.app_and_api_protector": ["akamai-waf-marker"],
+      "hcaptcha.challenge": ["hcaptcha-html-marker", "hcaptcha-inline-call"],
+      "arkoselabs.matchkey": ["arkose-html-marker", "arkose-inline-call"]
     }
   },
   {
@@ -195,7 +319,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -208,7 +334,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -221,7 +349,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -239,7 +369,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -252,7 +384,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -265,7 +399,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -289,7 +425,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "high",
@@ -302,7 +440,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header", "cloudflare-cache-header"],
@@ -315,7 +455,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -339,7 +481,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "high",
@@ -352,7 +496,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
@@ -365,7 +511,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -388,7 +536,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "high",
@@ -401,7 +551,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
@@ -414,7 +566,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -439,7 +593,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -452,7 +608,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -465,7 +623,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -489,7 +649,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -502,7 +664,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -515,7 +679,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -537,7 +703,9 @@
       "datadome.bot_protection": 100,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -550,7 +718,9 @@
       "datadome.bot_protection": "very_high",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -563,7 +733,9 @@
       "datadome.bot_protection": ["datadome-js-tag", "datadome-header", "datadome-cookie"],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -584,7 +756,9 @@
       "datadome.bot_protection": 40,
       "akamai.edge": 0,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -597,7 +771,9 @@
       "datadome.bot_protection": "low",
       "akamai.edge": "not_detected",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -610,7 +786,9 @@
       "datadome.bot_protection": ["datadome-cookie"],
       "akamai.edge": [],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -634,7 +812,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 75,
       "akamai.bot_manager": 40,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -647,7 +827,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "high",
       "akamai.bot_manager": "low",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -660,7 +842,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": ["akamai-ghost-server-header", "akamai-transformed-header", "akamai-cacheable-header"],
       "akamai.bot_manager": ["akamai-bm-abck-cookie"],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -683,7 +867,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 75,
       "akamai.bot_manager": 100,
-      "akamai.app_and_api_protector": 0
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -696,7 +882,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "high",
       "akamai.bot_manager": "very_high",
-      "akamai.app_and_api_protector": "not_detected"
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -709,7 +897,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": ["akamai-ghost-server-header", "akamai-transformed-header"],
       "akamai.bot_manager": ["akamai-bm-sensor-script", "akamai-bm-abck-cookie"],
-      "akamai.app_and_api_protector": []
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -732,7 +922,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 75,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 100
+      "akamai.app_and_api_protector": 100,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -745,7 +937,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "high",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "very_high"
+      "akamai.app_and_api_protector": "very_high",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -758,7 +952,9 @@
       "datadome.bot_protection": [],
       "akamai.edge": ["akamai-ghost-server-header"],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": ["akamai-waf-session-header", "akamai-waf-block-page", "akamai-waf-marker"]
+      "akamai.app_and_api_protector": ["akamai-waf-session-header", "akamai-waf-block-page", "akamai-waf-marker"],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   },
   {
@@ -780,7 +976,9 @@
       "datadome.bot_protection": 0,
       "akamai.edge": 75,
       "akamai.bot_manager": 0,
-      "akamai.app_and_api_protector": 35
+      "akamai.app_and_api_protector": 35,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
     },
     "levels": {
       "cloudflare.proxy": "not_detected",
@@ -793,7 +991,9 @@
       "datadome.bot_protection": "not_detected",
       "akamai.edge": "high",
       "akamai.bot_manager": "not_detected",
-      "akamai.app_and_api_protector": "low"
+      "akamai.app_and_api_protector": "low",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
     },
     "evidence": {
       "cloudflare.proxy": [],
@@ -806,7 +1006,272 @@
       "datadome.bot_protection": [],
       "akamai.edge": ["akamai-ghost-server-header"],
       "akamai.bot_manager": [],
-      "akamai.app_and_api_protector": ["akamai-waf-action-header"]
+      "akamai.app_and_api_protector": ["akamai-waf-action-header"],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "tech blog discussion",
+    "fixture": "tech-blog-discussion.html",
+    "detected": [],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 35,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 30,
+      "google.recaptcha": 30,
+      "aws.cloudfront": 0,
+      "aws.waf": 30,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 30,
+      "arkoselabs.matchkey": 35
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "low",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "low",
+      "google.recaptcha": "low",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "low",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "low",
+      "arkoselabs.matchkey": "low"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": ["cloudflare-waf-marker"],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": ["turnstile-html-marker"],
+      "google.recaptcha": ["recaptcha-html-marker"],
+      "aws.cloudfront": [],
+      "aws.waf": ["aws-waf-marker"],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": ["akamai-waf-marker"],
+      "hcaptcha.challenge": ["hcaptcha-html-marker"],
+      "arkoselabs.matchkey": ["arkose-html-marker", "arkose-inline-call"]
+    }
+  },
+  {
+    "name": "direct origin custom headers",
+    "fixture": "direct-origin-custom-headers.html",
+    "headers": {
+      "Server": "Apache/2.4.52 (Ubuntu)",
+      "X-Custom-Cache": "HIT",
+      "X-Amz-Request-Id": "1234567890ABCDEF",
+      "X-Datadome-Info": "none",
+      "Set-Cookie": "app_session=synthetic-session-id; Path=/; HttpOnly"
+    },
+    "detected": [],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "adversarial lookalike domains",
+    "fixture": "adversarial-lookalike-domains.html",
+    "detected": [],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "commented and dormant scripts",
+    "fixture": "commented-and-dormant-scripts.html",
+    "detected": [],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 30,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "low",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": ["hcaptcha-html-marker"],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "multi-protection coexistence",
+    "fixture": "multi-protection-coexistence.html",
+    "headers": {
+      "Server": "CloudFront",
+      "x-amz-cf-id": "multi-cf-id-1234567890==",
+      "x-amzn-waf-action": "allow",
+      "Set-Cookie": "aws-waf-token=synthetic-waf-token"
+    },
+    "detected": ["google.recaptcha", "aws.cloudfront", "aws.waf"],
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 75,
+      "aws.cloudfront": 75,
+      "aws.waf": 100,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "high",
+      "aws.cloudfront": "high",
+      "aws.waf": "very_high",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": ["recaptcha-client-script", "recaptcha-html-marker"],
+      "aws.cloudfront": ["aws-cf-id-header", "aws-cf-server-header"],
+      "aws.waf": ["aws-waf-sdk-script", "aws-waf-action-header", "aws-waf-token-cookie"],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
     }
   }
 ]
