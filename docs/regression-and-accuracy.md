@@ -18,7 +18,7 @@ versioned regression corpus comprising:
 
 ### Measured Accuracy Metrics (Corpus Baseline)
 
-The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 24-scenario corpus across all 13 built-in rules:
+The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 27-scenario corpus across all 13 built-in rules:
 
 $$\text{False Positive Rate (FPR)} = \frac{\text{FP}}{\text{FP} + \text{TN}} = 0.0\%$$
 
@@ -73,7 +73,7 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 
 ## 4. Regression Corpus Fixture Inventory
 
-The regression suite in `internal/scanner/testdata/cases.json` contains 25 synthetic test cases:
+The regression suite in `internal/scanner/testdata/cases.json` contains 27 synthetic test cases:
 
 1. `turnstile documented client` &mdash; `turnstile-positive.html`
 2. `recaptcha documented client` &mdash; `recaptcha-positive.html`
@@ -84,19 +84,21 @@ The regression suite in `internal/scanner/testdata/cases.json` contains 25 synth
 7. `unrelated protection page` &mdash; `negative.html`
 8. `documentation text regression` &mdash; `documentation-regression.html`
 9. `cloudflare reverse proxy edge` &mdash; `cloudflare-proxy-positive.html`
-10. `cloudflare challenge page` &mdash; `cloudflare-waf-challenge.html`
-11. `cloudflare bot protection telemetry` &mdash; `cloudflare-bot-management-positive.html`
-12. `cloudflare challenge ambiguity` &mdash; `ambiguous-markers.html` with Cloudflare proxy headers
-13. `aws cloudfront edge` &mdash; `aws-cloudfront-positive.html`
-14. `aws waf sdk integration` &mdash; `aws-waf-positive.html`
-15. `datadome bot protection` &mdash; `datadome-positive.html`
-16. `datadome cookie ambiguity` &mdash; `negative.html` with DataDome cookie
-17. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
-18. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
-19. `akamai waf block page` &mdash; `akamai-waf-positive.html`
-20. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
-21. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
-22. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
-23. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
-24. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
-25. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)
+10. `cloudflare challenge page` &mdash; `cloudflare-challenge-page.html`
+11. `cloudflare generic block page` &mdash; `cloudflare-block-page.html`
+12. `cloudflare bot protection telemetry` &mdash; `cloudflare-bot-protection-positive.html`
+13. `cloudflare bot protection manual api` &mdash; `cloudflare-bot-protection-api.html`
+14. `cloudflare challenge ambiguity` &mdash; `ambiguous-markers.html` with Cloudflare proxy headers
+15. `aws cloudfront edge` &mdash; `aws-cloudfront-positive.html`
+16. `aws waf sdk integration` &mdash; `aws-waf-positive.html`
+17. `datadome bot protection` &mdash; `datadome-positive.html`
+18. `datadome cookie ambiguity` &mdash; `negative.html` with DataDome cookie
+19. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
+20. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
+21. `akamai waf block page` &mdash; `akamai-waf-positive.html`
+22. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
+23. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
+24. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
+25. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
+26. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
+27. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)

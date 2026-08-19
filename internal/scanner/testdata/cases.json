@@ -290,7 +290,7 @@
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-cache-header"],
-      "cloudflare.challenge_page": ["cloudflare-challenge-marker"],
+      "cloudflare.challenge_page": ["cloudflare-challenge-block-marker"],
       "cloudflare.bot_protection": [],
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker", "recaptcha-inline-call"],
@@ -462,7 +462,7 @@
   },
   {
     "name": "cloudflare challenge page",
-    "fixture": "cloudflare-waf-challenge.html",
+    "fixture": "cloudflare-challenge-page.html",
     "status": 403,
     "headers": {
       "Server": "cloudflare",
@@ -502,7 +502,63 @@
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
-      "cloudflare.challenge_page": ["cloudflare-challenge-mitigated-header", "cloudflare-challenge-block-page", "cloudflare-challenge-marker"],
+      "cloudflare.challenge_page": ["cloudflare-challenge-mitigated-header", "cloudflare-challenge-script"],
+      "cloudflare.bot_protection": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
+    "name": "cloudflare generic block page",
+    "fixture": "cloudflare-block-page.html",
+    "status": 403,
+    "headers": {
+      "Server": "cloudflare",
+      "cf-ray": "8e5f123456789abc-IAD",
+      "cf-error-code": "1020"
+    },
+    "detected": ["cloudflare.proxy"],
+    "scores": {
+      "cloudflare.proxy": 75,
+      "cloudflare.challenge_page": 70,
+      "cloudflare.bot_protection": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "high",
+      "cloudflare.challenge_page": "medium",
+      "cloudflare.bot_protection": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
+      "cloudflare.challenge_page": ["cloudflare-challenge-error-header", "cloudflare-challenge-block-marker"],
       "cloudflare.bot_protection": [],
       "cloudflare.turnstile": [],
       "google.recaptcha": [],
@@ -518,7 +574,7 @@
   },
   {
     "name": "cloudflare bot protection telemetry",
-    "fixture": "cloudflare-bot-management-positive.html",
+    "fixture": "cloudflare-bot-protection-positive.html",
     "headers": {
       "Server": "cloudflare",
       "cf-ray": "8e5f123456789abc-IAD",
@@ -572,6 +628,60 @@
     }
   },
   {
+    "name": "cloudflare bot protection manual api",
+    "fixture": "cloudflare-bot-protection-api.html",
+    "headers": {
+      "Server": "cloudflare",
+      "cf-ray": "8e5f123456789abc-IAD"
+    },
+    "detected": ["cloudflare.proxy", "cloudflare.bot_protection"],
+    "scores": {
+      "cloudflare.proxy": 75,
+      "cloudflare.challenge_page": 0,
+      "cloudflare.bot_protection": 75,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0,
+      "aws.cloudfront": 0,
+      "aws.waf": 0,
+      "datadome.bot_protection": 0,
+      "akamai.edge": 0,
+      "akamai.bot_manager": 0,
+      "akamai.app_and_api_protector": 0,
+      "hcaptcha.challenge": 0,
+      "arkoselabs.matchkey": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "high",
+      "cloudflare.challenge_page": "not_detected",
+      "cloudflare.bot_protection": "high",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected",
+      "aws.cloudfront": "not_detected",
+      "aws.waf": "not_detected",
+      "datadome.bot_protection": "not_detected",
+      "akamai.edge": "not_detected",
+      "akamai.bot_manager": "not_detected",
+      "akamai.app_and_api_protector": "not_detected",
+      "hcaptcha.challenge": "not_detected",
+      "arkoselabs.matchkey": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
+      "cloudflare.challenge_page": [],
+      "cloudflare.bot_protection": ["cloudflare-bot-telemetry-script"],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": [],
+      "aws.cloudfront": [],
+      "aws.waf": [],
+      "datadome.bot_protection": [],
+      "akamai.edge": [],
+      "akamai.bot_manager": [],
+      "akamai.app_and_api_protector": [],
+      "hcaptcha.challenge": [],
+      "arkoselabs.matchkey": []
+    }
+  },
+  {
     "name": "cloudflare challenge ambiguity",
     "fixture": "ambiguous-markers.html",
     "headers": {
@@ -612,7 +722,7 @@
     },
     "evidence": {
       "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header", "cloudflare-cache-header"],
-      "cloudflare.challenge_page": ["cloudflare-challenge-marker"],
+      "cloudflare.challenge_page": ["cloudflare-challenge-block-marker"],
       "cloudflare.bot_protection": [],
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker", "recaptcha-inline-call"],
@@ -1102,7 +1212,7 @@
     },
     "evidence": {
       "cloudflare.proxy": [],
-      "cloudflare.challenge_page": ["cloudflare-challenge-marker"],
+      "cloudflare.challenge_page": ["cloudflare-challenge-block-marker"],
       "cloudflare.bot_protection": [],
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker"],
