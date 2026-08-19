@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "rules": [
     {
       "id": "cloudflare.turnstile",
@@ -15,6 +15,7 @@
           {
             "signal": {
               "id": "turnstile-client-script",
+              "group": "static_integration",
               "description": "Documented Turnstile JavaScript API URL",
               "type": "script_url",
               "value": {
@@ -27,6 +28,7 @@
           {
             "signal": {
               "id": "turnstile-html-marker",
+              "group": "static_integration",
               "description": "Static cf-turnstile widget marker",
               "type": "page_content",
               "value": {
@@ -53,6 +55,7 @@
           {
             "signal": {
               "id": "recaptcha-client-script",
+              "group": "static_integration",
               "description": "Documented standard or Enterprise reCAPTCHA JavaScript API URL",
               "type": "script_url",
               "value": {
@@ -65,6 +68,7 @@
           {
             "signal": {
               "id": "recaptcha-html-marker",
+              "group": "static_integration",
               "description": "Static g-recaptcha widget marker",
               "type": "page_content",
               "value": {
@@ -77,6 +81,7 @@
           {
             "signal": {
               "id": "recaptcha-inline-call",
+              "group": "static_integration",
               "description": "Static grecaptcha render or execute call",
               "type": "page_content",
               "value": {

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	// CurrentSchemaVersion is the detector rule schema understood by Hemera.
-	CurrentSchemaVersion = 1
+	// CurrentSchemaVersion is the latest detector rule schema understood by Hemera.
+	CurrentSchemaVersion = 2
+	schemaVersionV1      = 1
 	// MaxDocumentBytes bounds a decoded detector document.
 	MaxDocumentBytes   = 1 << 20
 	maxRules           = 1000
@@ -62,7 +63,7 @@ var validCategories = map[Category]struct{}{
 	CategoryThirdPartySecurity:   {},
 }
 
-// Valid reports whether the category is part of schema version 1.
+// Valid reports whether the category is supported by the rule schemas.
 func (c Category) Valid() bool {
 	_, ok := validCategories[c]
 	return ok
@@ -101,6 +102,7 @@ type Condition struct {
 // Evidence matches one normalized signal and assigns it a score weight.
 type Evidence struct {
 	ID          string           `json:"id"`
+	Group       string           `json:"group,omitempty"`
 	Description string           `json:"description,omitempty"`
 	Type        model.SignalType `json:"type"`
 	Source      *TextPattern     `json:"source,omitempty"`
@@ -209,8 +211,8 @@ func rejectDuplicateObjectKeys(data []byte) error {
 
 // Validate checks all schema invariants and cross-rule references.
 func (s RuleSet) Validate() error {
-	if s.SchemaVersion != CurrentSchemaVersion {
-		return schemaError("schema_version must be %d", CurrentSchemaVersion)
+	if s.SchemaVersion != schemaVersionV1 && s.SchemaVersion != CurrentSchemaVersion {
+		return schemaError("schema_version must be %d or %d", schemaVersionV1, CurrentSchemaVersion)
 	}
 	if len(s.Rules) == 0 {
 		return schemaError("rules must not be empty")
@@ -221,7 +223,7 @@ func (s RuleSet) Validate() error {
 
 	byID := make(map[string]Rule, len(s.Rules))
 	for i, rule := range s.Rules {
-		if err := validateRule(rule); err != nil {
+		if err := validateRule(rule, s.SchemaVersion); err != nil {
 			return schemaError("rules[%d]: %v", i, err)
 		}
 		if _, duplicate := byID[rule.ID]; duplicate {
@@ -267,7 +269,7 @@ func (s RuleSet) Validate() error {
 	return nil
 }
 
-func validateRule(rule Rule) error {
+func validateRule(rule Rule, schemaVersion int) error {
 	if !identifierPattern.MatchString(rule.ID) {
 		return fmt.Errorf("id %q must be a lowercase identifier", rule.ID)
 	}
@@ -288,20 +290,27 @@ func validateRule(rule Rule) error {
 	}
 
 	ids := make(map[string]struct{})
+	positiveGroups := make(map[string]struct{})
 	nodes := 0
-	if err := validateCondition(rule.Match, 1, &nodes, ids); err != nil {
+	if err := validateCondition(rule.Match, 1, &nodes, ids, positiveGroups, schemaVersion); err != nil {
 		return fmt.Errorf("match: %w", err)
 	}
-	if rule.MinimumEvidence > nodes {
-		return fmt.Errorf("minimum_evidence %d exceeds %d positive predicates", rule.MinimumEvidence, nodes)
+	availableEvidence := nodes
+	evidenceLabel := "positive predicates"
+	if schemaVersion == CurrentSchemaVersion {
+		availableEvidence = len(positiveGroups)
+		evidenceLabel = "positive evidence groups"
+	}
+	if rule.MinimumEvidence > availableEvidence {
+		return fmt.Errorf("minimum_evidence %d exceeds %d %s", rule.MinimumEvidence, availableEvidence, evidenceLabel)
 	}
 	for i, evidence := range rule.NegativeEvidence {
-		if err := validateEvidence(evidence, ids); err != nil {
+		if err := validatePenaltyEvidence(evidence, ids); err != nil {
 			return fmt.Errorf("negative_evidence[%d]: %w", i, err)
 		}
 	}
 	for i, evidence := range rule.AmbiguousEvidence {
-		if err := validateEvidence(evidence, ids); err != nil {
+		if err := validatePenaltyEvidence(evidence, ids); err != nil {
 			return fmt.Errorf("ambiguous_evidence[%d]: %w", i, err)
 		}
 	}
@@ -324,7 +333,14 @@ func validateRule(rule Rule) error {
 	return nil
 }
 
-func validateCondition(condition Condition, depth int, nodes *int, ids map[string]struct{}) error {
+func validateCondition(
+	condition Condition,
+	depth int,
+	nodes *int,
+	ids map[string]struct{},
+	groups map[string]struct{},
+	schemaVersion int,
+) error {
 	if depth > maxConditionDepth {
 		return fmt.Errorf("condition depth exceeds %d", maxConditionDepth)
 	}
@@ -346,7 +362,14 @@ func validateCondition(condition Condition, depth int, nodes *int, ids map[strin
 		if *nodes > maxEvidencePerRule {
 			return fmt.Errorf("positive evidence exceeds the limit of %d", maxEvidencePerRule)
 		}
-		return validateEvidence(*condition.Signal, ids)
+		if err := validateEvidence(*condition.Signal, ids); err != nil {
+			return err
+		}
+		if schemaVersion == schemaVersionV1 && condition.Signal.Group != "" {
+			return errors.New("group requires schema_version 2")
+		}
+		groups[evidenceGroup(*condition.Signal)] = struct{}{}
+		return nil
 	}
 	children := condition.All
 	if condition.Any != nil {
@@ -356,7 +379,7 @@ func validateCondition(condition Condition, depth int, nodes *int, ids map[strin
 		return errors.New("condition group must not be empty")
 	}
 	for i, child := range children {
-		if err := validateCondition(child, depth+1, nodes, ids); err != nil {
+		if err := validateCondition(child, depth+1, nodes, ids, groups, schemaVersion); err != nil {
 			return fmt.Errorf("child[%d]: %w", i, err)
 		}
 	}
@@ -371,6 +394,9 @@ func validateEvidence(evidence Evidence, ids map[string]struct{}) error {
 		return fmt.Errorf("duplicate evidence id %q", evidence.ID)
 	}
 	ids[evidence.ID] = struct{}{}
+	if evidence.Group != "" && !identifierPattern.MatchString(evidence.Group) {
+		return fmt.Errorf("group %q must be a lowercase identifier", evidence.Group)
+	}
 	if !evidence.Type.Valid() {
 		return fmt.Errorf("signal type %q is invalid", evidence.Type)
 	}
@@ -392,6 +418,20 @@ func validateEvidence(evidence Evidence, ids map[string]struct{}) error {
 		return errors.New("at least one of source, key, value, or url is required")
 	}
 	return nil
+}
+
+func validatePenaltyEvidence(evidence Evidence, ids map[string]struct{}) error {
+	if evidence.Group != "" {
+		return errors.New("group is only supported for positive evidence")
+	}
+	return validateEvidence(evidence, ids)
+}
+
+func evidenceGroup(evidence Evidence) string {
+	if evidence.Group != "" {
+		return evidence.Group
+	}
+	return evidence.ID
 }
 
 func (p TextPattern) validate() error {

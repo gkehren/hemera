@@ -32,6 +32,23 @@ type AppliedConflict struct {
 	Penalty float64
 }
 
+// ScoredEvidence ties one matched predicate to its raw and effective score
+// contributions.
+type ScoredEvidence struct {
+	Match           rules.EvidenceMatch
+	RawContribution float64
+	Contribution    float64
+}
+
+// EvidenceGroup records how correlated positive evidence was aggregated.
+type EvidenceGroup struct {
+	ID                 string
+	EvidenceIDs        []string
+	SelectedEvidenceID string
+	RawContribution    float64
+	Contribution       float64
+}
+
 // Detection contains the score and all evidence needed to explain one rule.
 type Detection struct {
 	RuleID                  string
@@ -45,9 +62,10 @@ type Detection struct {
 	EvidenceScore           float64
 	Score                   float64
 	Level                   Level
-	PositiveEvidence        []rules.EvidenceMatch
-	NegativeEvidence        []rules.EvidenceMatch
-	AmbiguousEvidence       []rules.EvidenceMatch
+	PositiveEvidence        []ScoredEvidence
+	PositiveEvidenceGroups  []EvidenceGroup
+	NegativeEvidence        []ScoredEvidence
+	AmbiguousEvidence       []ScoredEvidence
 	MissingPositiveEvidence []string
 	MissingDependencies     []string
 	AppliedConflicts        []AppliedConflict
@@ -91,8 +109,22 @@ func scoreMatches(ruleSet rules.RuleSet, matches []rules.MatchResult) ([]Detecti
 		matchByID[match.RuleID] = match
 	}
 	positiveScores := make(map[string]float64, len(matches))
+	positiveGroups := make(map[string][]EvidenceGroup, len(matches))
+	positiveEvidence := make(map[string][]ScoredEvidence, len(matches))
+	negativeEvidence := make(map[string][]ScoredEvidence, len(matches))
+	ambiguousEvidence := make(map[string][]ScoredEvidence, len(matches))
+	baseEvidenceScores := make(map[string]float64, len(matches))
 	for _, match := range matches {
-		positiveScores[match.RuleID] = weighted(match.PositiveEvidence)
+		active := match.Candidate()
+		positiveScore, scoredPositive, groups := scorePositive(match.PositiveEvidence, active)
+		negativeScore, scoredNegative := scorePenalties(match.NegativeEvidence, active)
+		ambiguousScore, scoredAmbiguous := scorePenalties(match.AmbiguousEvidence, active)
+		positiveScores[match.RuleID] = positiveScore
+		positiveGroups[match.RuleID] = groups
+		positiveEvidence[match.RuleID] = scoredPositive
+		negativeEvidence[match.RuleID] = scoredNegative
+		ambiguousEvidence[match.RuleID] = scoredAmbiguous
+		baseEvidenceScores[match.RuleID] = positiveScore + negativeScore + ambiguousScore
 	}
 
 	ruleByID := make(map[string]rules.Rule, len(ruleSet.Rules))
@@ -107,9 +139,7 @@ func scoreMatches(ruleSet rules.RuleSet, matches []rules.MatchResult) ([]Detecti
 		if !match.Candidate() {
 			continue
 		}
-		score := positiveScores[rule.ID]
-		score -= weighted(match.NegativeEvidence)
-		score -= weighted(match.AmbiguousEvidence)
+		score := baseEvidenceScores[rule.ID]
 		for _, conflict := range rule.Conflicts {
 			other, ok := matchByID[conflict.RuleID]
 			if ok && other.Candidate() && positiveScores[conflict.RuleID] > 0 {
@@ -170,9 +200,10 @@ func scoreMatches(ruleSet rules.RuleSet, matches []rules.MatchResult) ([]Detecti
 			EvidenceScore:           evidenceScores[rule.ID],
 			Score:                   score,
 			Level:                   LevelForScore(score),
-			PositiveEvidence:        match.PositiveEvidence,
-			NegativeEvidence:        match.NegativeEvidence,
-			AmbiguousEvidence:       match.AmbiguousEvidence,
+			PositiveEvidence:        positiveEvidence[rule.ID],
+			PositiveEvidenceGroups:  positiveGroups[rule.ID],
+			NegativeEvidence:        negativeEvidence[rule.ID],
+			AmbiguousEvidence:       ambiguousEvidence[rule.ID],
 			MissingPositiveEvidence: match.MissingPositiveEvidence,
 			MissingDependencies:     missingDependencies,
 			AppliedConflicts:        conflictsByID[rule.ID],
@@ -181,12 +212,69 @@ func scoreMatches(ruleSet rules.RuleSet, matches []rules.MatchResult) ([]Detecti
 	return detections, nil
 }
 
-func weighted(evidence []rules.EvidenceMatch) float64 {
+func scorePositive(
+	evidence []rules.EvidenceMatch,
+	active bool,
+) (float64, []ScoredEvidence, []EvidenceGroup) {
+	scored := make([]ScoredEvidence, len(evidence))
+	groups := make([]EvidenceGroup, 0, len(evidence))
+	indexes := make(map[string]int, len(evidence))
+	selectedIndexes := make([]int, 0, len(evidence))
+	maximums := make([]float64, 0, len(evidence))
+	for evidenceIndex, match := range evidence {
+		rawContribution := match.Weight * match.Signal.Confidence
+		scored[evidenceIndex] = ScoredEvidence{
+			Match: match, RawContribution: rawContribution,
+		}
+		index, ok := indexes[match.Group]
+		if !ok {
+			indexes[match.Group] = len(groups)
+			groups = append(groups, EvidenceGroup{
+				ID:                 match.Group,
+				EvidenceIDs:        []string{match.EvidenceID},
+				SelectedEvidenceID: match.EvidenceID,
+				RawContribution:    rawContribution,
+			})
+			selectedIndexes = append(selectedIndexes, evidenceIndex)
+			maximums = append(maximums, rawContribution)
+			continue
+		}
+		group := &groups[index]
+		group.EvidenceIDs = append(group.EvidenceIDs, match.EvidenceID)
+		group.RawContribution += rawContribution
+		if rawContribution > maximums[index] {
+			group.SelectedEvidenceID = match.EvidenceID
+			selectedIndexes[index] = evidenceIndex
+			maximums[index] = rawContribution
+		}
+	}
+
+	total := 0.0
+	if active {
+		for i := range groups {
+			groups[i].Contribution = maximums[i]
+			scored[selectedIndexes[i]].Contribution = maximums[i]
+			total += maximums[i]
+		}
+	}
+	return total, scored, groups
+}
+
+func scorePenalties(evidence []rules.EvidenceMatch, active bool) (float64, []ScoredEvidence) {
+	scored := make([]ScoredEvidence, 0, len(evidence))
 	total := 0.0
 	for _, match := range evidence {
-		total += match.Weight * match.Signal.Confidence
+		rawContribution := -match.Weight * match.Signal.Confidence
+		contribution := 0.0
+		if active {
+			contribution = rawContribution
+			total += contribution
+		}
+		scored = append(scored, ScoredEvidence{
+			Match: match, RawContribution: rawContribution, Contribution: contribution,
+		})
 	}
-	return total
+	return total, scored
 }
 
 func clamp(score float64) float64 {

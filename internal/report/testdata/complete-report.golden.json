@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "tool_version": "1.2.3",
   "requested_url": "https://example.test/start?redacted",
   "final_url": "https://example.test/final?redacted",
@@ -34,6 +34,7 @@
         "positive": [
           {
             "id": "client-script",
+            "group": "static_integration",
             "description": "Documented client script",
             "type": "script_url",
             "source": "http_analyzer",
@@ -42,6 +43,7 @@
             "url": "https://example.test/final?redacted",
             "confidence": 1,
             "weight": 100,
+            "raw_contribution": 100,
             "contribution": 100
           }
         ],
@@ -55,6 +57,7 @@
             "url": "https://example.test/final?redacted",
             "confidence": 0.8,
             "weight": 12.5,
+            "raw_contribution": -10,
             "contribution": -10
           }
         ],
@@ -69,10 +72,22 @@
             "url": "https://shared.example/frame?redacted",
             "confidence": 0.5,
             "weight": 5,
+            "raw_contribution": -2.5,
             "contribution": -2.5
           }
         ]
       },
+      "positive_evidence_groups": [
+        {
+          "id": "static_integration",
+          "evidence_ids": [
+            "client-script"
+          ],
+          "selected_evidence_id": "client-script",
+          "raw_contribution": 100,
+          "contribution": 100
+        }
+      ],
       "missing_evidence": [
         "html-marker"
       ],

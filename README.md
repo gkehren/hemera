@@ -7,17 +7,18 @@ WAF, bot management, CAPTCHA/challenge, client-side fingerprinting, and related
 security services.
 
 > Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
-> collection, detector rule matching, confidence scoring V1, initial Turnstile
-> and reCAPTCHA detectors, text/JSON reports, and internal sandboxed Chromium/CDP
-> session startup are implemented. Browser page analysis, DNS and TLS analyzers,
-> and broader detector coverage are not available yet.
+> collection, detector rule matching, correlation-aware confidence scoring,
+> initial Turnstile and reCAPTCHA detectors, text/JSON reports, and internal
+> sandboxed Chromium/CDP session startup are implemented. Browser page analysis,
+> DNS and TLS analyzers, and broader detector coverage are not available yet.
 
 ## What Hemera aims to provide
 
 - Passive or low-impact analysis of a complete HTTP/HTTPS URL.
 - Evidence-backed detections instead of opaque vendor labels.
-- A confidence score that exposes positive, missing, ambiguous, and conflicting
-  signals.
+- A confidence score that exposes grouped positive, missing, ambiguous, and
+  conflicting signals without treating correlated observations as independent
+  proof.
 - Human-readable CLI output and a stable JSON format for automation.
 - Data-driven detector rules that can evolve independently from the analyzers.
 - Reproducible fixtures and regression tests focused on false positives.
@@ -34,9 +35,10 @@ Final URL: https://protected.example/
 HTTP status: 200
 
 Detections:
-  Cloudflare Turnstile  100.0  VERY HIGH
-    + turnstile-client-script: script_url https://challenges.cloudflare.com/turnstile/v0/api.js (75.0)
-    + turnstile-html-marker: page_content (30.0)
+  Cloudflare Turnstile  75.0  HIGH
+    + turnstile-client-script: script_url https://challenges.cloudflare.com/turnstile/v0/api.js (raw 75.0; group static_integration)
+    + turnstile-html-marker: page_content (raw 30.0; group static_integration)
+    = group static_integration: 75.0 (105.0 raw; selected turnstile-client-script)
 ```
 
 ## Project principles
@@ -61,6 +63,10 @@ Hemera currently ships two product-specific static HTML detectors:
 
 The official client script is strong evidence. Static widget or inline-call
 markers are supporting evidence and do not reach the detection threshold alone.
+All observations from the same static integration share one evidence group, so
+seeing both a client script and its HTML marker explains the integration without
+inflating its confidence above the strongest observation. Complementary future
+HTTP, DNS/TLS, or browser evidence can use distinct groups and raise the score.
 These rules identify client integration visible in the final HTML; they do not
 execute JavaScript or distinguish reCAPTCHA v2, v3, invisible, and Enterprise as
 separate products. Turnstile evidence does not imply that Cloudflare proxy, WAF,
@@ -119,7 +125,7 @@ validation, hostname-derived SNI, and TLS 1.2 or later.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V1](docs/report-schema.md). A non-2xx response
+documented in [JSON report schema V2](docs/report-schema.md). A non-2xx response
 and a truncated body are successful observations; DNS, connection, TLS,
 timeout, read, and unsafe-redirect failures are reported as scan failures.
 
@@ -130,11 +136,13 @@ Only scan public targets that you are authorized to assess.
 Hemera has a strict, versioned JSON schema for data-driven detector rules and an
 engine for deterministic matching and explainable confidence scoring. It
 supports weighted `all`/`any` evidence, negative and ambiguous observations,
-minimum evidence, dependencies, and cross-rule conflict penalties.
+correlation groups aggregated by their maximum contribution, minimum independent
+evidence, dependencies, and cross-rule conflict penalties. Scores are bounded
+confidence indicators, not calibrated probabilities.
 
 `hemera scan` evaluates the embedded rules after HTTP analysis and passes the
 scored results to the selected reporter. See the
-[detector rule schema V1](docs/detector-rules.md) for the implemented contract,
+[detector rule schema V2](docs/detector-rules.md) for the implemented contract,
 built-in rules, and scoring semantics.
 
 ## Development

@@ -17,7 +17,7 @@ import (
 
 const (
 	// SchemaVersion identifies the stable JSON report contract.
-	SchemaVersion = 1
+	SchemaVersion = 2
 )
 
 // Report is the stable representation shared by text and JSON renderers.
@@ -47,21 +47,22 @@ type Redirect struct {
 
 // DetectionReport is one fully explained detector result.
 type DetectionReport struct {
-	ID                  string           `json:"id"`
-	Name                string           `json:"name"`
-	Category            rules.Category   `json:"category"`
-	Vendor              string           `json:"vendor"`
-	Product             string           `json:"product,omitempty"`
-	Detected            bool             `json:"detected"`
-	ConditionMatched    bool             `json:"condition_matched"`
-	MinimumEvidenceMet  bool             `json:"minimum_evidence_met"`
-	EvidenceScore       float64          `json:"evidence_score"`
-	Score               float64          `json:"score"`
-	Level               scoring.Level    `json:"level"`
-	Evidence            EvidenceReport   `json:"evidence"`
-	MissingEvidence     []string         `json:"missing_evidence"`
-	MissingDependencies []string         `json:"missing_dependencies"`
-	AppliedConflicts    []ConflictReport `json:"applied_conflicts"`
+	ID                     string           `json:"id"`
+	Name                   string           `json:"name"`
+	Category               rules.Category   `json:"category"`
+	Vendor                 string           `json:"vendor"`
+	Product                string           `json:"product,omitempty"`
+	Detected               bool             `json:"detected"`
+	ConditionMatched       bool             `json:"condition_matched"`
+	MinimumEvidenceMet     bool             `json:"minimum_evidence_met"`
+	EvidenceScore          float64          `json:"evidence_score"`
+	Score                  float64          `json:"score"`
+	Level                  scoring.Level    `json:"level"`
+	Evidence               EvidenceReport   `json:"evidence"`
+	PositiveEvidenceGroups []EvidenceGroup  `json:"positive_evidence_groups"`
+	MissingEvidence        []string         `json:"missing_evidence"`
+	MissingDependencies    []string         `json:"missing_dependencies"`
+	AppliedConflicts       []ConflictReport `json:"applied_conflicts"`
 }
 
 // EvidenceReport groups evidence by its scoring role.
@@ -71,18 +72,30 @@ type EvidenceReport struct {
 	Ambiguous []Evidence `json:"ambiguous"`
 }
 
-// Evidence is a sanitized observation and its signed score contribution.
+// Evidence is a sanitized observation with raw and effective contributions.
 type Evidence struct {
-	ID           string           `json:"id"`
-	Description  string           `json:"description,omitempty"`
-	Type         model.SignalType `json:"type"`
-	Source       string           `json:"source"`
-	Key          string           `json:"key"`
-	Value        string           `json:"value,omitempty"`
-	URL          string           `json:"url,omitempty"`
-	Confidence   float64          `json:"confidence"`
-	Weight       float64          `json:"weight"`
-	Contribution float64          `json:"contribution"`
+	ID              string           `json:"id"`
+	Group           string           `json:"group,omitempty"`
+	Description     string           `json:"description,omitempty"`
+	Type            model.SignalType `json:"type"`
+	Source          string           `json:"source"`
+	Key             string           `json:"key"`
+	Value           string           `json:"value,omitempty"`
+	URL             string           `json:"url,omitempty"`
+	Confidence      float64          `json:"confidence"`
+	Weight          float64          `json:"weight"`
+	RawContribution float64          `json:"raw_contribution"`
+	Contribution    float64          `json:"contribution"`
+}
+
+// EvidenceGroup explains the maximum contribution selected from correlated
+// positive evidence.
+type EvidenceGroup struct {
+	ID                 string   `json:"id"`
+	EvidenceIDs        []string `json:"evidence_ids"`
+	SelectedEvidenceID string   `json:"selected_evidence_id"`
+	RawContribution    float64  `json:"raw_contribution"`
+	Contribution       float64  `json:"contribution"`
 }
 
 // ConflictReport records one fixed cross-rule score penalty.
@@ -185,13 +198,14 @@ func buildDetection(detection scoring.Detection) DetectionReport {
 		ConditionMatched: detection.ConditionMatched, MinimumEvidenceMet: detection.MinimumEvidenceMet,
 		EvidenceScore: detection.EvidenceScore, Score: detection.Score, Level: detection.Level,
 		Evidence: EvidenceReport{
-			Positive:  buildEvidence(detection.PositiveEvidence, 1),
-			Negative:  buildEvidence(detection.NegativeEvidence, -1),
-			Ambiguous: buildEvidence(detection.AmbiguousEvidence, -1),
+			Positive:  buildEvidence(detection.PositiveEvidence, true),
+			Negative:  buildEvidence(detection.NegativeEvidence, false),
+			Ambiguous: buildEvidence(detection.AmbiguousEvidence, false),
 		},
-		MissingEvidence:     append([]string{}, detection.MissingPositiveEvidence...),
-		MissingDependencies: append([]string{}, detection.MissingDependencies...),
-		AppliedConflicts:    make([]ConflictReport, 0, len(detection.AppliedConflicts)),
+		PositiveEvidenceGroups: buildEvidenceGroups(detection.PositiveEvidenceGroups),
+		MissingEvidence:        append([]string{}, detection.MissingPositiveEvidence...),
+		MissingDependencies:    append([]string{}, detection.MissingDependencies...),
+		AppliedConflicts:       make([]ConflictReport, 0, len(detection.AppliedConflicts)),
 	}
 	for _, conflict := range detection.AppliedConflicts {
 		report.AppliedConflicts = append(report.AppliedConflicts, ConflictReport{
@@ -201,18 +215,38 @@ func buildDetection(detection scoring.Detection) DetectionReport {
 	return report
 }
 
-func buildEvidence(matches []rules.EvidenceMatch, sign float64) []Evidence {
-	evidence := make([]Evidence, 0, len(matches))
-	for _, match := range matches {
+func buildEvidence(scored []scoring.ScoredEvidence, includeGroup bool) []Evidence {
+	evidence := make([]Evidence, 0, len(scored))
+	for _, scoredEvidence := range scored {
+		match := scoredEvidence.Match
+		group := ""
+		if includeGroup {
+			group = match.Group
+		}
 		evidence = append(evidence, Evidence{
-			ID: match.EvidenceID, Description: match.Description, Type: match.Signal.Type,
+			ID: match.EvidenceID, Group: group,
+			Description: match.Description, Type: match.Signal.Type,
 			Source: match.Signal.Source, Key: match.Signal.Key,
 			Value: safeValue(match.Signal), URL: sanitizeURL(match.Signal.URL),
 			Confidence: match.Signal.Confidence, Weight: match.Weight,
-			Contribution: sign * match.Weight * match.Signal.Confidence,
+			RawContribution: scoredEvidence.RawContribution,
+			Contribution:    scoredEvidence.Contribution,
 		})
 	}
 	return evidence
+}
+
+func buildEvidenceGroups(groups []scoring.EvidenceGroup) []EvidenceGroup {
+	reports := make([]EvidenceGroup, 0, len(groups))
+	for _, group := range groups {
+		reports = append(reports, EvidenceGroup{
+			ID: group.ID, EvidenceIDs: append([]string{}, group.EvidenceIDs...),
+			SelectedEvidenceID: group.SelectedEvidenceID,
+			RawContribution:    group.RawContribution,
+			Contribution:       group.Contribution,
+		})
+	}
+	return reports
 }
 
 func safeValue(signal model.Signal) string {
@@ -254,13 +288,20 @@ func writeEvidence(output *strings.Builder, detection DetectionReport) {
 		if evidence.Value != "" {
 			fmt.Fprintf(output, " %s", evidence.Value)
 		}
-		fmt.Fprintf(output, " (%.1f)\n", evidence.Contribution)
+		fmt.Fprintf(output, " (raw %.1f; group %s)\n", evidence.RawContribution, evidence.Group)
+	}
+	for _, group := range detection.PositiveEvidenceGroups {
+		fmt.Fprintf(output, "    = group %s: %.1f (%.1f raw; selected %s)\n",
+			group.ID, group.Contribution, group.RawContribution, group.SelectedEvidenceID)
 	}
 	for _, evidence := range detection.Evidence.Negative {
 		fmt.Fprintf(output, "    - %s: %s (%.1f)\n", evidence.ID, evidence.Type, evidence.Contribution)
 	}
 	for _, evidence := range detection.Evidence.Ambiguous {
 		fmt.Fprintf(output, "    ~ %s: %s (%.1f)\n", evidence.ID, evidence.Type, evidence.Contribution)
+	}
+	for _, conflict := range detection.AppliedConflicts {
+		fmt.Fprintf(output, "    ! conflict %s: -%.1f\n", conflict.RuleID, conflict.Penalty)
 	}
 	if len(detection.MissingEvidence) > 0 {
 		fmt.Fprintf(output, "    missing: %s\n", strings.Join(detection.MissingEvidence, ", "))

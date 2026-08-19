@@ -3,8 +3,8 @@
     "name": "turnstile documented client",
     "fixture": "turnstile-positive.html",
     "detected": ["cloudflare.turnstile"],
-    "scores": {"cloudflare.turnstile": 100, "google.recaptcha": 0},
-    "levels": {"cloudflare.turnstile": "very_high", "google.recaptcha": "not_detected"},
+    "scores": {"cloudflare.turnstile": 75, "google.recaptcha": 0},
+    "levels": {"cloudflare.turnstile": "high", "google.recaptcha": "not_detected"},
     "evidence": {
       "cloudflare.turnstile": ["turnstile-client-script", "turnstile-html-marker"],
       "google.recaptcha": []
@@ -14,8 +14,8 @@
     "name": "recaptcha documented client",
     "fixture": "recaptcha-positive.html",
     "detected": ["google.recaptcha"],
-    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 100},
-    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "very_high"},
+    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 75},
+    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "high"},
     "evidence": {
       "cloudflare.turnstile": [],
       "google.recaptcha": ["recaptcha-client-script", "recaptcha-html-marker"]
@@ -25,8 +25,8 @@
     "name": "recaptcha enterprise alternate host regression",
     "fixture": "recaptcha-enterprise-regression.html",
     "detected": ["google.recaptcha"],
-    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 100},
-    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "very_high"},
+    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 75},
+    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "high"},
     "evidence": {
       "cloudflare.turnstile": [],
       "google.recaptcha": ["recaptcha-client-script", "recaptcha-html-marker"]
@@ -36,8 +36,8 @@
     "name": "ambiguous static markers",
     "fixture": "ambiguous-markers.html",
     "detected": [],
-    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 65},
-    "levels": {"cloudflare.turnstile": "low", "google.recaptcha": "medium"},
+    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 35},
+    "levels": {"cloudflare.turnstile": "low", "google.recaptcha": "low"},
     "evidence": {
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker", "recaptcha-inline-call"]

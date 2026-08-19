@@ -17,6 +17,7 @@ var (
 // EvidenceMatch ties one rule predicate to the strongest matching observation.
 type EvidenceMatch struct {
 	EvidenceID  string
+	Group       string
 	Description string
 	Weight      float64
 	Signal      model.Signal
@@ -70,7 +71,7 @@ func Match(ruleSet RuleSet, signals []model.Signal) ([]MatchResult, error) {
 		results = append(results, MatchResult{
 			RuleID:                  rule.ID,
 			ConditionMatched:        outcome.matched,
-			MinimumEvidenceMet:      len(outcome.evidence) >= rule.MinimumEvidence,
+			MinimumEvidenceMet:      countEvidenceGroups(outcome.evidence) >= rule.MinimumEvidence,
 			PositiveEvidence:        outcome.evidence,
 			NegativeEvidence:        negative,
 			AmbiguousEvidence:       ambiguous,
@@ -160,7 +161,7 @@ func strongestMatch(evidence Evidence, signals []cachedSignal) (EvidenceMatch, b
 	}
 	best := -1
 	for i := range signals {
-		if prepared.matches(&signals[i]) && (best == -1 || signals[i].signal.Confidence > signals[best].signal.Confidence) {
+		if prepared.matches(&signals[i]) && (best == -1 || strongerSignal(signals[i].signal, signals[best].signal)) {
 			best = i
 		}
 	}
@@ -169,10 +170,33 @@ func strongestMatch(evidence Evidence, signals []cachedSignal) (EvidenceMatch, b
 	}
 	return EvidenceMatch{
 		EvidenceID:  evidence.ID,
+		Group:       evidenceGroup(evidence),
 		Description: evidence.Description,
 		Weight:      evidence.Weight,
 		Signal:      signals[best].signal,
 	}, true, nil
+}
+
+func strongerSignal(candidate, current model.Signal) bool {
+	if candidate.Confidence != current.Confidence {
+		return candidate.Confidence > current.Confidence
+	}
+	candidateFields := [...]string{string(candidate.Type), candidate.Source, candidate.Key, candidate.Value, candidate.URL}
+	currentFields := [...]string{string(current.Type), current.Source, current.Key, current.Value, current.URL}
+	for i := range candidateFields {
+		if candidateFields[i] != currentFields[i] {
+			return candidateFields[i] < currentFields[i]
+		}
+	}
+	return false
+}
+
+func countEvidenceGroups(evidence []EvidenceMatch) int {
+	groups := make(map[string]struct{}, len(evidence))
+	for _, match := range evidence {
+		groups[match.Group] = struct{}{}
+	}
+	return len(groups)
 }
 
 type preparedEvidence struct {

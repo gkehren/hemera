@@ -14,9 +14,9 @@ and future contributor documentation.
    and status and breaks delivery into incremental, testable milestones.
 4. [Security and ethical boundaries](security-and-ethics.md) defines the safety
    requirements and explicit non-goals.
-5. [Detector rule schema V1](detector-rules.md) documents the implemented rule,
+5. [Detector rule schema V2](detector-rules.md) documents the implemented rule,
    matching, and confidence-scoring contracts.
-6. [JSON report schema V1](report-schema.md) documents the stable automation
+6. [JSON report schema V2](report-schema.md) documents the stable automation
    output from `hemera scan --format json`.
 
 ## Documentation status

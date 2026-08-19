@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/gkehren/hemera/internal/rules"
@@ -40,6 +41,9 @@ func TestEvaluateAppliesWeightedEvidencePenaltiesAndDependencies(t *testing.T) {
 	if len(edge.PositiveEvidence) != 3 || len(edge.NegativeEvidence) != 1 || len(edge.AmbiguousEvidence) != 1 {
 		t.Errorf("edge evidence counts = %d/%d/%d", len(edge.PositiveEvidence), len(edge.NegativeEvidence), len(edge.AmbiguousEvidence))
 	}
+	if got := len(edge.PositiveEvidenceGroups); got != 3 {
+		t.Errorf("edge positive groups = %d, want 3", got)
+	}
 	legacy := detections[1]
 	if legacy.Score != 50 || !legacy.Detected || legacy.Level != LevelMedium {
 		t.Errorf("legacy detection = %#v", legacy)
@@ -47,6 +51,181 @@ func TestEvaluateAppliesWeightedEvidencePenaltiesAndDependencies(t *testing.T) {
 	challenge := detections[2]
 	if challenge.Score != 70 || !challenge.Detected || challenge.Level != LevelMedium || len(challenge.MissingDependencies) != 0 {
 		t.Errorf("challenge detection = %#v", challenge)
+	}
+}
+
+func TestEvaluateCapsCorrelatedEvidenceAndAddsComplementaryGroups(t *testing.T) {
+	t.Parallel()
+	ruleSet := rules.RuleSet{SchemaVersion: rules.CurrentSchemaVersion, Rules: []rules.Rule{
+		scoringRule("grouped", 1, 75, rules.Condition{Any: []rules.Condition{
+			{Signal: groupedScoreEvidence("client-script", "static_integration", model.SignalTypeScriptURL, "script", 75)},
+			{Signal: groupedScoreEvidence("html-marker", "static_integration", model.SignalTypePageContent, "marker", 30)},
+			{Signal: groupedScoreEvidence("network-request", "browser_network", model.SignalTypeNetworkRequest, "request", 15)},
+		}}),
+	}}
+
+	staticOnly, err := Evaluate(ruleSet, []model.Signal{
+		testSignal(model.SignalTypeScriptURL, "script", "", 1),
+		testSignal(model.SignalTypePageContent, "marker", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detection := staticOnly[0]
+	if detection.Score != 75 || detection.Level != LevelHigh || !detection.Detected {
+		t.Fatalf("correlated static score = %#v, want detected high at 75", detection)
+	}
+	wantGroup := EvidenceGroup{
+		ID: "static_integration", EvidenceIDs: []string{"client-script", "html-marker"},
+		SelectedEvidenceID: "client-script", RawContribution: 105, Contribution: 75,
+	}
+	if got := detection.PositiveEvidenceGroups; len(got) != 1 || !reflect.DeepEqual(got[0], wantGroup) {
+		t.Fatalf("static evidence groups = %#v, want %#v", got, wantGroup)
+	}
+	if got := detection.PositiveEvidence; got[0].RawContribution != 75 || got[0].Contribution != 75 ||
+		got[1].RawContribution != 30 || got[1].Contribution != 0 {
+		t.Errorf("correlated evidence contributions = %#v", got)
+	}
+
+	complementary, err := Evaluate(ruleSet, []model.Signal{
+		testSignal(model.SignalTypeNetworkRequest, "request", "", 1),
+		testSignal(model.SignalTypePageContent, "marker", "", 1),
+		testSignal(model.SignalTypeScriptURL, "script", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := complementary[0]; got.Score != 90 || got.Level != LevelVeryHigh || len(got.PositiveEvidenceGroups) != 2 {
+		t.Errorf("complementary score = %#v, want very high at 90", got)
+	}
+}
+
+func TestEvaluateAppliesPenaltiesAfterPositiveGrouping(t *testing.T) {
+	t.Parallel()
+	rule := scoringRule("penalized", 1, 50, rules.Condition{Any: []rules.Condition{
+		{Signal: groupedScoreEvidence("strong", "static_integration", model.SignalTypeCookie, "strong", 75)},
+		{Signal: groupedScoreEvidence("duplicate", "static_integration", model.SignalTypeCookie, "duplicate", 30)},
+	}})
+	rule.NegativeEvidence = []rules.Evidence{*scoreEvidence("negative", "negative", 10)}
+	rule.AmbiguousEvidence = []rules.Evidence{*scoreEvidence("ambiguous", "ambiguous", 5)}
+
+	detections, err := Evaluate(rules.RuleSet{
+		SchemaVersion: rules.CurrentSchemaVersion, Rules: []rules.Rule{rule},
+	}, []model.Signal{
+		testSignal(model.SignalTypeCookie, "strong", "", 1),
+		testSignal(model.SignalTypeCookie, "duplicate", "", 1),
+		testSignal(model.SignalTypeCookie, "negative", "", 1),
+		testSignal(model.SignalTypeCookie, "ambiguous", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detections[0]; got.EvidenceScore != 60 || got.Score != 60 || !got.Detected {
+		t.Errorf("penalized grouped score = %#v, want detected at 60", got)
+	}
+	if got := detections[0].NegativeEvidence[0]; got.RawContribution != -10 || got.Contribution != -10 {
+		t.Errorf("negative contribution = %#v, want -10/-10", got)
+	}
+	if got := detections[0].AmbiguousEvidence[0]; got.RawContribution != -5 || got.Contribution != -5 {
+		t.Errorf("ambiguous contribution = %#v, want -5/-5", got)
+	}
+}
+
+func TestEvaluateKeepsInactiveEvidenceRawButNotContributing(t *testing.T) {
+	t.Parallel()
+	rule := scoringRule("partial", 2, 50, rules.Condition{Any: []rules.Condition{
+		{Signal: groupedScoreEvidence("script", "static_integration", model.SignalTypeScriptURL, "script", 75)},
+		{Signal: groupedScoreEvidence("marker", "static_integration", model.SignalTypePageContent, "marker", 30)},
+		{Signal: groupedScoreEvidence("request", "browser_network", model.SignalTypeNetworkRequest, "request", 15)},
+	}})
+	rule.NegativeEvidence = []rules.Evidence{*scoreEvidence("negative", "negative", 10)}
+
+	detections, err := Evaluate(rules.RuleSet{
+		SchemaVersion: rules.CurrentSchemaVersion, Rules: []rules.Rule{rule},
+	}, []model.Signal{
+		testSignal(model.SignalTypeScriptURL, "script", "", 1),
+		testSignal(model.SignalTypePageContent, "marker", "", 1),
+		testSignal(model.SignalTypeCookie, "negative", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detection := detections[0]
+	if !detection.ConditionMatched || detection.MinimumEvidenceMet || detection.EvidenceScore != 0 {
+		t.Fatalf("partial detection = %#v", detection)
+	}
+	if got := detection.PositiveEvidenceGroups[0]; got.RawContribution != 105 || got.Contribution != 0 {
+		t.Errorf("inactive group = %#v, want raw 105 and contribution 0", got)
+	}
+	for _, evidence := range append(detection.PositiveEvidence, detection.NegativeEvidence...) {
+		if evidence.RawContribution == 0 || evidence.Contribution != 0 {
+			t.Errorf("inactive evidence = %#v, want non-zero raw and zero contribution", evidence)
+		}
+	}
+}
+
+func TestEvaluatePreservesV1AdditiveScoring(t *testing.T) {
+	t.Parallel()
+	ruleSet := rules.RuleSet{SchemaVersion: 1, Rules: []rules.Rule{
+		scoringRule("legacy", 1, 75, rules.Condition{Any: []rules.Condition{
+			{Signal: scoreEvidence("script", "script", 75)},
+			{Signal: scoreEvidence("marker", "marker", 30)},
+		}}),
+	}}
+	detections, err := Evaluate(ruleSet, []model.Signal{
+		testSignal(model.SignalTypeCookie, "script", "", 1),
+		testSignal(model.SignalTypeCookie, "marker", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detections[0]; got.Score != 100 || len(got.PositiveEvidenceGroups) != 2 {
+		t.Errorf("V1 additive detection = %#v, want score 100 from independent predicates", got)
+	}
+}
+
+func TestEvaluateIsInvariantToRuleAndSignalOrder(t *testing.T) {
+	t.Parallel()
+	ruleSet := loadRuleFixture(t)
+	signals := []model.Signal{
+		testSignal(model.SignalTypeResponseHeader, "Server", "Acme edge", 1),
+		testSignal(model.SignalTypeCookie, "acme_session", "", 0.6),
+		testSignal(model.SignalTypeResourceHost, "host", "static.acme.test", 0.9),
+		testSignal(model.SignalTypeResponseHeader, "X-Legacy", "true", 1),
+		testSignal(model.SignalTypeScriptURL, "src", "https://static.acme.test/v1/challenge.js", 1),
+	}
+	want, err := Evaluate(ruleSet, signals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Reverse(ruleSet.Rules)
+	slices.Reverse(signals)
+	got, err := Evaluate(ruleSet, signals)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type stableResult struct {
+		EvidenceScore float64
+		Score         float64
+		Detected      bool
+		Groups        []EvidenceGroup
+		Conflicts     []AppliedConflict
+		Dependencies  []string
+	}
+	byID := func(detections []Detection) map[string]stableResult {
+		results := make(map[string]stableResult, len(detections))
+		for _, detection := range detections {
+			results[detection.RuleID] = stableResult{
+				EvidenceScore: detection.EvidenceScore, Score: detection.Score,
+				Detected: detection.Detected, Groups: detection.PositiveEvidenceGroups,
+				Conflicts: detection.AppliedConflicts, Dependencies: detection.MissingDependencies,
+			}
+		}
+		return results
+	}
+	if !reflect.DeepEqual(byID(got), byID(want)) {
+		t.Errorf("order changed results\ngot:  %#v\nwant: %#v", byID(got), byID(want))
 	}
 }
 
@@ -171,7 +350,7 @@ func TestEvaluateRejectsInvalidSignalsAndRules(t *testing.T) {
 	if _, err := Evaluate(ruleSet, []model.Signal{invalidSignal}); err == nil {
 		t.Error("Evaluate() accepted invalid signal")
 	}
-	ruleSet.SchemaVersion = 2
+	ruleSet.SchemaVersion = 3
 	if _, err := Evaluate(ruleSet, nil); err == nil {
 		t.Error("Evaluate() accepted invalid rule set")
 	}
@@ -207,6 +386,13 @@ func scoreEvidence(id, key string, weight float64) *rules.Evidence {
 		ID: id, Type: model.SignalTypeCookie,
 		Key: &rules.TextPattern{Exact: scoreString(key)}, Weight: weight,
 	}
+}
+
+func groupedScoreEvidence(id, group string, signalType model.SignalType, key string, weight float64) *rules.Evidence {
+	evidence := scoreEvidence(id, key, weight)
+	evidence.Group = group
+	evidence.Type = signalType
+	return evidence
 }
 
 func scoreString(value string) *string {

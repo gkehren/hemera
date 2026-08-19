@@ -182,9 +182,9 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 				}
 				ids := make([]string, 0, len(detection.PositiveEvidence))
 				for _, evidence := range detection.PositiveEvidence {
-					ids = append(ids, evidence.EvidenceID)
-					if err := evidence.Signal.Validate(); err != nil {
-						t.Errorf("detector %q evidence %q has invalid signal: %v", detection.RuleID, evidence.EvidenceID, err)
+					ids = append(ids, evidence.Match.EvidenceID)
+					if err := evidence.Match.Signal.Validate(); err != nil {
+						t.Errorf("detector %q evidence %q has invalid signal: %v", detection.RuleID, evidence.Match.EvidenceID, err)
 					}
 				}
 				if want, ok := testCase.Evidence[detection.RuleID]; !ok {

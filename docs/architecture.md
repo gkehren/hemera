@@ -137,11 +137,11 @@ The rule engine must depend on this model, not directly on Chromium or
 
 Rules are data-driven through the strict, versioned JSON schema implemented in
 `internal/rules` and documented in
-[Detector rule schema V1](detector-rules.md). The schema expresses:
+[Detector rule schema V2](detector-rules.md). The schema expresses:
 
 - positive and negative signals;
 - `AND` and `OR` combinations;
-- minimum evidence requirements and weighted signals;
+- correlation groups, minimum independent evidence, and weighted signals;
 - ambiguity penalties and product conflicts;
 - dependencies between related vendor and product detections.
 
@@ -152,17 +152,21 @@ matching retains positive, missing, negative, and ambiguous evidence in stable
 rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
-`internal/detectors` embeds the validated V1 rules shipped with the binary.
+`internal/detectors` embeds the validated V2 rules shipped with the binary.
 Milestone 0 includes product-specific rules for Cloudflare Turnstile and Google
 reCAPTCHA. They use documented client-script URLs as decisive evidence and
-static HTML markers only as supporting evidence.
+static HTML markers only as supporting evidence. Related static observations
+share one `static_integration` group so their maximum, not their sum, contributes
+to confidence.
 
 ### Confidence engine
 
-The V1 model is deliberately simple and is implemented in `internal/scoring`:
+The V2 model is deliberately simple and is implemented in `internal/scoring`:
 
 ```text
-score = weighted positive evidence
+raw evidence = weight × observation confidence
+group contribution = maximum raw evidence in that group
+score = sum(positive group contributions)
       - conflicting evidence
       - ambiguity penalty
 ```
@@ -171,21 +175,35 @@ The bounded 0–100 result should be labeled consistently:
 
 | Score | Level | Meaning |
 | --- | --- | --- |
-| 90–100 | Very High | Several independent, product-specific signals |
-| 75–89 | High | Detection is very probable |
+| 90–100 | Very High | Strong evidence from complementary groups |
+| 75–89 | High | Strong product-specific evidence |
 | 50–74 | Medium | Meaningful evidence with real ambiguity |
 | 25–49 | Low | Weak signals; do not present as certain |
 | 0–24 | Not detected | Insufficient evidence |
 
 Each evidence contribution is multiplied by the producing signal's observation
-confidence. Scores are clamped to 0–100. Directional cross-rule conflicts apply
-fixed penalties when the referenced rule is a matching candidate with non-zero
-effective confidence. Dependencies are acyclic and must be detected; a missing
-dependency blocks detection while the pre-dependency evidence score remains
-available for explanation.
+confidence. Positive evidence is aggregated by an explicit rule-local group;
+omitting the group makes that predicate independent. Only the maximum effective
+contribution in a group is counted, while every raw match remains explainable.
+`minimum_evidence` counts distinct matched groups. Negative and ambiguous
+evidence and fixed directional conflicts are subtracted after positive grouping.
+Dependencies are acyclic and must be detected; a missing dependency blocks
+detection while the pre-dependency evidence score remains available for
+explanation. Scores are clamped to 0–100.
 
-Bayesian scoring, calibration on a labeled corpus, or learned weights can be
-considered later; none is part of V1.
+The scoring layer owns the raw and effective contribution assigned to every
+matched predicate and group. Reporters receive those values as scored evidence;
+they sanitize and format them but never recalculate weights, grouping, or gates.
+
+Signal confidence and detection confidence have different meanings. Signal
+confidence expresses certainty in an observation; the final 0–100 score
+expresses rule-evidence strength after correlation, penalties, and dependencies.
+The final score is a confidence indicator, not a calibrated probability.
+
+Rule schema V1 remains readable with its original additive positive scoring;
+correlation groups and distinct-group minimum evidence require V2. Bayesian
+scoring, calibration on a labeled corpus, or learned weights can be considered
+later; none is part of V2.
 
 ### Scan orchestration and reporting
 
@@ -195,10 +213,12 @@ network policy nor presentation.
 
 `internal/report` converts scanner results into a secret-minimized report model.
 The CLI renders that model as text by default or as stable, versioned JSON with
-`--format json`. Both formats explain detected and non-detected rules. They omit
-HTML and header/cookie values and sanitize every emitted URL. The JSON contract
-is documented in [JSON report schema V1](report-schema.md). An exportable local
-HTML report remains a later goal.
+`--format json`. Both formats explain detected and non-detected rules, including
+raw positive evidence, its correlation group, the selected maximum contribution,
+and later penalties. They omit HTML and header/cookie values and sanitize every
+emitted URL. The JSON contract is documented in
+[JSON report schema V2](report-schema.md). An exportable local HTML report
+remains a later goal.
 
 ## Proposed repository layout
 

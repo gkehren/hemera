@@ -176,8 +176,17 @@ func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 		BodyTruncated: true,
 		Warnings:      []string{"response body was truncated"},
 	}, Detections: []scoring.Detection{{
-		RuleID: "test.rule", Name: "Test product", Detected: true, Score: 75, Level: scoring.LevelHigh,
-		PositiveEvidence: []rules.EvidenceMatch{{EvidenceID: "script", Weight: 75}},
+		RuleID: "test.rule", Name: "Test product", Detected: true,
+		ConditionMatched: true, MinimumEvidenceMet: true,
+		EvidenceScore: 75, Score: 75, Level: scoring.LevelHigh,
+		PositiveEvidence: []scoring.ScoredEvidence{{
+			Match:           rules.EvidenceMatch{EvidenceID: "script", Group: "static_integration", Weight: 75},
+			RawContribution: 75, Contribution: 75,
+		}},
+		PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+			ID: "static_integration", EvidenceIDs: []string{"script"},
+			SelectedEvidenceID: "script", RawContribution: 75, Contribution: 75,
+		}},
 	}}}
 	var stdout, stderr bytes.Buffer
 	if code := runScan(context.Background(), []string{"https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
@@ -206,7 +215,7 @@ func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	for _, expected := range []string{`"schema_version": 1`, `"status_code": 404`, `"detections": []`} {
+	for _, expected := range []string{`"schema_version": 2`, `"status_code": 404`, `"detections": []`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("JSON lacks %q: %s", expected, stdout.String())
 		}
