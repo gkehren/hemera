@@ -79,8 +79,8 @@ Browser -----┘
 - [x] Enforce browser destination validation, navigation timeouts, and resource
   limits.
 - [x] Add browser fixtures that do not depend on live third-party pages.
-- [ ] Add browser-specific CI incrementally as deterministic navigation fixtures
-  become available.
+- [x] Add browser-specific CI incrementally as deterministic navigation fixtures
+  become available. The initial Linux job runs standard and race tests.
 - [ ] Aggregate HTTP, DNS/TLS, and browser observations into one deterministic
   report without coupling detector rules to an analyzer implementation.
 
