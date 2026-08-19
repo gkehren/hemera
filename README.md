@@ -6,9 +6,10 @@ explainable report about the protections that may be present: CDN/reverse proxy,
 WAF, bot management, CAPTCHA/challenge, client-side fingerprinting, and related
 security services.
 
-> Hemera is in early development. Safe HTTP scanning and normalized HTTP signal
-> collection are implemented. Detection rules, confidence scoring, browser
-> analysis, and stable report formats are not available yet.
+> Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
+> collection, the detector rule schema, rule matching, and confidence scoring V1
+> are implemented. Built-in detector rules, scan integration, browser analysis,
+> and stable report formats are not available yet.
 
 ## What Hemera aims to provide
 
@@ -99,6 +100,17 @@ truncated body are successful observations; DNS, connection, TLS, timeout, read,
 and unsafe-redirect failures are reported as scan failures.
 
 Only scan public targets that you are authorized to assess.
+
+## Current rule engine
+
+Hemera has a strict, versioned JSON schema for data-driven detector rules and an
+engine for deterministic matching and explainable confidence scoring. It
+supports weighted `all`/`any` evidence, negative and ambiguous observations,
+minimum evidence, dependencies, and cross-rule conflict penalties.
+
+The engine is not connected to `hemera scan` yet and the repository does not yet
+ship real vendor rules. See the [detector rule schema V1](docs/detector-rules.md)
+for the implemented contract and scoring semantics.
 
 ## Development
 

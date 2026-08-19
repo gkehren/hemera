@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "acme.edge",
+      "name": "Acme Edge",
+      "description": "Synthetic vendor-level detector used by tests.",
+      "category": "cdn_reverse_proxy",
+      "vendor": "Acme",
+      "minimum_evidence": 2,
+      "minimum_score": 50,
+      "match": {
+        "all": [
+          {
+            "signal": {
+              "id": "acme-server",
+              "description": "Acme server header",
+              "type": "response_header",
+              "key": {
+                "exact": "Server",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "acme",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          },
+          {
+            "any": [
+              {
+                "signal": {
+                  "id": "acme-cookie",
+                  "type": "cookie",
+                  "key": {
+                    "exact": "acme_session"
+                  },
+                  "weight": 35
+                }
+              },
+              {
+                "signal": {
+                  "id": "acme-resource",
+                  "type": "resource_host",
+                  "value": {
+                    "suffix": ".acme.test",
+                    "case_insensitive": true
+                  },
+                  "weight": 40
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "negative_evidence": [
+        {
+          "id": "origin-exposed",
+          "type": "response_header",
+          "key": {
+            "exact": "X-Origin-Exposed",
+            "case_insensitive": true
+          },
+          "value": {
+            "exact": "true",
+            "case_insensitive": true
+          },
+          "weight": 20
+        }
+      ],
+      "ambiguous_evidence": [
+        {
+          "id": "generic-via",
+          "type": "response_header",
+          "key": {
+            "exact": "Via",
+            "case_insensitive": true
+          },
+          "weight": 10
+        }
+      ],
+      "conflicts": [
+        {
+          "rule_id": "legacy.edge",
+          "penalty": 15
+        }
+      ]
+    },
+    {
+      "id": "legacy.edge",
+      "name": "Legacy Edge",
+      "category": "cdn_reverse_proxy",
+      "vendor": "Legacy",
+      "minimum_evidence": 1,
+      "minimum_score": 50,
+      "match": {
+        "signal": {
+          "id": "legacy-header",
+          "type": "response_header",
+          "key": {
+            "exact": "X-Legacy",
+            "case_insensitive": true
+          },
+          "value": {
+            "exact": "true",
+            "case_insensitive": true
+          },
+          "weight": 50
+        }
+      }
+    },
+    {
+      "id": "acme.challenge",
+      "name": "Acme Challenge",
+      "category": "captcha_challenge",
+      "vendor": "Acme",
+      "product": "Challenge",
+      "minimum_evidence": 1,
+      "minimum_score": 60,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "challenge-script",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://static\\.acme\\.test/.*/challenge\\.js(?:\\?redacted)?$",
+                "case_insensitive": true
+              },
+              "weight": 70
+            }
+          },
+          {
+            "signal": {
+              "id": "challenge-frame",
+              "type": "iframe_url",
+              "value": {
+                "contains": "/challenge/"
+              },
+              "weight": 70
+            }
+          }
+        ]
+      },
+      "requires": [
+        "acme.edge"
+      ]
+    }
+  ]
+}
