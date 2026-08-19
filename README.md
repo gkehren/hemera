@@ -148,6 +148,10 @@ go run ./cmd/hemera scan https://example.com/
 go test ./...
 ```
 
+GitHub Actions runs formatting, vetting, unit and race tests, vulnerability
+scanning, and a CLI build on Linux. It also runs tests and a CLI build on macOS
+and Windows.
+
 The internal browser package uses `chromedp` but does not download a browser.
 Its opt-in integration test requires a locally installed Chromium or Chrome that
 can run with its sandbox enabled:
@@ -161,13 +165,17 @@ not start Chromium; browser navigation and signal capture remain planned.
 
 ## Documentation
 
+The repository roadmap is the authoritative source for implementation order and
+status. The Notion brief retains the original product and vision context but does
+not maintain a separate implementation checklist.
+
 - [Documentation index](docs/README.md)
 - [Vision, direction, and objectives](docs/vision-and-goals.md)
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Security and ethical boundaries](docs/security-and-ethics.md)
 
-The original product brief is maintained in
+The original product brief is available in
 [Notion](https://app.notion.com/p/3c076e148bdd812e99d6c69ac2dd7ee8).
 
 ## Contributing

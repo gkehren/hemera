@@ -10,7 +10,8 @@ and future contributor documentation.
    exists, what success means, and how product decisions should be made.
 2. [Architecture](architecture.md) describes the planned analysis pipeline and
    its main boundaries.
-3. [Roadmap](roadmap.md) breaks delivery into incremental, testable milestones.
+3. [Roadmap](roadmap.md) is the authoritative source for implementation order
+   and status and breaks delivery into incremental, testable milestones.
 4. [Security and ethical boundaries](security-and-ethics.md) defines the safety
    requirements and explicit non-goals.
 5. [Detector rule schema V1](detector-rules.md) documents the implemented rule,
@@ -21,8 +22,9 @@ and future contributor documentation.
 ## Documentation status
 
 Documents distinguish implemented behavior from planned behavior. Architectural
-decisions and stable user-facing formats should be recorded here and updated
-alongside the relevant code changes.
+decisions and user-facing formats should be recorded here and updated alongside
+the relevant code changes. Implementation status is maintained in the roadmap,
+not independently in the source brief.
 
-The source brief is the
+The product and vision source brief is the
 [Web Protection Scanner Notion page](https://app.notion.com/p/3c076e148bdd812e99d6c69ac2dd7ee8).
