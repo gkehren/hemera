@@ -414,6 +414,8 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 	type fixtureCase struct {
 		Name     string              `json:"name"`
 		Fixture  string              `json:"fixture"`
+		Status   int                 `json:"status,omitempty"`
+		Headers  map[string]string   `json:"headers,omitempty"`
 		Detected []string            `json:"detected"`
 		Scores   map[string]float64  `json:"scores"`
 		Levels   map[string]string   `json:"levels"`
@@ -444,6 +446,12 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				for k, v := range testCase.Headers {
+					w.Header().Set(k, v)
+				}
+				if testCase.Status != 0 {
+					w.WriteHeader(testCase.Status)
+				}
 				_, _ = w.Write(body)
 			}))
 			defer server.Close()
@@ -484,8 +492,12 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 			if len(result.Analyzers) != 1 || result.Analyzers[0].Observation.Metadata.HTTP == nil {
 				t.Fatalf("HTTP analyzer outcome = %#v", result.Analyzers)
 			}
-			if got := result.Analyzers[0].Observation.Metadata.HTTP.StatusCode; got != http.StatusOK {
-				t.Errorf("HTTP status = %d, want %d", got, http.StatusOK)
+			wantStatus := http.StatusOK
+			if testCase.Status != 0 {
+				wantStatus = testCase.Status
+			}
+			if got := result.Analyzers[0].Observation.Metadata.HTTP.StatusCode; got != wantStatus {
+				t.Errorf("HTTP status = %d, want %d", got, wantStatus)
 			}
 			for i, signal := range result.Signals {
 				if err := signal.Validate(); err != nil {

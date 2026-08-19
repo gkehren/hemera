@@ -3,9 +3,24 @@
     "name": "turnstile documented client",
     "fixture": "turnstile-positive.html",
     "detected": ["cloudflare.turnstile"],
-    "scores": {"cloudflare.turnstile": 75, "google.recaptcha": 0},
-    "levels": {"cloudflare.turnstile": "high", "google.recaptcha": "not_detected"},
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 75,
+      "google.recaptcha": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "high",
+      "google.recaptcha": "not_detected"
+    },
     "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
       "cloudflare.turnstile": ["turnstile-client-script", "turnstile-html-marker"],
       "google.recaptcha": []
     }
@@ -14,9 +29,24 @@
     "name": "recaptcha documented client",
     "fixture": "recaptcha-positive.html",
     "detected": ["google.recaptcha"],
-    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 75},
-    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "high"},
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 75
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "high"
+    },
     "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
       "cloudflare.turnstile": [],
       "google.recaptcha": ["recaptcha-client-script", "recaptcha-html-marker"]
     }
@@ -25,9 +55,24 @@
     "name": "recaptcha enterprise alternate host regression",
     "fixture": "recaptcha-enterprise-regression.html",
     "detected": ["google.recaptcha"],
-    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 75},
-    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "high"},
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 75
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "high"
+    },
     "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
       "cloudflare.turnstile": [],
       "google.recaptcha": ["recaptcha-client-script", "recaptcha-html-marker"]
     }
@@ -35,10 +80,28 @@
   {
     "name": "ambiguous static markers",
     "fixture": "ambiguous-markers.html",
+    "headers": {
+      "cf-cache-status": "HIT"
+    },
     "detected": [],
-    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 35},
-    "levels": {"cloudflare.turnstile": "low", "google.recaptcha": "low"},
+    "scores": {
+      "cloudflare.proxy": 35,
+      "cloudflare.waf": 35,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 30,
+      "google.recaptcha": 35
+    },
+    "levels": {
+      "cloudflare.proxy": "low",
+      "cloudflare.waf": "low",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "low",
+      "google.recaptcha": "low"
+    },
     "evidence": {
+      "cloudflare.proxy": ["cloudflare-cache-header"],
+      "cloudflare.waf": ["cloudflare-waf-marker"],
+      "cloudflare.bot_management": [],
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker", "recaptcha-inline-call"]
     }
@@ -47,19 +110,147 @@
     "name": "unrelated protection page",
     "fixture": "negative.html",
     "detected": [],
-    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 0},
-    "levels": {"cloudflare.turnstile": "not_detected", "google.recaptcha": "not_detected"},
-    "evidence": {"cloudflare.turnstile": [], "google.recaptcha": []}
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": []
+    }
   },
   {
     "name": "documentation text regression",
     "fixture": "documentation-regression.html",
     "detected": [],
-    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 30},
-    "levels": {"cloudflare.turnstile": "low", "google.recaptcha": "low"},
+    "scores": {
+      "cloudflare.proxy": 0,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 30,
+      "google.recaptcha": 30
+    },
+    "levels": {
+      "cloudflare.proxy": "not_detected",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "low",
+      "google.recaptcha": "low"
+    },
     "evidence": {
+      "cloudflare.proxy": [],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": [],
       "cloudflare.turnstile": ["turnstile-html-marker"],
       "google.recaptcha": ["recaptcha-html-marker"]
+    }
+  },
+  {
+    "name": "cloudflare reverse proxy edge",
+    "fixture": "cloudflare-proxy-positive.html",
+    "headers": {
+      "Server": "cloudflare",
+      "cf-ray": "8e5f123456789abc-IAD",
+      "cf-cache-status": "HIT",
+      "Set-Cookie": "__cf_bm=synthetic-cookie"
+    },
+    "detected": ["cloudflare.proxy"],
+    "scores": {
+      "cloudflare.proxy": 75,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 40,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "high",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "low",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header", "cloudflare-cache-header"],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": ["cloudflare-bot-cookie"],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": []
+    }
+  },
+  {
+    "name": "cloudflare waf managed challenge",
+    "fixture": "cloudflare-waf-challenge.html",
+    "status": 403,
+    "headers": {
+      "Server": "cloudflare",
+      "cf-ray": "8e5f123456789abc-IAD",
+      "cf-mitigated": "challenge"
+    },
+    "detected": ["cloudflare.proxy", "cloudflare.waf"],
+    "scores": {
+      "cloudflare.proxy": 75,
+      "cloudflare.waf": 100,
+      "cloudflare.bot_management": 0,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "high",
+      "cloudflare.waf": "very_high",
+      "cloudflare.bot_management": "not_detected",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
+      "cloudflare.waf": ["cloudflare-waf-mitigated-header", "cloudflare-waf-block-page", "cloudflare-waf-marker"],
+      "cloudflare.bot_management": [],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": []
+    }
+  },
+  {
+    "name": "cloudflare bot management telemetry",
+    "fixture": "cloudflare-bot-management-positive.html",
+    "headers": {
+      "Server": "cloudflare",
+      "cf-ray": "8e5f123456789abc-IAD",
+      "Set-Cookie": "__cf_bm=synthetic-bot-cookie"
+    },
+    "detected": ["cloudflare.proxy", "cloudflare.bot_management"],
+    "scores": {
+      "cloudflare.proxy": 75,
+      "cloudflare.waf": 0,
+      "cloudflare.bot_management": 100,
+      "cloudflare.turnstile": 0,
+      "google.recaptcha": 0
+    },
+    "levels": {
+      "cloudflare.proxy": "high",
+      "cloudflare.waf": "not_detected",
+      "cloudflare.bot_management": "very_high",
+      "cloudflare.turnstile": "not_detected",
+      "google.recaptcha": "not_detected"
+    },
+    "evidence": {
+      "cloudflare.proxy": ["cloudflare-server-header", "cloudflare-ray-header"],
+      "cloudflare.waf": [],
+      "cloudflare.bot_management": ["cloudflare-bot-telemetry-script", "cloudflare-bot-cookie"],
+      "cloudflare.turnstile": [],
+      "google.recaptcha": []
     }
   }
 ]
