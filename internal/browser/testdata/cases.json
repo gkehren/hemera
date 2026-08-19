@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "host": "fixture.test",
+  "routes": [
+    {
+      "name": "dynamic-start",
+      "path": "/dynamic/start",
+      "raw_query": "entry_token=fake-entry-secret",
+      "status": 302,
+      "redirect_to": "/dynamic/page?landing_token=fake-landing-secret#fake-landing-fragment"
+    },
+    {
+      "name": "dynamic-page",
+      "path": "/dynamic/page",
+      "raw_query": "landing_token=fake-landing-secret",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "dynamic/page.html"
+    },
+    {
+      "name": "dynamic-bootstrap",
+      "path": "/dynamic/bootstrap.js",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "file": "dynamic/bootstrap.js"
+    },
+    {
+      "name": "dynamic-script",
+      "path": "/dynamic/injected.js",
+      "raw_query": "credential=fake-script-credential",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "file": "dynamic/injected.js"
+    },
+    {
+      "name": "dynamic-frame",
+      "path": "/dynamic/frame",
+      "raw_query": "session=fake-frame-session",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "dynamic/frame.html"
+    },
+    {
+      "name": "dynamic-api",
+      "path": "/dynamic/api",
+      "raw_query": "token=fake-api-token",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "expected_authorization": "Bearer fake-authorization-credential",
+      "file": "dynamic/api.txt"
+    },
+    {
+      "name": "dynamic-completion-barrier",
+      "path": "/dynamic/completion-barrier.js",
+      "status": 200,
+      "content_type": "text/javascript; charset=utf-8",
+      "behavior": "completion-barrier"
+    },
+    {
+      "name": "static-negative",
+      "path": "/negative/page",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "negative/page.html"
+    },
+    {
+      "name": "limit-bounded-dom",
+      "path": "/limits/bounded-dom",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/bounded-dom.html"
+    },
+    {
+      "name": "limit-concurrency",
+      "path": "/limits/concurrency",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/concurrency.html"
+    },
+    {
+      "name": "limit-held-one",
+      "path": "/limits/held/one",
+      "status": 200,
+      "content_type": "image/gif",
+      "behavior": "held-resource"
+    },
+    {
+      "name": "limit-held-two",
+      "path": "/limits/held/two",
+      "status": 200,
+      "content_type": "image/gif",
+      "behavior": "held-resource"
+    },
+    {
+      "name": "limit-many",
+      "path": "/limits/many",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "file": "limits/many.html"
+    },
+    {
+      "name": "limit-resource-one",
+      "path": "/limits/resources/one",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-resource-two",
+      "path": "/limits/resources/two",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-resource-three",
+      "path": "/limits/resources/three",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/resource.txt"
+    },
+    {
+      "name": "limit-large",
+      "path": "/limits/large",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "file": "limits/large.txt"
+    },
+    {
+      "name": "limit-slow",
+      "path": "/limits/slow",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "slow-response"
+    },
+    {
+      "name": "limit-private",
+      "path": "/limits/private",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "behavior": "private-subresource"
+    },
+    {
+      "name": "limit-trap",
+      "path": "/limits/trap",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "private-trap"
+    }
+  ],
+  "cases": [
+    {
+      "name": "dynamic-sequential",
+      "entry_route": "dynamic-start",
+      "final_route": "dynamic-page",
+      "completion_selector": "#capture-complete",
+      "dom_markers": [
+        "id=\"capture-complete\"",
+        "data-dynamic-script=\"loaded\"",
+        "data-api-result=\"api ready\""
+      ],
+      "traffic": [
+        "dynamic-start",
+        "dynamic-page",
+        "dynamic-bootstrap",
+        "dynamic-script",
+        "dynamic-frame",
+        "dynamic-completion-barrier",
+        "dynamic-api"
+      ],
+      "scripts": [
+        "/dynamic/bootstrap.js",
+        "/dynamic/injected.js?redacted"
+      ],
+      "iframes": [
+        "/dynamic/frame?redacted"
+      ],
+      "cookies": [
+        "browser_fixture_cookie"
+      ],
+      "forbidden_metadata": [
+        "fake-entry-secret",
+        "fake-landing-secret",
+        "fake-script-credential",
+        "fake-frame-session",
+        "fake-api-token",
+        "fake-authorization-credential",
+        "fake-cookie-value",
+        "fake-entry-fragment",
+        "fake-script-fragment",
+        "fake-frame-fragment",
+        "fake-landing-fragment"
+      ]
+    },
+    {
+      "name": "static-negative",
+      "entry_route": "static-negative",
+      "final_route": "static-negative",
+      "completion_selector": "#static-ready",
+      "dom_markers": [
+        "id=\"static-ready\"",
+        "data-fixture=\"negative\""
+      ],
+      "traffic": [
+        "static-negative"
+      ],
+      "scripts": [],
+      "iframes": [],
+      "cookies": [],
+      "forbidden_metadata": []
+    }
+  ]
+}

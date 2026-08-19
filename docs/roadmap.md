@@ -77,7 +77,7 @@ Browser -----┘
   cookies.
 - [x] Enforce browser destination validation, navigation timeouts, and resource
   limits.
-- [ ] Add browser fixtures that do not depend on live third-party pages.
+- [x] Add browser fixtures that do not depend on live third-party pages.
 - [ ] Add browser-specific CI incrementally as deterministic navigation fixtures
   become available.
 - [ ] Aggregate HTTP, DNS/TLS, and browser observations into one deterministic

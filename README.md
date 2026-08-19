@@ -204,10 +204,13 @@ go test -tags=browser_integration ./internal/browser
 ```
 
 Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The integration test
-uses injected DNS and dialing dependencies to reach a loopback `httptest`
-fixture through the same validated proxy boundary used in production. The
-current CLI does not start Chromium. Browser signal conversion and scanner
-integration remain planned.
+uses the versioned synthetic corpus in `internal/browser/testdata`, injected DNS
+and dialing dependencies, and a loopback `httptest` server reached only through
+the same validated proxy boundary used in production. The manifest-driven
+dynamic and negative scenarios use a fresh Chromium profile, declare every
+allowed route, and never contact a live page or third-party asset. The current
+CLI does not start Chromium. Browser signal conversion and scanner integration
+remain planned.
 
 Internal navigation accepts only HTTP(S) targets and sends Chromium traffic
 through a per-session loopback proxy. The proxy applies the shared public-address

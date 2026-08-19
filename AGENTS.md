@@ -47,6 +47,8 @@ Hemera is in early development. The repository currently contains:
 - internal sandboxed Chromium/CDP session startup, bounded capture of the
   current target, and validated resource-bounded navigation, without browser
   signal conversion or scanner integration;
+- a versioned, synthetic browser fixture corpus with hermetic dynamic, negative,
+  security, and resource-limit coverage;
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
 - deterministic multi-analyzer orchestration and typed HTTP metadata;
