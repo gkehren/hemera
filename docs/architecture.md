@@ -179,12 +179,24 @@ preserves a typed error for the caller. Downloads are denied, cache reuse and
 service workers are bypassed, and the proxy is inactive outside an authorized
 navigation.
 
-The tagged integration test reaches a loopback `httptest` fixture only through
-injected resolver and dialer dependencies: the synthetic hostname resolves to a
-permitted public address, while the test dialer connects to its local server.
-This exercises the production validation and pinning path without weakening the
-global destination policy. The package still emits no normalized browser
-signals and has no scanner or report integration.
+The tagged integration test loads a versioned, entirely synthetic corpus from
+`internal/browser/testdata`. Its test-only manifest declares the sole synthetic
+host, every route and resource, capture completion selectors, ordered traffic,
+DOM markers, scripts, iframes, cookie names, and forbidden metadata. A loader
+rejects path traversal, duplicate or missing routes, oversized assets, absolute
+or protocol-relative HTTP(S) references, and undeclared redirect destinations
+without starting Chromium. The server accepts only declared GET requests for
+`fixture.test`.
+
+Each capture scenario receives a fresh browser session and profile. The dynamic
+scenario uses a bounded local completion barrier and an explicit CDP selector
+wait before capture finalization; the negative scenario verifies that a static
+page produces no dynamic resources, cookies, or extra traffic. Injected resolver
+and dialer dependencies make the synthetic hostname validate as a permitted
+public destination while connecting the production proxy to loopback
+`httptest`. This exercises validation and pinning without weakening the global
+destination policy or contacting public DNS or a third party. The package still
+emits no normalized browser signals and has no scanner or report integration.
 
 ### Signal model
 

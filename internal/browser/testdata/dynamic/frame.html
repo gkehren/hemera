@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<body>
+  <p id="frame-content">frame ready</p>
+  <script>
+    fetch("/dynamic/api?token=fake-api-token", {
+      headers: {Authorization: "Bearer fake-authorization-credential"}
+    }).then(response => response.text()).then(result => {
+      parent.document.body.dataset.apiResult = result.trim();
+      const marker = parent.document.createElement("div");
+      marker.id = "capture-complete";
+      parent.document.body.appendChild(marker);
+    });
+  </script>
+  <script src="/dynamic/completion-barrier.js"></script>
+</body>
+</html>

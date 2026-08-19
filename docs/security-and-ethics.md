@@ -191,13 +191,19 @@ addresses fail before page loading. Browser URLs also have a fixed byte limit,
 and proxy transfer accounting includes headers, uploads, downloads, and opaque
 tunnel traffic.
 
-The tagged integration test injects a synthetic public DNS answer and maps only
-the validated dial to its loopback `httptest` server. Loopback remains forbidden
-under the production policy. Browser observations are still internal and are
-not converted to signals or reports. External protocol handling, normalized
-evidence minimization, and scanner-level aggregation remain future integration
-work; the current navigation method does not authorize challenge bypass,
-fingerprint spoofing, or active probing.
+The tagged integration test uses a checked-in synthetic browser corpus, injects
+a synthetic public DNS answer, and maps only the validated dial to its loopback
+`httptest` server. Its test-only loader caps files and the complete corpus,
+rejects traversing paths and absolute or protocol-relative HTTP(S) asset
+references, and serves only declared routes for `fixture.test`. Fake query
+values, authorization data, fragments, and cookie values exercise minimization
+without containing live credentials or personal data. Loopback remains
+forbidden under the production policy, and no public DNS or third-party
+destination is contacted. Browser observations are still internal and are not
+converted to signals or reports.
+External protocol handling, normalized evidence minimization, and scanner-level
+aggregation remain future integration work; the current navigation method does
+not authorize challenge bypass, fingerprint spoofing, or active probing.
 
 ## Explicitly prohibited capabilities
 

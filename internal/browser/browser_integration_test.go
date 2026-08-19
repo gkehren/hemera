@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"github.com/gkehren/hemera/internal/networkguard"
 )
 
@@ -70,126 +71,78 @@ func TestSandboxedChromiumLifecycle(t *testing.T) {
 }
 
 func TestSandboxedChromiumCapture(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/start":
-			http.Redirect(writer, request, "/page", http.StatusFound)
-		case "/page":
-			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprint(writer, `<!doctype html><html><head><script defer src="/bootstrap.js"></script></head><body><main id="initial">ready</main></body></html>`)
-		case "/bootstrap.js":
-			writer.Header().Set("Content-Type", "text/javascript")
-			_, _ = fmt.Fprint(writer, `
-document.cookie = "browser_cookie=super-secret-cookie-value; SameSite=Lax";
-const loaded = [];
-loaded.push(new Promise((resolve, reject) => {
-  const script = document.createElement("script");
-  script.src = "/dynamic.js?credential=secret";
-  script.onload = resolve;
-  script.onerror = reject;
-  document.head.appendChild(script);
-}));
-loaded.push(new Promise((resolve, reject) => {
-  const frame = document.createElement("iframe");
-  frame.src = "/frame?session=secret";
-  frame.onload = resolve;
-  frame.onerror = reject;
-  document.body.appendChild(frame);
-}));
-loaded.push(fetch("/api?token=secret").then(response => response.text()));
-Promise.all(loaded).then(() => {
-  const marker = document.createElement("div");
-  marker.id = "capture-complete";
-  document.body.appendChild(marker);
-});`)
-		case "/dynamic.js":
-			writer.Header().Set("Content-Type", "text/javascript")
-			_, _ = fmt.Fprint(writer, `document.body.dataset.dynamicScript = "loaded";`)
-		case "/frame":
-			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprint(writer, `<!doctype html><p id="frame-content">frame ready</p>`)
-		case "/api":
-			writer.Header().Set("Content-Type", "text/plain")
-			_, _ = fmt.Fprint(writer, "api ready")
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
-	defer server.Close()
-
-	config, explicit := integrationConfig(t)
-	targetURL := configureIntegrationFixture(t, &config, server)
-	client, err := New(config)
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	session, err := client.Start(ctx)
-	if err != nil {
-		if !explicit {
-			t.Skipf("sandboxed Chromium is unavailable: %v", err)
-		}
-		t.Fatalf("start explicitly configured Chromium: %v", err)
-	}
-	defer session.Close()
-	if err := session.Navigate(ctx, server.URL+"/page"); !errors.Is(err, networkguard.ErrForbiddenDestination) {
-		t.Fatalf("Navigate(loopback) error = %v, want ErrForbiddenDestination", err)
-	}
+	for _, fixtureCase := range corpus.manifest.Cases {
+		fixtureCase := fixtureCase
+		t.Run(fixtureCase.Name, func(t *testing.T) {
+			fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+				"completion-barrier": func(writer http.ResponseWriter, _ *http.Request) {
+					time.Sleep(250 * time.Millisecond)
+					writer.WriteHeader(http.StatusOK)
+					_, _ = fmt.Fprint(writer, "// synthetic navigation completion barrier")
+				},
+			})
+			config, explicit := integrationConfig(t)
+			configureIntegrationFixture(t, &config, fixture.server)
+			client, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			session, err := client.Start(ctx)
+			if err != nil {
+				if !explicit {
+					t.Skipf("sandboxed Chromium is unavailable: %v", err)
+				}
+				t.Fatalf("start explicitly configured Chromium: %v", err)
+			}
+			defer session.Close()
+			if err := session.Navigate(ctx, fixture.server.URL+"/negative/page"); !errors.Is(err, networkguard.ErrForbiddenDestination) {
+				t.Fatalf("Navigate(loopback) error = %v, want ErrForbiddenDestination", err)
+			}
 
-	recorder, err := session.BeginCapture(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := session.Navigate(ctx, targetURL+"/start"); err != nil {
-		t.Fatalf("navigate validated fixture: %v", err)
-	}
-	result, err := recorder.Finish(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+			recorder, err := session.BeginCapture(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := fixtureURL(fixture.baseURL, corpus.route(fixtureCase.EntryRoute), false)
+			if fixtureCase.Name == "dynamic-sequential" {
+				entry += "#fake-entry-fragment"
+			}
+			if err := session.Navigate(ctx, entry); err != nil {
+				t.Fatalf("navigate validated fixture: %v", err)
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+			waitErr := waitForFixtureSelector(waitCtx, recorder, fixtureCase.CompletionSelector)
+			cancelWait()
+			if waitErr != nil {
+				served, unexpected := fixture.snapshot()
+				t.Fatalf("wait for fixture completion selector %q: %v; served=%#v unexpected=%#v",
+					fixtureCase.CompletionSelector, waitErr, served, unexpected)
+			}
+			result, err := recorder.Finish(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	if result.FinalURL != targetURL+"/page" {
-		t.Errorf("FinalURL = %q, want %q", result.FinalURL, targetURL+"/page")
-	}
-	if result.DOMTruncated || !strings.Contains(result.DOM, `id="capture-complete"`) ||
-		!strings.Contains(result.DOM, `data-dynamic-script="loaded"`) {
-		t.Errorf("final DOM was not captured after dynamic actions: truncated=%t DOM=%q", result.DOMTruncated, result.DOM)
-	}
-	wantScripts := []string{targetURL + "/bootstrap.js", targetURL + "/dynamic.js?redacted"}
-	if fmt.Sprint(result.ScriptURLs) != fmt.Sprint(wantScripts) {
-		t.Errorf("ScriptURLs = %#v, want %#v", result.ScriptURLs, wantScripts)
-	}
-	if fmt.Sprint(result.IframeURLs) != fmt.Sprint([]string{targetURL + "/frame?redacted"}) {
-		t.Errorf("IframeURLs = %#v", result.IframeURLs)
-	}
-	if fmt.Sprint(result.CookieNames) != fmt.Sprint([]string{"browser_cookie"}) {
-		t.Errorf("CookieNames = %#v", result.CookieNames)
-	}
-	for _, path := range []string{"/start", "/page", "/bootstrap.js", "/dynamic.js?redacted", "/frame?redacted", "/api?redacted"} {
-		if !captureContainsURL(result, targetURL+path) {
-			t.Errorf("capture is missing traffic URL %q", targetURL+path)
-		}
-	}
-	if strings.Contains(fmt.Sprintf("%#v", result.Requests), "secret") ||
-		strings.Contains(fmt.Sprintf("%#v", result.Responses), "secret") ||
-		strings.Contains(fmt.Sprintf("%#v", result.CookieNames), "super-secret-cookie-value") {
-		t.Fatalf("minimized traffic or cookies contain a secret: %#v", result)
+			assertFixtureCapture(t, fixture, fixtureCase, result)
+		})
 	}
 }
 
 func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var activeResources atomic.Int32
 	var peakResources atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch {
-		case request.URL.Path == "/bounded-dom":
-			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprint(writer, `<html><body><script>document.body.append(document.createTextNode("x".repeat(8 * 1024 * 1024)))</script></body></html>`)
-		case request.URL.Path == "/concurrency":
-			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprint(writer, `<html><body><img src="/held/one"><img src="/held/two"></body></html>`)
-		case strings.HasPrefix(request.URL.Path, "/held/"):
+	fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+		"held-resource": func(writer http.ResponseWriter, _ *http.Request) {
 			current := activeResources.Add(1)
 			defer activeResources.Add(-1)
 			for {
@@ -199,16 +152,13 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 				}
 			}
 			time.Sleep(75 * time.Millisecond)
-			writer.Header().Set("Content-Type", "image/gif")
+			writer.WriteHeader(http.StatusOK)
 			_, _ = writer.Write([]byte("not-a-real-image"))
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
-	defer server.Close()
+		},
+	})
 
 	config, explicit := integrationConfig(t)
-	targetURL := configureIntegrationFixture(t, &config, server)
+	targetURL := configureIntegrationFixture(t, &config, fixture.server)
 	config.MaxConcurrentRequests = 1
 	client, err := New(config)
 	if err != nil {
@@ -229,7 +179,7 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Navigate(ctx, targetURL+"/bounded-dom"); err != nil {
+	if err := session.Navigate(ctx, targetURL+"/limits/bounded-dom"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := recorder.Finish(ctx)
@@ -239,7 +189,7 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Fatalf("DOM snapshot = %d bytes, truncated=%t", len(result.DOM), result.DOMTruncated)
 	}
-	if err := session.Navigate(ctx, targetURL+"/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
+	if err := session.Navigate(ctx, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
 		t.Fatalf("concurrent resource navigation error = %v, want ErrConcurrencyLimit", err)
 	}
 	if peak := peakResources.Load(); peak > 1 {
@@ -248,33 +198,10 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 }
 
 func TestSandboxedChromiumNavigationLimits(t *testing.T) {
-	var privateHits atomic.Int32
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/many":
-			writer.Header().Set("Content-Type", "text/html")
-			_, _ = fmt.Fprint(writer, `<html><body><img src="/r/1"><img src="/r/2"><img src="/r/3"></body></html>`)
-		case "/large":
-			writer.Header().Set("Content-Type", "text/html")
-			_, _ = fmt.Fprint(writer, strings.Repeat("x", 4096))
-		case "/slow":
-			select {
-			case <-request.Context().Done():
-			case <-time.After(2 * time.Second):
-				_, _ = fmt.Fprint(writer, "late")
-			}
-		case "/private":
-			writer.Header().Set("Content-Type", "text/html")
-			_, _ = fmt.Fprintf(writer, `<html><body><img src="%s/trap"></body></html>`, server.URL)
-		case "/trap":
-			privateHits.Add(1)
-			_, _ = fmt.Fprint(writer, "unsafe")
-		default:
-			_, _ = fmt.Fprint(writer, "resource")
-		}
-	}))
-	defer server.Close()
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name      string
@@ -282,15 +209,36 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 		configure func(*Config)
 		wantErr   error
 	}{
-		{"request budget", "/many", func(config *Config) { config.MaxRequests = 2 }, ErrRequestLimit},
-		{"transfer budget", "/large", func(config *Config) { config.MaxTransferBytes = 1 }, ErrTransferLimit},
-		{"navigation timeout", "/slow", func(config *Config) { config.NavigationTimeout = 150 * time.Millisecond }, context.DeadlineExceeded},
-		{"private subresource", "/private", func(config *Config) {}, networkguard.ErrForbiddenDestination},
+		{"request budget", "/limits/many", func(config *Config) { config.MaxRequests = 2 }, ErrRequestLimit},
+		{"transfer budget", "/limits/large", func(config *Config) { config.MaxTransferBytes = 1 }, ErrTransferLimit},
+		{"navigation timeout", "/limits/slow", func(config *Config) { config.NavigationTimeout = 150 * time.Millisecond }, context.DeadlineExceeded},
+		{"private subresource", "/limits/private", func(config *Config) {}, networkguard.ErrForbiddenDestination},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			var privateHits atomic.Int32
+			var fixture *fixtureServer
+			fixture = newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+				"slow-response": func(writer http.ResponseWriter, request *http.Request) {
+					select {
+					case <-request.Context().Done():
+					case <-time.After(2 * time.Second):
+						writer.WriteHeader(http.StatusOK)
+						_, _ = fmt.Fprint(writer, "late")
+					}
+				},
+				"private-subresource": func(writer http.ResponseWriter, _ *http.Request) {
+					writer.WriteHeader(http.StatusOK)
+					_, _ = fmt.Fprintf(writer, `<html><body><img src="%s/limits/trap"></body></html>`, fixture.server.URL)
+				},
+				"private-trap": func(writer http.ResponseWriter, _ *http.Request) {
+					privateHits.Add(1)
+					writer.WriteHeader(http.StatusOK)
+					_, _ = fmt.Fprint(writer, "unsafe")
+				},
+			})
 			config, explicit := integrationConfig(t)
-			targetURL := configureIntegrationFixture(t, &config, server)
+			targetURL := configureIntegrationFixture(t, &config, fixture.server)
 			test.configure(&config)
 			client, err := New(config)
 			if err != nil {
@@ -309,11 +257,131 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 			if err := session.Navigate(ctx, targetURL+test.path); !errors.Is(err, test.wantErr) {
 				t.Fatalf("Navigate() error = %v, want %v", err, test.wantErr)
 			}
-			if test.path == "/private" && privateHits.Load() != 0 {
+			if test.path == "/limits/private" && privateHits.Load() != 0 {
 				t.Fatalf("private subresource reached loopback server %d times", privateHits.Load())
 			}
 		})
 	}
+}
+
+func waitForFixtureSelector(ctx context.Context, recorder *Recorder, selector string) error {
+	source, ok := recorder.source.(*chromedpCapture)
+	if !ok {
+		return fmt.Errorf("capture source type = %T, want *chromedpCapture", recorder.source)
+	}
+	return source.run(ctx, chromedp.WaitReady(selector, chromedp.ByQuery))
+}
+
+func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixtureCase, result CaptureResult) {
+	t.Helper()
+	wantFinal := fixtureURL(fixture.baseURL, fixture.corpus.route(fixtureCase.FinalRoute), true)
+	if result.FinalURL != wantFinal {
+		t.Errorf("FinalURL = %q, want %q", result.FinalURL, wantFinal)
+	}
+	if result.DOMTruncated {
+		t.Error("final fixture DOM was unexpectedly truncated")
+	}
+	for _, marker := range fixtureCase.DOMMarkers {
+		if !strings.Contains(result.DOM, marker) {
+			t.Errorf("final DOM is missing marker %q", marker)
+		}
+	}
+	wantScripts := fixtureResourceURLs(fixture.baseURL, fixtureCase.Scripts)
+	if fmt.Sprint(result.ScriptURLs) != fmt.Sprint(wantScripts) {
+		t.Errorf("ScriptURLs = %#v, want %#v", result.ScriptURLs, wantScripts)
+	}
+	wantIframes := fixtureResourceURLs(fixture.baseURL, fixtureCase.Iframes)
+	if fmt.Sprint(result.IframeURLs) != fmt.Sprint(wantIframes) {
+		t.Errorf("IframeURLs = %#v, want %#v", result.IframeURLs, wantIframes)
+	}
+	if fmt.Sprint(result.CookieNames) != fmt.Sprint(fixtureCase.Cookies) {
+		t.Errorf("CookieNames = %#v, want exclusively %#v", result.CookieNames, fixtureCase.Cookies)
+	}
+
+	wantURLs := make([]string, 0, len(fixtureCase.Traffic))
+	wantStatuses := make([]int64, 0, len(fixtureCase.Traffic))
+	for _, routeName := range fixtureCase.Traffic {
+		route := fixture.corpus.route(routeName)
+		wantURLs = append(wantURLs, fixtureURL(fixture.baseURL, route, true))
+		wantStatuses = append(wantStatuses, int64(route.Status))
+	}
+	gotRequestURLs := make([]string, 0, len(result.Requests))
+	for _, request := range result.Requests {
+		gotRequestURLs = append(gotRequestURLs, request.URL)
+		assertDeclaredCaptureURL(t, fixture, request.URL)
+	}
+	gotResponses := make(map[string][]int64, len(result.Responses))
+	for _, response := range result.Responses {
+		gotResponses[response.URL] = append(gotResponses[response.URL], response.Status)
+		assertDeclaredCaptureURL(t, fixture, response.URL)
+	}
+	if fmt.Sprint(gotRequestURLs) != fmt.Sprint(wantURLs) {
+		t.Errorf("request order = %#v, want %#v", gotRequestURLs, wantURLs)
+	}
+	for index, wantURL := range wantURLs {
+		statuses := gotResponses[wantURL]
+		if len(statuses) != 1 || statuses[0] != wantStatuses[index] {
+			t.Errorf("response for %q = %#v, want [%d]", wantURL, statuses, wantStatuses[index])
+		}
+		delete(gotResponses, wantURL)
+	}
+	if len(gotResponses) != 0 {
+		t.Errorf("capture contains unexpected responses: %#v", gotResponses)
+	}
+	served, unexpected := fixture.snapshot()
+	if fmt.Sprint(served) != fmt.Sprint(fixtureCase.Traffic) {
+		t.Errorf("fixture server request order = %#v, want %#v", served, fixtureCase.Traffic)
+	}
+	if len(unexpected) != 0 {
+		t.Errorf("fixture server received undeclared requests: %#v", unexpected)
+	}
+
+	metadata := fmt.Sprintf("requests=%#v responses=%#v scripts=%#v iframes=%#v cookies=%#v final=%q",
+		result.Requests, result.Responses, result.ScriptURLs, result.IframeURLs, result.CookieNames, result.FinalURL)
+	for _, forbidden := range fixtureCase.ForbiddenMetadata {
+		if strings.Contains(metadata, forbidden) {
+			t.Errorf("minimized capture metadata contains synthetic secret or fragment %q: %s", forbidden, metadata)
+		}
+	}
+}
+
+func fixtureURL(baseURL string, route *fixtureRoute, clean bool) string {
+	rawURL := baseURL + route.Path
+	if route.RawQuery != "" {
+		if clean {
+			return rawURL + "?redacted"
+		}
+		rawURL += "?" + route.RawQuery
+	}
+	return rawURL
+}
+
+func fixtureResourceURLs(baseURL string, paths []string) []string {
+	urls := make([]string, len(paths))
+	for index, resourcePath := range paths {
+		urls[index] = baseURL + resourcePath
+	}
+	return urls
+}
+
+func assertDeclaredCaptureURL(t *testing.T, fixture *fixtureServer, rawURL string) {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Errorf("parse captured URL %q: %v", rawURL, err)
+		return
+	}
+	base, _ := url.Parse(fixture.baseURL)
+	if parsed.Scheme != base.Scheme || parsed.Host != base.Host {
+		t.Errorf("captured URL has undeclared destination %q", rawURL)
+		return
+	}
+	for _, route := range fixture.corpus.manifest.Routes {
+		if route.Path == parsed.Path {
+			return
+		}
+	}
+	t.Errorf("captured URL has undeclared route %q", rawURL)
 }
 
 func configureIntegrationFixture(t *testing.T, config *Config, server *httptest.Server) string {
@@ -333,20 +401,6 @@ func configureIntegrationFixture(t *testing.T, config *Config, server *httptest.
 		return (&net.Dialer{}).DialContext(ctx, network, serverURL.Host)
 	}
 	return "http://fixture.test:" + port
-}
-
-func captureContainsURL(result CaptureResult, want string) bool {
-	for _, request := range result.Requests {
-		if request.URL == want {
-			return true
-		}
-	}
-	for _, response := range result.Responses {
-		if response.URL == want {
-			return true
-		}
-	}
-	return false
 }
 
 func integrationConfig(t *testing.T) (Config, bool) {
