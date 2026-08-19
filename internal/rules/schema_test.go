@@ -40,17 +40,18 @@ func TestDocumentedExampleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	const opening = "```json\n"
-	start := strings.Index(string(data), opening)
+	start := strings.Index(text, opening)
 	if start == -1 {
 		t.Fatal("documented JSON example is missing")
 	}
 	start += len(opening)
-	end := strings.Index(string(data[start:]), "\n```")
+	end := strings.Index(text[start:], "\n```")
 	if end == -1 {
 		t.Fatal("documented JSON example is unterminated")
 	}
-	if _, err := DecodeJSON(strings.NewReader(string(data[start : start+end]))); err != nil {
+	if _, err := DecodeJSON(strings.NewReader(text[start : start+end])); err != nil {
 		t.Fatalf("documented JSON example is invalid: %v", err)
 	}
 }
