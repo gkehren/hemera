@@ -36,10 +36,11 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 #### `cloudflare.challenge_page` (Category: `captcha_challenge`)
 - **Product-Neutral Challenge Attribution:** `cf-mitigated: challenge` and challenge platform scripts indicate that a Cloudflare Challenge Page was served. They do *not* uniquely prove whether the challenge was triggered by WAF custom rules, Bot Fight Mode, Rate Limiting, DDoS mitigations, or Under Attack Mode.
+- **Block / Error Pages are not Challenges:** Generic Cloudflare security error / block pages (e.g. error 1020 "Sorry, you have been blocked") provide supporting diagnostic evidence only and do not trigger `cloudflare.challenge_page`.
 - **Passive-Only Visibility:** Sites that allow benign traffic without issuing an active challenge or security error code do not emit challenge mitigation headers.
 
 #### `cloudflare.bot_protection` (Category: `bot_management`)
-- **Tier Invisibility (Bot Fight Mode vs. Enterprise Bot Management):** JavaScript Detections (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`) and `__cf_bm` cookies are shared across Bot Fight Mode (free/pro), Super Bot Fight Mode (business), and Bot Management (enterprise). Hemera intentionally asserts `Bot Protection` rather than overclaiming the enterprise-tier product.
+- **Tier Invisibility (Bot Fight Mode vs. Enterprise Bot Management):** JavaScript Detections (`/cdn-cgi/challenge-platform/scripts/jsd/(main|api).js`) and `__cf_bm` cookies are shared across Bot Fight Mode (free/pro), Super Bot Fight Mode (business), and Bot Management (enterprise). Hemera intentionally asserts `Bot Protection` rather than overclaiming the enterprise-tier product.
 - **Server-Side-Only Bot Heuristics:** If bot protections are deployed solely via backend API rules without client-side JavaScript telemetry or cookies, they are invisible to passive analysis.
 
 #### `cloudflare.turnstile` (Category: `captcha_challenge`)

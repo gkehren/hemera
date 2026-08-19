@@ -16,8 +16,8 @@ Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome
 | Rule ID | Category | Product | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
 | `cloudflare.proxy` | `cdn_reverse_proxy` | (Infrastructure) | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
-| `cloudflare.challenge_page` | `captcha_challenge` | Cloudflare Challenge Page | `cf-mitigated: challenge`, `cf-error-code`, challenge block DOM | Challenge orchestration scripts, `cf-error-details` marker |
-| `cloudflare.bot_protection` | `bot_management` | Cloudflare Bot Protection | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` script | `__cf_bm` cookie |
+| `cloudflare.challenge_page` | `captcha_challenge` | Cloudflare Challenge Page | `cf-mitigated: challenge` or challenge script | `cf-error-code`, error wrapper and block page DOM |
+| `cloudflare.bot_protection` | `bot_management` | Cloudflare Bot Protection | `/cdn-cgi/challenge-platform/scripts/jsd/(main\|api).js` script | `__cf_bm` cookie |
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
 | `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |

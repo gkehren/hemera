@@ -191,27 +191,29 @@ The following detector families currently meet the support standard:
 | Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
 | `cloudflare-challenge-mitigated-header` | `response_headers` | `response_header` | `cf-mitigated: challenge` | 75 | Decisive | Cloudflare challenge mitigation header emitted on challenge responses ([Cloudflare docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/)). |
-| `cloudflare-challenge-error-header` | `response_headers` | `response_header` | `cf-error-code` | 75 | Decisive | Security error code header emitted on challenge or block responses. |
-| `cloudflare-challenge-block-page` | `static_integration` | `page_content` | `Attention Required! \| Cloudflare` or `cf-error-details` | 75 | Decisive | Standard Cloudflare challenge or security block page HTML structure. |
-| `cloudflare-challenge-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1` | 75 | Decisive | Managed challenge orchestration script URL. |
-| `cloudflare-challenge-marker` | `static_integration` | `page_content` | `cf-error-details` or `cf-wrapper` | 35 | Supporting | Cloudflare error wrapper or details marker. |
+| `cloudflare-challenge-script` | `static_integration` | `script_url` | `^https?://[^/]+/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1` | 75 | Decisive | Managed challenge orchestration script URL. |
+| `cloudflare-challenge-error-header` | `response_headers` | `response_header` | `cf-error-code` | 35 | Supporting | Security error code header emitted on challenge or block responses. |
+| `cloudflare-challenge-block-marker` | `static_integration` | `page_content` | `Attention Required! \| Cloudflare`, `Sorry, you have been blocked`, `cf-error-details`, or `cf-wrapper` | 35 | Supporting | Cloudflare block or error page DOM marker. |
 
 #### Scoring and threshold rationale
 
 - `minimum_score`: 75 (`high`).
 - `minimum_evidence`: 1 group.
 - `requires`: `["cloudflare.proxy"]` &mdash; Challenge pages are served by Cloudflare reverse proxy edge infrastructure.
-- Mitigation headers or block page content reach 75 points (`high`).
+- Either decisive signal (`cf-mitigated: challenge` or the orchestration script URL) reaches 75 points (`high`).
+- Supporting error codes and block page markup provide 35 points each. Even when both are present on a generic block page without `cf-mitigated`, their sum is 70 points (`medium`), which remains below `minimum_score: 75` (`not_detected`).
 
 #### Vendor vs. product separation & anti-overclaim
 
 - Detection of Cloudflare Challenge Page indicates that a Cloudflare managed or interstitial challenge page was returned. It does **not** assert whether the challenge was triggered by WAF custom rules, Bot Fight Mode, Rate Limiting, DDoS protection, or Under Attack Mode.
+- Generic Cloudflare security block / error pages (e.g. error 1020 "Sorry, you have been blocked") do **not** trigger `cloudflare.challenge_page`.
 
 #### Fixture coverage
 
-- **Positive:** `cloudflare-waf-challenge.html` &mdash; 403 status with `cf-mitigated: challenge` and challenge page DOM (`score: 75`, `level: high`, `detected: true`).
-- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; normal proxied page without challenge (`score: 0`, `detected: false`).
-- **Ambiguous:** `ambiguous-markers.html` with proxy headers &mdash; (`score: 35`, `level: low`, `detected: false`).
+- **Positive:** `cloudflare-challenge-page.html` &mdash; 403 status with `cf-mitigated: challenge` and challenge orchestration script (`score: 100`, `level: very_high`, `detected: true`).
+- **Hard negative (Clean origin):** `negative.html` &mdash; clean / unrelated page (`score: 0`, `detected: false`).
+- **Hard negative (Block / error page):** `cloudflare-block-page.html` &mdash; 403 status with `cf-error-code: 1020` and block markup (`score: 70`, `level: medium`, `detected: false`).
+- **Ambiguous (HTML markers only):** `ambiguous-markers.html` with proxy headers &mdash; (`score: 35`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
@@ -231,7 +233,7 @@ The following detector families currently meet the support standard:
 
 | Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| `cloudflare-bot-telemetry-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` or `invisible.js` | 75 | Decisive | JavaScript Detections (JSD) telemetry script used by Cloudflare Bot Fight Mode, Super Bot Fight Mode, and Bot Management ([Cloudflare docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/)). |
+| `cloudflare-bot-telemetry-script` | `static_integration` | `script_url` | `^https?://[^/]+/cdn-cgi/challenge-platform/scripts/jsd/(?:main\|api)\.js` | 75 | Decisive | JavaScript Detections (JSD) telemetry script used by Cloudflare Bot Fight Mode, Super Bot Fight Mode, and Bot Management ([Cloudflare docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/)). |
 | `cloudflare-bot-cookie` | `cookies` | `cookie` | `__cf_bm` | 40 | Supporting | Bot score tracking cookie set on requests ([Cloudflare docs](https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/)). |
 
 #### Scoring and threshold rationale
@@ -248,9 +250,10 @@ The following detector families currently meet the support standard:
 
 #### Fixture coverage
 
-- **Positive:** `cloudflare-bot-management-positive.html` &mdash; proxied page with `__cf_bm` cookie and `/cdn-cgi/challenge-platform/scripts/jsd/main.js` (`score: 75`, `level: high`, `detected: true`).
-- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; proxied page without Bot Protection telemetry (`score: 0`, `detected: false`).
-- **Ambiguous:** `cloudflare-proxy-positive.html` with cookie only &mdash; (`score: 40`, `level: low`, `detected: false`).
+- **Positive (Automated snippet):** `cloudflare-bot-protection-positive.html` &mdash; proxied page with `__cf_bm` cookie and `/cdn-cgi/challenge-platform/scripts/jsd/main.js` (`score: 100`, `level: very_high`, `detected: true`).
+- **Positive (Manual API script):** `cloudflare-bot-protection-api.html` &mdash; proxied page with `/cdn-cgi/challenge-platform/scripts/jsd/api.js` (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative (Clean origin):** `negative.html` &mdash; clean page without telemetry or cookie (`score: 0`, `detected: false`).
+- **Ambiguous (Cookie only):** `cloudflare-proxy-positive.html` with `__cf_bm` cookie only &mdash; (`score: 40`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
