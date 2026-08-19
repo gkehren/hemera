@@ -12,8 +12,7 @@
 # Go test, coverage, benchmark, and profiling artifacts
 *.test
 *.out
-coverage.html
-coverage.txt
+coverage.*
 *.coverprofile
 profile.cov
 *.prof
