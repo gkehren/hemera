@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/gkehren/hemera/internal/httpanalyzer"
-	"github.com/gkehren/hemera/pkg/model"
+	"github.com/gkehren/hemera/internal/rules"
+	"github.com/gkehren/hemera/internal/scanner"
+	"github.com/gkehren/hemera/internal/scoring"
 )
 
 func TestRunShowsHelpWhenNoArgumentsAreProvided(t *testing.T) {
@@ -87,12 +89,18 @@ func TestRunRejectsUnexpectedArguments(t *testing.T) {
 }
 
 type fakeScanner struct {
-	result httpanalyzer.Result
+	result scanner.Result
 	err    error
 }
 
-func (f fakeScanner) Analyze(context.Context, string) (httpanalyzer.Result, error) {
+func (f fakeScanner) Scan(context.Context, string) (scanner.Result, error) {
 	return f.result, f.err
+}
+
+type errorWriter struct{}
+
+func (errorWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
 }
 
 func TestRunScanRequiresExactlyOneURL(t *testing.T) {
@@ -108,9 +116,9 @@ func TestRunScanRequiresExactlyOneURL(t *testing.T) {
 	}
 }
 
-func TestRunScanPrintsSafeDiagnosticForAnyHTTPStatus(t *testing.T) {
+func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 	t.Parallel()
-	result := httpanalyzer.Result{
+	result := scanner.Result{HTTP: httpanalyzer.Result{
 		RequestedURL: "https://example.test/?redacted",
 		FinalURL:     "https://example.test/login?redacted",
 		StatusCode:   403,
@@ -119,13 +127,10 @@ func TestRunScanPrintsSafeDiagnosticForAnyHTTPStatus(t *testing.T) {
 		}},
 		BodyTruncated: true,
 		Warnings:      []string{"response body was truncated"},
-		Signals: []model.Signal{
-			{Type: model.SignalTypeResponseHeader, Source: "http_analyzer", Key: "Authorization", Value: "header-secret", Confidence: 1},
-			{Type: model.SignalTypeCookie, Source: "http_analyzer", Key: "session", Value: "cookie-secret", Confidence: 1},
-			{Type: model.SignalTypePageContent, Source: "http_analyzer", Key: "body", Value: "<html>private</html>", Confidence: 1},
-			{Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src", Value: "https://cdn.test/app.js?redacted", Confidence: 1},
-		},
-	}
+	}, Detections: []scoring.Detection{{
+		RuleID: "test.rule", Name: "Test product", Detected: true, Score: 75, Level: scoring.LevelHigh,
+		PositiveEvidence: []rules.EvidenceMatch{{EvidenceID: "script", Weight: 75}},
+	}}}
 	var stdout, stderr bytes.Buffer
 	if code := runScan(context.Background(), []string{"https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
 		t.Fatalf("code = %d", code)
@@ -134,15 +139,72 @@ func TestRunScanPrintsSafeDiagnosticForAnyHTTPStatus(t *testing.T) {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 	output := stdout.String()
-	for _, expected := range []string{"unstable format", "Status: 403", "Body truncated: true", "app.js?redacted", "[content omitted]"} {
+	for _, expected := range []string{"Hemera scan report", "HTTP status: 403", "Body: truncated", "Test product", "HIGH"} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("stdout lacks %q: %q", expected, output)
 		}
 	}
-	for _, secret := range []string{"header-secret", "cookie-secret", "<html>private</html>"} {
-		if strings.Contains(output, secret) {
-			t.Errorf("stdout disclosed %q", secret)
+}
+
+func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
+	t.Parallel()
+	result := scanner.Result{HTTP: httpanalyzer.Result{
+		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 404,
+	}}
+	var stdout, stderr bytes.Buffer
+	if code := runScan(context.Background(), []string{"--format", "json", "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+	for _, expected := range []string{`"schema_version": 1`, `"status_code": 404`, `"detections": []`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("JSON lacks %q: %s", expected, stdout.String())
 		}
+	}
+}
+
+func TestRunScanHelpAndInvalidFormat(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"--help"},
+		{"--format", "json", "--help"},
+		{"-h", "--format", "json"},
+	} {
+		args := args
+		t.Run("help "+strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runScan(context.Background(), args, &stdout, &stderr, fakeScanner{}); code != 0 {
+				t.Fatalf("code = %d", code)
+			}
+			if !strings.Contains(stdout.String(), "--format") || stderr.Len() != 0 {
+				t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+			}
+		})
+	}
+	t.Run("invalid format", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := runScan(context.Background(), []string{"--format", "xml", "https://example.test/"}, &stdout, &stderr, fakeScanner{}); code != 2 {
+			t.Fatalf("code = %d", code)
+		}
+		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unsupported report format") {
+			t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+		}
+	})
+}
+
+func TestRunScanReportsOutputFailure(t *testing.T) {
+	t.Parallel()
+	result := scanner.Result{HTTP: httpanalyzer.Result{
+		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,
+	}}
+	var stderr bytes.Buffer
+	if code := runScan(context.Background(), []string{"https://example.test/"}, errorWriter{}, &stderr, fakeScanner{result: result}); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "write report") {
+		t.Errorf("stderr = %q, want report output error", stderr.String())
 	}
 }
 

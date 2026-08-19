@@ -74,11 +74,12 @@ session-bearing values by default, avoid persisting data unless requested, and
 document what each output format records. Public test fixtures must use synthetic
 or explicitly redistributable data.
 
-The current diagnostic output masks every query string, prints cookie and header
-names without their values, and never prints collected HTML. Internally, HTTP
-signals omit cookie values and redact authorization-, cookie-, token-, secret-,
-authentication-, and API-key-bearing header values. The scanner does not persist
-results.
+The text and JSON reporters mask every query string and remove URL user
+information and fragments. They may expose cookie and header names as evidence,
+but never their values, and never expose collected HTML. Internally, HTTP signals
+omit cookie values and redact authorization-, cookie-, token-, secret-,
+authentication-, and API-key-bearing header values. Reports are produced in
+memory and the scanner does not persist results.
 
 Detector documents are also treated as untrusted local input. JSON decoding
 rejects unknown fields and unsupported versions and bounds document size, rule
