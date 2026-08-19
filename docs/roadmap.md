@@ -42,7 +42,7 @@ prerequisites.
 - [ ] Define the DNS/TLS observation contract and its place in the shared
   analyzer pipeline before implementing collection in Milestone 1
   ([issue #4](https://github.com/gkehren/hemera/issues/4)).
-- [ ] Make the special-purpose network policy maintainable against IANA registry
+- [x] Make the special-purpose network policy maintainable against IANA registry
   changes ([issue #5](https://github.com/gkehren/hemera/issues/5)).
 - [x] Add baseline GitHub Actions CI before browser navigation enters the scan
   pipeline:
