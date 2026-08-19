@@ -316,11 +316,10 @@ rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
 `internal/detectors` embeds the validated V2 rules shipped with the binary.
-Hemera includes general Cloudflare rules (`cloudflare.proxy`, `cloudflare.waf`,
-`cloudflare.bot_management`, `cloudflare.turnstile`) with strict product-level
-separation, alongside Google reCAPTCHA. They use decisive evidence (headers,
-scripts, block page DOM) and supporting markers grouped by correlation.
-Every supported rule adheres to the quality, evidence, and fixture
+Hemera includes 11 built-in rules across 5 vendor families (Cloudflare, Google,
+AWS, DataDome, and Akamai) with strict product-level separation. They use decisive
+evidence (headers, scripts, block page DOM, DNS/TLS) and supporting markers grouped
+by correlation. Every supported rule adheres to the quality, evidence, and fixture
 requirements in [Detector family support standard](detector-support-standard.md).
 
 ### Confidence engine

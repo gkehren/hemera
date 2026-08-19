@@ -337,6 +337,555 @@
           }
         ]
       }
+    },
+    {
+      "id": "aws.cloudfront",
+      "name": "Amazon CloudFront",
+      "description": "Detects Amazon CloudFront edge infrastructure from x-amz-cf-id, x-amz-cf-pop, Server headers, CNAME routing, or TLS certificates.",
+      "category": "cdn_reverse_proxy",
+      "vendor": "AWS",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "aws-cf-id-header",
+              "group": "response_headers",
+              "description": "CloudFront request ID header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-amz-cf-id",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-cf-pop-header",
+              "group": "response_headers",
+              "description": "CloudFront POP identifier header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-amz-cf-pop",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-cf-server-header",
+              "group": "response_headers",
+              "description": "CloudFront Server response header",
+              "type": "response_header",
+              "key": {
+                "exact": "Server",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "CloudFront",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-cf-cache-header",
+              "group": "response_headers",
+              "description": "CloudFront X-Cache response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-cache",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "cloudfront",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-cf-cname",
+              "group": "dns",
+              "description": "CloudFront canonical edge CNAME",
+              "type": "dns_record",
+              "key": {
+                "exact": "cname",
+                "case_insensitive": true
+              },
+              "value": {
+                "regex": "\\.cloudfront\\.net$",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-cf-cert-issuer",
+              "group": "tls",
+              "description": "Amazon issued TLS certificate",
+              "type": "tls_property",
+              "key": {
+                "exact": "certificate_issuer",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "Amazon",
+                "case_insensitive": true
+              },
+              "weight": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "aws.waf",
+      "name": "AWS WAF",
+      "description": "Detects AWS WAF integration scripts, WAF action headers, error types, or standard block pages.",
+      "category": "waf",
+      "vendor": "AWS",
+      "product": "AWS WAF",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "aws-waf-sdk-script",
+              "group": "static_integration",
+              "description": "AWS WAF JavaScript SDK integration script URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://[a-f0-9]+\\.(?:awswaf|waf\\.aws\\.amazon)\\.com/",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-waf-action-header",
+              "group": "response_headers",
+              "description": "AWS WAF action response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-amzn-waf-action",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-waf-errortype-header",
+              "group": "response_headers",
+              "description": "AWS WAF error type response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-amzn-errortype",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "WAF",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-waf-block-page",
+              "group": "static_integration",
+              "description": "AWS WAF block page content",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:405 Method Not Allowed.*AWS WAF|<title>403 Forbidden</title>.*(?:CloudFront.*AWS WAF|Generated by cloudfront.*AWS WAF)|<H1>403 Forbidden</H1>.*AWS WAF)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-waf-token-cookie",
+              "group": "cookies",
+              "description": "AWS WAF token cookie",
+              "type": "cookie",
+              "key": {
+                "exact": "aws-waf-token",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          },
+          {
+            "signal": {
+              "id": "aws-waf-marker",
+              "group": "static_integration",
+              "description": "AWS WAF token or element marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:aws-waf-|AwsWafIntegration)",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "datadome.bot_protection",
+      "name": "DataDome",
+      "description": "Detects DataDome bot management client tag, challenge interstitial pages, response headers, or tracking cookies.",
+      "category": "bot_management",
+      "vendor": "DataDome",
+      "product": "DataDome",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "datadome-js-tag",
+              "group": "static_integration",
+              "description": "DataDome JavaScript tag URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://js\\.datadome\\.co/tags\\.js",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-header",
+              "group": "response_headers",
+              "description": "DataDome protection response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-datadome",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-response-header",
+              "group": "response_headers",
+              "description": "DataDome response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-datadome-response",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-interstitial-url",
+              "group": "static_integration",
+              "description": "DataDome CAPTCHA delivery interstitial iframe URL",
+              "type": "iframe_url",
+              "value": {
+                "regex": "^https://geo\\.captcha-delivery\\.com/captcha/",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-interstitial-script",
+              "group": "static_integration",
+              "description": "DataDome CAPTCHA delivery script URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://geo\\.captcha-delivery\\.com/captcha/",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-cookie",
+              "group": "cookies",
+              "description": "DataDome tracking cookie",
+              "type": "cookie",
+              "key": {
+                "exact": "datadome",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-marker",
+              "group": "static_integration",
+              "description": "DataDome inline client configuration marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:window\\.datadomeOptions|datadome\\.init)",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "akamai.edge",
+      "name": "Akamai Edge",
+      "description": "Detects Akamai Edge reverse proxy infrastructure from Server headers, transformation headers, CNAME routing, or TLS certificates.",
+      "category": "cdn_reverse_proxy",
+      "vendor": "Akamai",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "akamai-ghost-server-header",
+              "group": "response_headers",
+              "description": "Akamai GHost Server response header",
+              "type": "response_header",
+              "key": {
+                "exact": "Server",
+                "case_insensitive": true
+              },
+              "value": {
+                "regex": "(?:AkamaiGHost|Ghost|AkamaiNetStorage)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-transformed-header",
+              "group": "response_headers",
+              "description": "Akamai transformed response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-akamai-transformed",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-cname",
+              "group": "dns",
+              "description": "Akamai canonical edge CNAME",
+              "type": "dns_record",
+              "key": {
+                "exact": "cname",
+                "case_insensitive": true
+              },
+              "value": {
+                "regex": "\\.(?:edgekey|edgesuite|akamaiedge|akamai)\\.net$",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-request-id-header",
+              "group": "response_headers",
+              "description": "Akamai request ID header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-akamai-request-id",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-cacheable-header",
+              "group": "response_headers",
+              "description": "Akamai cacheable diagnostic header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-check-cacheable",
+                "case_insensitive": true
+              },
+              "weight": 25
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-cert-issuer",
+              "group": "tls",
+              "description": "Akamai issued TLS certificate",
+              "type": "tls_property",
+              "key": {
+                "exact": "certificate_issuer",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "Akamai",
+                "case_insensitive": true
+              },
+              "weight": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "akamai.bot_manager",
+      "name": "Akamai Bot Manager",
+      "description": "Detects Akamai Bot Manager JavaScript sensor scripts and tracking cookies.",
+      "category": "bot_management",
+      "vendor": "Akamai",
+      "product": "Bot Manager",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "requires": [
+        "akamai.edge"
+      ],
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "akamai-bm-sensor-script",
+              "group": "static_integration",
+              "description": "Akamai Bot Manager JavaScript sensor script URL",
+              "type": "script_url",
+              "value": {
+                "regex": "(?:^|/)(?:_sec/verify\\.js|akam/13/|akamai/bmp/)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-bm-cookie",
+              "group": "cookies",
+              "description": "Akamai Bot Manager telemetry cookie",
+              "type": "cookie",
+              "key": {
+                "regex": "^(?:ak_bmsc|bm_sv|bm_sz)$",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-bm-abck-cookie",
+              "group": "cookies",
+              "description": "Akamai Bot Manager sensor tracking cookie",
+              "type": "cookie",
+              "key": {
+                "exact": "_abck",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-bm-marker",
+              "group": "static_integration",
+              "description": "Akamai Bot Manager inline client sensor marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:window\\._sec|akamai\\.bmp)",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "akamai.app_and_api_protector",
+      "name": "Akamai App & API Protector",
+      "description": "Detects Akamai App & API Protector or Kona Site Defender WAF reference error block pages and mitigation headers.",
+      "category": "waf",
+      "vendor": "Akamai",
+      "product": "App & API Protector",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "requires": [
+        "akamai.edge"
+      ],
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "akamai-waf-session-header",
+              "group": "response_headers",
+              "description": "Akamai WAF session info response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-akamai-session-info",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-waf-block-page",
+              "group": "static_integration",
+              "description": "Akamai WAF reference error block page content",
+              "type": "page_content",
+              "value": {
+                "regex": "(?s)(?:Access Denied.*You don't have permission to access.*Reference&#32;&#35;|<title>Access Denied</title>.*Reference&#32;&#35;[0-9a-fA-F.]+)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-waf-action-header",
+              "group": "response_headers",
+              "description": "Akamai WAF action response header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-akamai-waf-action",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "akamai-waf-marker",
+              "group": "static_integration",
+              "description": "Akamai reference error marker",
+              "type": "page_content",
+              "value": {
+                "regex": "Reference&#32;&#35;[0-9a-fA-F.]+",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
     }
   ]
 }
