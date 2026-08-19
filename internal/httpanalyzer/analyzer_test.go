@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -619,8 +620,13 @@ func TestAnalyzePreservesTLSServerName(t *testing.T) {
 	rootCAs := x509.NewCertPool()
 	rootCAs.AddCert(server.Certificate())
 	analyzer := analyzerForServer(t, server.URL, func(config *Config) { config.RootCAs = rootCAs })
-	if _, err := analyzer.Analyze(context.Background(), "https://example.com/"); err != nil {
+	result, err := analyzer.Analyze(context.Background(), "https://example.com/")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.TLS == nil || result.TLS.Version < tls.VersionTLS12 || result.TLS.CertificateIssuer == "" ||
+		result.TLS.CertificateSubject == "" || len(result.TLS.DNSNames) == 0 {
+		t.Errorf("reused TLS metadata = %#v, want bounded verified connection properties", result.TLS)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -662,6 +668,59 @@ func TestAnalyzeRequiresTLS12OrLater(t *testing.T) {
 	analyzer := analyzerForServer(t, server.URL, func(config *Config) { config.RootCAs = rootCAs })
 	if _, err := analyzer.Analyze(context.Background(), "https://example.com/"); err == nil {
 		t.Fatal("Analyze() against TLS 1.1 server error = nil")
+	}
+}
+
+func TestCollectTLSMetadataBoundsCertificateProperties(t *testing.T) {
+	t.Parallel()
+	dnsNames := make([]string, maxCertificateDNSNames+1)
+	for index := range dnsNames {
+		dnsNames[index] = fmt.Sprintf("%03d.example.test", index)
+	}
+	result := Result{}
+	collectTLSMetadata(&result, &tls.ConnectionState{
+		HandshakeComplete: true,
+		Version:           tls.VersionTLS13,
+		PeerCertificates: []*x509.Certificate{{
+			DNSNames: dnsNames,
+		}},
+	})
+	if result.TLS == nil || len(result.TLS.DNSNames) != maxCertificateDNSNames {
+		t.Fatalf("TLS metadata = %#v", result.TLS)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "truncated") {
+		t.Errorf("warnings = %v, want truncation warning", result.Warnings)
+	}
+}
+
+func TestCollectTLSMetadataOmitsMalformedDNSNamesWithoutRewriting(t *testing.T) {
+	t.Parallel()
+	result := Result{}
+	collectTLSMetadata(&result, &tls.ConnectionState{
+		HandshakeComplete: true,
+		Version:           tls.VersionTLS13,
+		PeerCertificates: []*x509.Certificate{{
+			DNSNames: []string{"valid.example.test", "edge.\nvendor.com", "bad name.example"},
+		}},
+	})
+	if result.TLS == nil || !slices.Equal(result.TLS.DNSNames, []string{"valid.example.test"}) {
+		t.Fatalf("TLS DNS names = %#v, want only the unchanged valid SAN", result.TLS)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "malformed TLS certificate DNS names were omitted" {
+		t.Errorf("warnings = %v, want one malformed-SAN warning", result.Warnings)
+	}
+}
+
+func TestBoundedCertificateTextRejectsMalformedValuesWithoutRewriting(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{
+		"edge.\nvendor.com",
+		strings.Repeat("a", maxCertificateNameBytes+1),
+		string([]byte{0xff}),
+	} {
+		if got := boundedCertificateText(value); got != "" {
+			t.Errorf("boundedCertificateText(%q) = %q, want omitted value", value, got)
+		}
 	}
 }
 

@@ -7,11 +7,17 @@ import "github.com/gkehren/hemera/pkg/model"
 const (
 	// SourceHTTP identifies observations produced by the bounded HTTP analyzer.
 	SourceHTTP = "http_analyzer"
+	// SourceDNSTLS identifies DNS and TLS signals derived from bounded DNS
+	// observation and the established HTTP connection.
+	SourceDNSTLS = "dns_tls_analyzer"
 )
 
-// Target identifies the user-requested resource passed to every analyzer.
+// Target identifies the user-requested resource passed to every analyzer. Prior
+// contains cloned observations from analyzers that completed earlier in the
+// configured pipeline.
 type Target struct {
-	URL string
+	URL   string
+	Prior []Observation
 }
 
 // Observation contains one analyzer's normalized signals, local warnings, and
@@ -34,6 +40,11 @@ func (o Observation) Clone() Observation {
 	if o.Metadata.HTTP != nil {
 		httpMetadata := *o.Metadata.HTTP
 		httpMetadata.Redirects = append([]HTTPRedirect{}, o.Metadata.HTTP.Redirects...)
+		if o.Metadata.HTTP.TLS != nil {
+			tlsMetadata := *o.Metadata.HTTP.TLS
+			tlsMetadata.DNSNames = append([]string{}, o.Metadata.HTTP.TLS.DNSNames...)
+			httpMetadata.TLS = &tlsMetadata
+		}
 		cloned.Metadata.HTTP = &httpMetadata
 	}
 	return cloned
@@ -75,6 +86,17 @@ type HTTPMetadata struct {
 	StatusCode    int
 	Redirects     []HTTPRedirect
 	BodyTruncated bool
+	TLS           *TLSMetadata
+}
+
+// TLSMetadata is the bounded subset of the verified final HTTP connection's
+// TLS state that can support detector evidence without another handshake.
+type TLSMetadata struct {
+	Version            uint16
+	NegotiatedProtocol string
+	CertificateIssuer  string
+	CertificateSubject string
+	DNSNames           []string
 }
 
 // HTTPRedirect records one sanitized HTTP redirect.

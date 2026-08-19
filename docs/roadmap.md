@@ -39,7 +39,7 @@ prerequisites.
 - [x] Decouple scanner orchestration from `httpanalyzer.Result` and define
   deterministic multi-analyzer aggregation and partial-failure semantics
   ([issue #3](https://github.com/gkehren/hemera/issues/3)).
-- [ ] Define the DNS/TLS observation contract and its place in the shared
+- [x] Define the DNS/TLS observation contract and its place in the shared
   analyzer pipeline before implementing collection in Milestone 1
   ([issue #4](https://github.com/gkehren/hemera/issues/4)).
 - [x] Make the special-purpose network policy maintainable against IANA registry
@@ -70,7 +70,7 @@ Browser -----┘
 ```
 
 - [x] Integrate a sandboxed local Chromium process through a mature CDP client.
-- [ ] Implement bounded DNS/TLS observation and normalized `dns_record` and
+- [x] Implement bounded DNS/TLS observation and normalized `dns_record` and
   `tls_property` signals, reusing validated HTTP/TLS state where practical
   ([issue #4](https://github.com/gkehren/hemera/issues/4)).
 - [ ] Capture browser network traffic, final DOM, scripts, iframes, and dynamic

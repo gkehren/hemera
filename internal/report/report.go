@@ -313,12 +313,23 @@ func safeValue(signal model.Signal) string {
 		return sanitizeURL(signal.Value)
 	case model.SignalTypeResourceHost:
 		return signal.Value
+	case model.SignalTypeDNSRecord, model.SignalTypeTLSProperty:
+		return safePlainValue(signal.Value)
 	case model.SignalTypeNetworkResponse:
 		if signal.Key == "status" {
 			return signal.Value
 		}
 	}
 	return ""
+}
+
+func safePlainValue(value string) string {
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return ""
+		}
+	}
+	return value
 }
 
 func sanitizeURL(rawURL string) string {
