@@ -38,11 +38,23 @@ The current HTTP analyzer applies these controls to its single navigation:
 - rejection of empty and mixed public/forbidden DNS answers;
 - a dedicated dial path that connects only to a validated IP and preserves the
   original hostname for TLS SNI and certificate checks;
+- an analyzer-owned TLS configuration with certificate validation enabled, TLS
+  1.2 or later, and only an optional root CA pool exposed for trust
+  customization;
 - fresh validation before redirects and fresh resolution for every connection,
   so a public-to-private DNS change is blocked;
-- no use of proxy environment variables and no subresource requests;
+- no use of proxy environment variables, no subresource requests, and at most
+  one active connection per host;
 - a 15-second total deadline, 5-second connection/TLS/header deadlines, at most
-  10 redirects, 1 MiB of response headers, and 2 MiB of decompressed body data.
+  10 redirects, 1 MiB of response headers, and 2 MiB of decompressed body data;
+- a 512-byte User-Agent limit and at most 4096 unique static script or iframe
+  URLs extracted from the final document;
+- cancellable charset decoding and two HTML5 tokenizer passes without a DOM
+  tree, preventing attacker-controlled nesting from driving recursive traversal.
+
+Configuration can only reduce these limits; it cannot raise the safety
+ceilings. Reaching the static resource limit preserves already collected
+signals, stops extraction, and emits one warning.
 
 These controls apply to the HTTP analyzer only. Browser and separate DNS/TLS
 analyzers remain planned and must establish equivalent boundaries when added.

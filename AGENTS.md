@@ -42,7 +42,7 @@ must remain synchronized as decisions evolve.
 
 Hemera is in early development. The repository currently contains:
 
-- the Go module `github.com/gkehren/hemera`, requiring Go 1.24 or later;
+- the Go module `github.com/gkehren/hemera`, requiring Go 1.25 or later;
 - a CLI in `cmd/hemera` with help, version, and bounded `scan` commands;
 - safe URL/DNS validation and passive HTTP analysis;
 - the normalized signal model, detector rule matching, and confidence scoring;

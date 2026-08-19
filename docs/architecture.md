@@ -38,7 +38,9 @@ different address. When DNS returns several public addresses, the dial path trie
 them in resolver order under the same context. Resolution and policy checks occur
 during initial validation, before each redirect, and again for every new
 connection. TLS continues to use the original hostname for SNI and certificate
-validation.
+validation. The analyzer owns the TLS configuration, enforces TLS 1.2 or later,
+and accepts only an optional root CA pool for deterministic trust customization;
+callers cannot disable certificate verification.
 
 ### HTTP analyzer
 
@@ -51,9 +53,17 @@ navigation, ignores environment proxies, and does not fetch subresources. The
 complete operation is limited to 15 seconds; connection, TLS handshake, and
 response-header waits are each limited to 5 seconds. It permits at most 10
 redirects, 1 MiB of response headers, and 2 MiB of decompressed body data.
-Intermediate and final HTTP responses produce normalized signals. Only the final
-body is parsed as HTML, using the HTML5 parser and charset support from
-`golang.org/x/net`.
+These are hard ceilings: configuration may lower but cannot raise them. The
+User-Agent is limited to 512 bytes, the transport permits one active connection
+per host, and static extraction stops after 4096 unique script or iframe URLs.
+Intermediate and final HTTP responses produce normalized signals.
+
+Only the final body is analyzed as HTML. Charset decoding and two streaming
+HTML5 tokenizer passes from `golang.org/x/net` first select the first valid
+HTTP(S) `<base href>`, then extract scripts and iframes in document order. The
+analyzer does not build a DOM tree. Decoding and both passes observe the scan
+context. Cancellation and deadlines remain fatal; non-security HTML decoding or
+tokenization errors become warnings without discarding HTTP signals.
 
 The analyzer records cookie names without values and redacts sensitive response
 headers. Stored and displayed URL observations mask query values. A body prefix

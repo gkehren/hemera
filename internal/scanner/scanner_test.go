@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -88,10 +89,12 @@ func TestScanPreservesAnalyzerFailure(t *testing.T) {
 func TestFixtureBackedDetectorFamilies(t *testing.T) {
 	t.Parallel()
 	type fixtureCase struct {
-		Name     string             `json:"name"`
-		Fixture  string             `json:"fixture"`
-		Detected []string           `json:"detected"`
-		Scores   map[string]float64 `json:"scores"`
+		Name     string              `json:"name"`
+		Fixture  string              `json:"fixture"`
+		Detected []string            `json:"detected"`
+		Scores   map[string]float64  `json:"scores"`
+		Levels   map[string]string   `json:"levels"`
+		Evidence map[string][]string `json:"evidence"`
 	}
 	manifest, err := os.ReadFile(filepath.Join("testdata", "cases.json"))
 	if err != nil {
@@ -152,6 +155,15 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 			if got := requests.Load(); got != 1 {
 				t.Errorf("HTTP requests = %d, want exactly one navigation", got)
 			}
+			for i, signal := range result.HTTP.Signals {
+				if err := signal.Validate(); err != nil {
+					t.Errorf("HTTP signal %d is invalid: %v", i, err)
+				}
+				if signal.Type != model.SignalTypePageContent &&
+					strings.Contains(signal.Value+signal.URL, "synthetic-site-key") {
+					t.Errorf("HTTP signal %d retained a synthetic secret outside internal page content: %#v", i, signal)
+				}
+			}
 
 			var detected []string
 			for _, detection := range result.Detections {
@@ -162,6 +174,23 @@ func TestFixtureBackedDetectorFamilies(t *testing.T) {
 					t.Errorf("unexpected detector %q", detection.RuleID)
 				} else if detection.Score != want {
 					t.Errorf("detector %q score = %v, want %v", detection.RuleID, detection.Score, want)
+				}
+				if want, ok := testCase.Levels[detection.RuleID]; !ok {
+					t.Errorf("missing expected level for detector %q", detection.RuleID)
+				} else if string(detection.Level) != want {
+					t.Errorf("detector %q level = %q, want %q", detection.RuleID, detection.Level, want)
+				}
+				ids := make([]string, 0, len(detection.PositiveEvidence))
+				for _, evidence := range detection.PositiveEvidence {
+					ids = append(ids, evidence.EvidenceID)
+					if err := evidence.Signal.Validate(); err != nil {
+						t.Errorf("detector %q evidence %q has invalid signal: %v", detection.RuleID, evidence.EvidenceID, err)
+					}
+				}
+				if want, ok := testCase.Evidence[detection.RuleID]; !ok {
+					t.Errorf("missing expected evidence for detector %q", detection.RuleID)
+				} else if !slices.Equal(ids, want) {
+					t.Errorf("detector %q evidence IDs = %v, want %v", detection.RuleID, ids, want)
 				}
 			}
 			if !slices.Equal(detected, testCase.Detected) {

@@ -109,6 +109,13 @@ cookie names, and statically referenced scripts, iframes, and third-party hosts.
 Query values, cookie values, sensitive header values, and HTML content are not
 printed.
 
+HTTP configuration can tighten but cannot raise the built-in safety ceilings:
+15 seconds total, 5 seconds for connection, TLS, and response headers, 10
+redirects, 1 MiB of response headers, 2 MiB of decompressed body data, and 4096
+unique script or iframe URLs. Static HTML extraction uses two cancellable HTML5
+tokenizer passes and does not construct a DOM tree. TLS uses certificate
+validation, hostname-derived SNI, and TLS 1.2 or later.
+
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
 documented in [JSON report schema V1](docs/report-schema.md). A non-2xx response
@@ -131,7 +138,8 @@ built-in rules, and scoring semantics.
 
 ## Development
 
-Hemera requires Go 1.24 or later. From the repository root:
+Hemera requires Go 1.25 or later. Because it processes untrusted network input,
+build it with the latest supported Go patch release. From the repository root:
 
 ```sh
 go run ./cmd/hemera --help
