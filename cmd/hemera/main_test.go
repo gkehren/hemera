@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
 	"github.com/gkehren/hemera/internal/rules"
 	"github.com/gkehren/hemera/internal/scanner"
@@ -166,7 +167,7 @@ func TestRunScanRequiresExactlyOneURL(t *testing.T) {
 
 func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 	t.Parallel()
-	result := scanner.Result{HTTP: httpanalyzer.Result{
+	result := scanResultWithHTTP(httpanalyzer.Result{
 		RequestedURL: "https://example.test/?redacted",
 		FinalURL:     "https://example.test/login?redacted",
 		StatusCode:   403,
@@ -175,7 +176,8 @@ func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 		}},
 		BodyTruncated: true,
 		Warnings:      []string{"response body was truncated"},
-	}, Detections: []scoring.Detection{{
+	})
+	result.Detections = []scoring.Detection{{
 		RuleID: "test.rule", Name: "Test product", Detected: true,
 		ConditionMatched: true, MinimumEvidenceMet: true,
 		EvidenceScore: 75, Score: 75, Level: scoring.LevelHigh,
@@ -187,7 +189,7 @@ func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 			ID: "static_integration", EvidenceIDs: []string{"script"},
 			SelectedEvidenceID: "script", RawContribution: 75, Contribution: 75,
 		}},
-	}}}
+	}}
 	var stdout, stderr bytes.Buffer
 	if code := runScan(context.Background(), []string{"https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
 		t.Fatalf("code = %d", code)
@@ -205,9 +207,9 @@ func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 
 func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 	t.Parallel()
-	result := scanner.Result{HTTP: httpanalyzer.Result{
+	result := scanResultWithHTTP(httpanalyzer.Result{
 		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 404,
-	}}
+	})
 	var stdout, stderr bytes.Buffer
 	if code := runScan(context.Background(), []string{"--format", "json", "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
@@ -215,7 +217,7 @@ func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	for _, expected := range []string{`"schema_version": 2`, `"status_code": 404`, `"detections": []`} {
+	for _, expected := range []string{`"schema_version": 3`, `"status_code": 404`, `"detections": []`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("JSON lacks %q: %s", expected, stdout.String())
 		}
@@ -253,9 +255,9 @@ func TestRunScanHelpAndInvalidFormat(t *testing.T) {
 
 func TestRunScanReportsOutputFailure(t *testing.T) {
 	t.Parallel()
-	result := scanner.Result{HTTP: httpanalyzer.Result{
+	result := scanResultWithHTTP(httpanalyzer.Result{
 		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,
-	}}
+	})
 	var stderr bytes.Buffer
 	if code := runScan(context.Background(), []string{"https://example.test/"}, errorWriter{}, &stderr, fakeScanner{result: result}); code != 1 {
 		t.Fatalf("code = %d, want 1", code)
@@ -287,4 +289,36 @@ func TestRunScanClassifiesFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunPreservesHTTPOnlyInvalidTargetBehavior(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", "ftp://example.test/"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("run() code = %d, want 2; stderr = %q", code, stderr.String())
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid or forbidden initial target") {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func scanResultWithHTTP(result httpanalyzer.Result) scanner.Result {
+	redirects := make([]analysis.HTTPRedirect, 0, len(result.Redirects))
+	for _, redirect := range result.Redirects {
+		redirects = append(redirects, analysis.HTTPRedirect{
+			From: redirect.From, To: redirect.To, Status: redirect.Status,
+		})
+	}
+	return scanner.Result{Analyzers: []scanner.AnalyzerResult{{
+		Observation: analysis.Observation{
+			Source:   analysis.SourceHTTP,
+			Warnings: append([]string{}, result.Warnings...),
+			Metadata: analysis.Metadata{HTTP: &analysis.HTTPMetadata{
+				RequestedURL: result.RequestedURL, FinalURL: result.FinalURL,
+				StatusCode: result.StatusCode, Redirects: redirects,
+				BodyTruncated: result.BodyTruncated,
+			}},
+		},
+		Status: scanner.AnalyzerStatusComplete,
+	}}}
 }

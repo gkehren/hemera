@@ -16,7 +16,7 @@ and future contributor documentation.
    requirements and explicit non-goals.
 5. [Detector rule schema V2](detector-rules.md) documents the implemented rule,
    matching, and confidence-scoring contracts.
-6. [JSON report schema V2](report-schema.md) documents the stable automation
+6. [JSON report schema V3](report-schema.md) documents the stable automation
    output from `hemera scan --format json`.
 
 ## Documentation status

@@ -32,7 +32,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "hemera: load detector rules: %v\n", err)
 			return 1
 		}
-		engine, err := scanner.New(analyzer, ruleSet)
+		engine, err := scanner.New(scanner.Config{
+			Analyzers: []scanner.AnalyzerConfig{{
+				Analyzer: analyzer, FailurePolicy: scanner.FailurePolicyAbort,
+			}},
+			RuleSet: ruleSet,
+		})
 		if err != nil {
 			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
 			return 1

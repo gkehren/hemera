@@ -8,9 +8,10 @@ security services.
 
 > Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
 > collection, detector rule matching, correlation-aware confidence scoring,
-> initial Turnstile and reCAPTCHA detectors, text/JSON reports, and internal
-> sandboxed Chromium/CDP session startup are implemented. Browser page analysis,
-> DNS and TLS analyzers, and broader detector coverage are not available yet.
+> initial Turnstile and reCAPTCHA detectors, text/JSON reports, deterministic
+> multi-analyzer orchestration, and internal sandboxed Chromium/CDP session
+> startup are implemented. Browser page analysis, DNS and TLS analyzers, and
+> broader detector coverage are not available yet.
 
 ## What Hemera aims to provide
 
@@ -89,16 +90,17 @@ Management detection.
 ## Architecture
 
 ```text
-Target URL -> URL validation ┬-> HTTP analyzer -----┐
-                             ├-> DNS/TLS analyzer --┼-> normalized signals
-                             └-> browser analyzer --┘          |
-                                                              v
-                     report <- confidence engine <- rule engine
+Target URL -> scanner orchestration ┬-> HTTP analyzer -----┐
+                                    ├-> DNS/TLS analyzer --┼-> normalized signals
+                                    └-> browser analyzer --┘          |
+                                                                     v
+                            report <- confidence engine <- rule engine
 ```
 
 Hemera is implemented in Go. Analyzers emit a shared signal model; the
-data-driven rule engine consumes those signals without depending on `net/http`
-or Chromium directly.
+scanner validates and aggregates those signals in configured analyzer order.
+The data-driven rule engine and scoring layer consume only the aggregate signals
+without depending on `net/http`, DNS/TLS, or Chromium implementation types.
 
 ## Current HTTP scan
 
@@ -125,7 +127,7 @@ validation, hostname-derived SNI, and TLS 1.2 or later.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V2](docs/report-schema.md). A non-2xx response
+documented in [JSON report schema V3](docs/report-schema.md). A non-2xx response
 and a truncated body are successful observations; DNS, connection, TLS,
 timeout, read, and unsafe-redirect failures are reported as scan failures.
 

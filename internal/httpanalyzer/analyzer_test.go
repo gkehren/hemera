@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/networkguard"
 	"github.com/gkehren/hemera/pkg/model"
 )
@@ -51,6 +52,21 @@ func analyzerForServer(t *testing.T, serverURL string, change func(*Config)) *An
 		t.Fatal(err)
 	}
 	return analyzer
+}
+
+func TestObservePreservesAnalyzerIdentityOnFailure(t *testing.T) {
+	t.Parallel()
+	analyzer, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := analyzer.Observe(context.Background(), analysis.Target{URL: "ftp://example.test/"})
+	if !errors.Is(err, ErrInitialTarget) {
+		t.Fatalf("Observe() error = %v, want ErrInitialTarget", err)
+	}
+	if observation.Source != analysis.SourceHTTP || len(observation.Signals) != 0 || !observation.Metadata.Empty() {
+		t.Errorf("failed observation = %#v", observation)
+	}
 }
 
 func TestNewValidatesConfiguration(t *testing.T) {

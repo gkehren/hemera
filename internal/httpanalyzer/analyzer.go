@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/networkguard"
 	"github.com/gkehren/hemera/pkg/model"
 	"golang.org/x/net/html"
@@ -28,7 +29,7 @@ import (
 )
 
 const (
-	source = "http_analyzer"
+	source = analysis.SourceHTTP
 
 	maxTotalTimeout                = 15 * time.Second
 	maxConnectTimeout              = 5 * time.Second
@@ -120,6 +121,36 @@ func New(config Config) (*Analyzer, error) {
 	}
 	guard := networkguard.New(networkguard.Config{Resolver: config.Resolver, Dialer: dialer})
 	return &Analyzer{config: config, guard: guard}, nil
+}
+
+// Source returns the stable identity used for this analyzer's observations.
+func (*Analyzer) Source() string {
+	return source
+}
+
+// Observe adapts one HTTP navigation to the analyzer-agnostic observation
+// contract consumed by scan orchestration.
+func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
+	observation := analysis.Observation{Source: source}
+	result, err := a.Analyze(ctx, target.URL)
+	if err != nil {
+		return observation, err
+	}
+
+	redirects := make([]analysis.HTTPRedirect, 0, len(result.Redirects))
+	for _, redirect := range result.Redirects {
+		redirects = append(redirects, analysis.HTTPRedirect{
+			From: redirect.From, To: redirect.To, Status: redirect.Status,
+		})
+	}
+	observation.Signals = append([]model.Signal{}, result.Signals...)
+	observation.Warnings = append([]string{}, result.Warnings...)
+	observation.Metadata.HTTP = &analysis.HTTPMetadata{
+		RequestedURL: result.RequestedURL, FinalURL: result.FinalURL,
+		StatusCode: result.StatusCode, Redirects: redirects,
+		BodyTruncated: result.BodyTruncated,
+	}
+	return observation, nil
 }
 
 // Analyze performs a single GET navigation and returns normalized observations.

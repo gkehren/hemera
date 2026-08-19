@@ -9,10 +9,10 @@ conflicting evidence before reporters render the result.
 
 ```mermaid
 flowchart TD
-    URL[Target URL] --> Validate[URL validation]
-    Validate --> HTTP[HTTP analyzer]
-    Validate --> DNS[DNS / TLS analyzer]
-    Validate --> Browser[Chromium / CDP analyzer]
+    URL[Target URL] --> Scanner[Ordered scanner orchestration]
+    Scanner --> HTTP[HTTP analyzer]
+    Scanner --> DNS[DNS / TLS analyzer]
+    Scanner --> Browser[Chromium / CDP analyzer]
     HTTP --> Signals[Normalized signal collector]
     DNS --> Signals
     Browser --> Signals
@@ -57,6 +57,10 @@ These are hard ceilings: configuration may lower but cannot raise them. The
 User-Agent is limited to 512 bytes, the transport permits one active connection
 per host, and static extraction stops after 4096 unique script or iframe URLs.
 Intermediate and final HTTP responses produce normalized signals.
+
+The analyzer's `Observe` boundary converts its navigation result into the common
+observation envelope. Navigation diagnostics are retained as typed HTTP metadata
+while only normalized signals enter rule matching and scoring.
 
 Only the final body is analyzed as HTML. Charset decoding and two streaming
 HTML5 tokenizer passes from `golang.org/x/net` first select the first valid
@@ -133,6 +137,24 @@ shared invariants before signals enter the detection pipeline.
 The rule engine must depend on this model, not directly on Chromium or
 `net/http`. This boundary enables deterministic fixture tests without live scans.
 
+`internal/analysis` wraps signals in a small typed observation contract:
+
+```go
+type Observation struct {
+    Source   string
+    Signals  []model.Signal
+    Warnings []string
+    Metadata Metadata
+}
+```
+
+`Metadata` currently has an optional `HTTPMetadata` member for the requested and
+final URLs, status, redirects, and body-truncation state. This information is
+diagnostic and does not become detector evidence unless an analyzer separately
+emits an appropriate normalized signal. Future source-specific metadata must add
+a bounded typed member; opaque `map[string]any` payloads are not part of the
+contract.
+
 ### Detection rules
 
 Rules are data-driven through the strict, versioned JSON schema implemented in
@@ -207,24 +229,53 @@ later; none is part of V2.
 
 ### Scan orchestration and reporting
 
-`internal/scanner` is the thin application boundary that runs the HTTP analyzer
-and sends normalized signals to the rule and scoring packages. It owns neither
-network policy nor presentation.
+`internal/scanner` is the thin application boundary that runs an ordered list of
+analyzers. Each analyzer has a stable unique source and returns an
+`analysis.Observation`. Every signal in that observation must carry the same
+source; an analyzer cannot attribute evidence to another source. The scanner runs
+analyzers sequentially in configuration order, validates every `model.Signal`,
+appends signals without sorting or blind deduplication, and invokes scoring once
+with the aggregate slice. Analyzer order, signal order within each observation,
+outcomes, and report coverage are therefore deterministic. The aggregate result
+retains the original target independently of HTTP metadata so partial scans can
+still produce a sanitized target field.
+
+Each configured analyzer has one explicit failure policy:
+
+- `abort` stops the scan and returns the analyzer error. The current HTTP analyzer
+  uses this policy, so invalid targets and navigation failures retain the existing
+  CLI failure behavior and no later analyzer runs.
+- `continue` retains valid partial signals and typed metadata, records the
+  analyzer as `partial`, and runs later analyzers. If no signal or typed metadata
+  was produced, the outcome is `failed`. Both outcomes remain visible in reports.
+
+Caller cancellation is always fatal, including for an analyzer configured to
+continue. Invalid signals, observation or signal source mismatches, and duplicate
+typed metadata kinds are analyzer contract violations and are also always fatal.
+Successful observations may contain analyzer-local warnings without becoming
+partial. The scanner retains local errors for internal diagnostics, but reporters
+omit their text because it may contain untrusted input.
+
+The current CLI configures only the HTTP analyzer with `abort`. Synthetic scanner
+tests use multiple independent analyzers; DNS/TLS and browser collection are not
+yet connected.
 
 `internal/report` converts scanner results into a secret-minimized report model.
 The CLI renders that model as text by default or as stable, versioned JSON with
 `--format json`. Both formats explain detected and non-detected rules, including
 raw positive evidence, its correlation group, the selected maximum contribution,
-and later penalties. They omit HTML and header/cookie values and sanitize every
-emitted URL. The JSON contract is documented in
-[JSON report schema V2](report-schema.md). An exportable local HTML report
-remains a later goal.
+and later penalties. JSON V3 also records each analyzer's source, coverage status,
+and producer-sanitized warnings. They omit HTML, header/cookie values, and
+analyzer error details and sanitize every emitted URL. The JSON contract is documented in
+[JSON report schema V3](report-schema.md). An exportable local HTML report remains
+a later goal.
 
 ## Proposed repository layout
 
 ```text
 cmd/hemera/               CLI entry point
 internal/scanner/         scan orchestration
+internal/analysis/        shared observations and typed analyzer metadata
 internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
 internal/browser/         Chromium/CDP session lifecycle; collection planned
