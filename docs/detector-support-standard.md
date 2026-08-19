@@ -616,6 +616,86 @@ The following detector families currently meet the support standard:
 
 ---
 
+### 12. hCaptcha (`hcaptcha.challenge`)
+
+- **Category:** `captcha_challenge`
+- **Vendor:** `hCaptcha`
+- **Product:** `hCaptcha`
+- **Rule ID:** `hcaptcha.challenge`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `hcaptcha-client-script` | `static_integration` | `script_url` | `^https://(?:js\.|assets\.)?hcaptcha\.com/(?:1/api\.js|c/)` | 75 | Decisive | Documented official hCaptcha client-side API script URL ([hCaptcha docs](https://docs.hcaptcha.com/configuration)). |
+| `hcaptcha-challenge-iframe` | `static_integration` | `iframe_url` | `^https://(?:newassets\.)?hcaptcha\.com/captcha/` | 75 | Decisive | Official hCaptcha interactive challenge widget iframe URL. |
+| `hcaptcha-html-marker` | `static_integration` | `page_content` | `h-captcha` | 30 | Supporting | Standard widget container class name. |
+| `hcaptcha-inline-call` | `static_integration` | `page_content` | `hcaptcha\.(execute\|render\|reset)\(` | 35 | Supporting | Client-side JavaScript API invocation pattern. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- The official client script or challenge iframe provides 75 points (`high`).
+- Supporting HTML markers and inline API invocations provide 30 or 35 points (`low`), resulting in `not_detected` without the official script.
+
+#### Vendor vs. product separation
+
+- Detection of hCaptcha indicates client-side CAPTCHA challenge integration only and does not imply underlying hosting, WAF, or CDN protections.
+
+#### Fixture coverage
+
+- **Positive:** `hcaptcha-positive.html` &mdash; contains official script and `h-captcha` container (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `ambiguous-markers.html` &mdash; contains `h-captcha` marker and `hcaptcha.render()` call without script (`score: 35`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible. Static markup alone yields score 35.
+- **Known false negatives:** Custom self-hosted proxy scripts forwarding hCaptcha verification payloads.
+
+---
+
+### 13. Arkose MatchKey (`arkoselabs.matchkey`)
+
+- **Category:** `captcha_challenge`
+- **Vendor:** `Arkose Labs`
+- **Product:** `Arkose MatchKey`
+- **Rule ID:** `arkoselabs.matchkey`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `arkose-client-script` | `static_integration` | `script_url` | `^https://(?:[a-z0-9-]+\.)?(?:arkoselabs\.com\|funcaptcha\.com)/(?:v2/(?:[a-f0-9-]+/)?api\.js\|fc/api/\|client/)` | 75 | Decisive | Documented official Arkose Labs / FunCAPTCHA client API script URL ([Arkose Labs docs](https://developer.arkoselabs.com/)). |
+| `arkose-challenge-iframe` | `static_integration` | `iframe_url` | `^https://(?:[a-z0-9-]+\.)?(?:arkoselabs\.com\|funcaptcha\.com)/fc/gc/` | 75 | Decisive | Official Arkose Labs challenge frame URL. |
+| `arkose-html-marker` | `static_integration` | `page_content` | `arkose-enforcement`, `fc-token`, `arkose-matchkey` | 30 | Supporting | Standard widget container identifiers. |
+| `arkose-inline-call` | `static_integration` | `page_content` | `(?:setupArkose\|arkose\.run\|myArkose)\(` | 35 | Supporting | Client-side initialization callback invocation. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- The official client script or challenge iframe provides 75 points (`high`).
+- Supporting HTML markers and callback functions provide 30 or 35 points (`low`), resulting in `not_detected` without the script.
+
+#### Vendor vs. product separation
+
+- Detection of Arkose MatchKey indicates client-side challenge integration only and does not imply underlying hosting or WAF protections.
+
+#### Fixture coverage
+
+- **Positive:** `arkose-positive.html` &mdash; contains official client API script, container, and callback (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `ambiguous-markers.html` &mdash; contains `arkose-enforcement` marker and `setupArkose()` call without script (`score: 35`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible.
+- **Known false negatives:** Custom proxy domains or enterprise deployments using fully self-hosted wrapper scripts.
+
+---
+
 ## Contributor checklist for new detector families
 
 When proposing a new detector family or adding rules to an existing family:

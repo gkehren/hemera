@@ -886,6 +886,138 @@
           }
         ]
       }
+    },
+    {
+      "id": "hcaptcha.challenge",
+      "name": "hCaptcha",
+      "description": "Detects the documented hCaptcha client script; static HTML markers and inline API calls are supporting evidence only.",
+      "category": "captcha_challenge",
+      "vendor": "hCaptcha",
+      "product": "hCaptcha",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "hcaptcha-client-script",
+              "group": "static_integration",
+              "description": "Documented hCaptcha client API script URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://(?:js\\.|assets\\.)?hcaptcha\\.com/(?:1/api\\.js|c/)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "hcaptcha-challenge-iframe",
+              "group": "static_integration",
+              "description": "hCaptcha challenge container iframe URL",
+              "type": "iframe_url",
+              "value": {
+                "regex": "^https://(?:newassets\\.)?hcaptcha\\.com/captcha/",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "hcaptcha-html-marker",
+              "group": "static_integration",
+              "description": "hCaptcha HTML widget container marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:^|[^A-Za-z0-9_-])h-captcha(?:[^A-Za-z0-9_-]|$)",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "hcaptcha-inline-call",
+              "group": "static_integration",
+              "description": "Inline hCaptcha API method invocation",
+              "type": "page_content",
+              "value": {
+                "regex": "hcaptcha\\s*\\.\\s*(?:execute|render|reset)\\s*\\(",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "arkoselabs.matchkey",
+      "name": "Arkose MatchKey",
+      "description": "Detects documented Arkose Labs / FunCAPTCHA client API scripts; static widget containers and callback calls are supporting evidence only.",
+      "category": "captcha_challenge",
+      "vendor": "Arkose Labs",
+      "product": "Arkose MatchKey",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "arkose-client-script",
+              "group": "static_integration",
+              "description": "Documented Arkose Labs / FunCAPTCHA client API script URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://(?:[a-z0-9-]+\\.)?(?:arkoselabs\\.com|funcaptcha\\.com)/(?:v2/(?:[a-f0-9-]+/)?api\\.js|fc/api/|client/)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "arkose-challenge-iframe",
+              "group": "static_integration",
+              "description": "Arkose Labs challenge frame URL",
+              "type": "iframe_url",
+              "value": {
+                "regex": "^https://(?:[a-z0-9-]+\\.)?(?:arkoselabs\\.com|funcaptcha\\.com)/fc/gc/",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "arkose-html-marker",
+              "group": "static_integration",
+              "description": "Arkose Labs widget container marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:arkose-enforcement|fc-token|arkose-matchkey)",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "arkose-inline-call",
+              "group": "static_integration",
+              "description": "Arkose Labs callback or initialization function call",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:setupArkose|arkose\\.run|myArkose)\\s*\\(",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
     }
   ]
 }

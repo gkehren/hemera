@@ -19,7 +19,11 @@ and future contributor documentation.
 6. [Detector family support standard](detector-support-standard.md) defines the
    quality criteria, fixture requirements, and evidence/scoring rationale for
    supported detector families.
-7. [JSON report schema V4](report-schema.md) documents the versioned,
+7. [Regression corpus and accuracy standards](regression-and-accuracy.md) documents
+   the synthetic fixture corpus, accuracy metrics, and false-positive/negative rates.
+8. [Detector limitations and operational boundaries](detector-limitations.md) details
+   the known limitations, blind spots, and evasion profiles for all built-in rules.
+9. [JSON report schema V4](report-schema.md) documents the versioned,
    experimental pre-release automation output from
    `hemera scan --format json`.
 

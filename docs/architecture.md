@@ -316,11 +316,11 @@ rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
 `internal/detectors` embeds the validated V2 rules shipped with the binary.
-Hemera includes 11 built-in rules across 5 vendor families (Cloudflare, Google,
-AWS, DataDome, and Akamai) with strict product-level separation. They use decisive
-evidence (headers, scripts, block page DOM, DNS/TLS) and supporting markers grouped
-by correlation. Every supported rule adheres to the quality, evidence, and fixture
-requirements in [Detector family support standard](detector-support-standard.md).
+Hemera includes 13 built-in rules across 7 vendor families (Cloudflare, Google,
+AWS, DataDome, Akamai, hCaptcha, and Arkose Labs) with strict product-level
+separation. They use decisive evidence (headers, scripts, block page DOM, DNS/TLS)
+and supporting markers grouped by correlation. Every supported rule adheres to the
+quality, evidence, and fixture requirements in [Detector family support standard](detector-support-standard.md).
 
 ### Confidence engine
 

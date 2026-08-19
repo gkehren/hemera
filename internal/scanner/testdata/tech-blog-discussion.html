@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Understanding Modern Web Application Firewalls and CAPTCHA Systems</title>
+</head>
+<body>
+  <article>
+    <h1>A Comparative Analysis of Cloudflare, AWS WAF, Akamai, DataDome, and CAPTCHAs</h1>
+    <p>
+      In this article, we analyze common HTTP headers and DOM markers emitted by various security products.
+    </p>
+    <section>
+      <h2>Cloudflare & WAF</h2>
+      <p>
+        Cloudflare reverse proxy nodes often attach headers such as <code>cf-ray: 8e5f123456789abc-IAD</code> and
+        <code>cf-mitigated: challenge</code> when challenge mode is activated. In client HTML, you might see container
+        classes like <code>cf-turnstile</code> or error wrappers like <code>cf-error-details</code>.
+      </p>
+    </section>
+    <section>
+      <h2>AWS WAF & CloudFront</h2>
+      <p>
+        AWS CloudFront assigns request IDs via <code>x-amz-cf-id</code>. When AWS WAF inspects traffic, it can issue an
+        <code>aws-waf-token</code> cookie or respond with <code>405 Method Not Allowed</code>. Integration usually involves
+        the AWS WAF SDK marker <code>aws-waf-</code>.
+      </p>
+    </section>
+    <section>
+      <h2>DataDome & Akamai</h2>
+      <p>
+        DataDome uses tracking scripts like <code>js.datadome.co/tags.js</code> and sets <code>x-datadome: protected</code>.
+        Akamai GHost edge servers attach <code>x-akamai-transformed</code> and error pages containing
+        <code>Reference&#32;&#35;18.12345678.1234567890.abcdef12</code>. Bot Manager uses cookies like <code>_abck</code>.
+      </p>
+    </section>
+    <section>
+      <h2>reCAPTCHA, hCaptcha, and Arkose MatchKey</h2>
+      <p>
+        Google reCAPTCHA v2 uses <code>g-recaptcha</code> widgets, hCaptcha uses <code>h-captcha</code>, and Arkose Labs uses
+        <code>arkose-enforcement</code> containers with callback functions like <code>setupArkose()</code>.
+      </p>
+    </section>
+    <pre><code>
+      // Example configuration snippet (not executed)
+      const config = {
+        turnstileKey: "0x4AAAAAAAX..",
+        recaptchaKey: "6LeIxacZAAAAA..",
+        hcaptchaKey: "10000000-ffff-ffff-ffff-000000000001",
+        arkoseKey: "ABCD-1234-EFGH"
+      };
+    </code></pre>
+  </article>
+</body>
+</html>

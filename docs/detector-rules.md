@@ -11,7 +11,7 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Hemera ships 11 built-in detector rules across Cloudflare, Google, AWS, DataDome, and Akamai:
+Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs:
 
 | Rule ID | Category | Product | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
@@ -26,6 +26,8 @@ Hemera ships 11 built-in detector rules across Cloudflare, Google, AWS, DataDome
 | `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, Akamai TLS |
 | `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
 | `akamai.app_and_api_protector` | `waf` | Akamai App & API Protector | Reference error block page DOM, `x-akamai-session-info` | `x-akamai-waf-action`, `Reference #` marker |
+| `hcaptcha.challenge` | `captcha_challenge` | hCaptcha | Official `js.hcaptcha.com/1/api.js` script or challenge iframe | `h-captcha` container marker, `hcaptcha.render()` call |
+| `arkoselabs.matchkey` | `captcha_challenge` | Arkose MatchKey | Official `client-api.arkoselabs.com/v2/api.js` script or challenge frame | `arkose-enforcement` container, `setupArkose()` call |
 
 Decisive evidence contributes the 75-point detection threshold. Supporting
 markers cannot produce a detection by themselves, which limits false positives
@@ -38,7 +40,7 @@ infrastructure (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) never impli
 that a corresponding WAF, Bot Management, or CAPTCHA product is active.
 Product rules requiring edge infrastructure declare formal prerequisites via `requires`
 (e.g., `cloudflare.bot_management`, `akamai.bot_manager`, `akamai.app_and_api_protector`),
-while standalone products (`cloudflare.turnstile`, `google.recaptcha`, `aws.waf`, `datadome`)
+while standalone products (`cloudflare.turnstile`, `google.recaptcha`, `aws.waf`, `datadome.bot_protection`, `hcaptcha.challenge`, `arkoselabs.matchkey`)
 operate on any origin.
 
 The signatures follow the vendors' documented client integrations and edge specifications:
@@ -51,6 +53,8 @@ The signatures follow the vendors' documented client integrations and edge speci
 - [AWS WAF JavaScript SDK integration](https://docs.aws.amazon.com/waf/latest/developerguide/waf-javascript-sdk.html)
 - [DataDome JavaScript tag integration](https://docs.datadome.co/docs/javascript-tag)
 - [Akamai Bot Manager sensor integration](https://techdocs.akamai.com/bot-manager/docs/javascript-sensor)
+- [hCaptcha client-side integration](https://docs.hcaptcha.com/configuration)
+- [Arkose Labs MatchKey client integration](https://developer.arkoselabs.com/)
 
 Checked-in synthetic fixtures cover positive, negative, ambiguous, and
 regression cases. They run through the real HTTP analyzer without contacting

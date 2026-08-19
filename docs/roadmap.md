@@ -107,10 +107,10 @@ baseline, not yet a broad measurement of false-positive and false-negative rates
   - explicit vendor-level versus product-level separation.
 - [x] Complete general Cloudflare coverage with product-level separation.
 - [x] Add AWS WAF, DataDome, and Akamai detectors.
-- [ ] Evaluate hCaptcha and Arkose Labs signatures.
-- [ ] Expand the regression corpus, measure false positives, and record known
+- [x] Evaluate hCaptcha and Arkose Labs signatures.
+- [x] Expand the regression corpus, measure false positives, and record known
   false negatives.
-- [ ] Document the limitations of every supported detector.
+- [x] Document the limitations of every supported detector.
 
 **Exit criterion:** at least five protection families meet the documented
 evidence, fixture, rationale, and regression-measurement standards.
