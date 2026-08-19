@@ -6,8 +6,9 @@ explainable report about the protections that may be present: CDN/reverse proxy,
 WAF, bot management, CAPTCHA/challenge, client-side fingerprinting, and related
 security services.
 
-> Hemera is in early development. The Go module, bootstrap CLI, and normalized
-> signal model are implemented; scanning and detection are not available yet.
+> Hemera is in early development. Safe HTTP scanning and normalized HTTP signal
+> collection are implemented. Detection rules, confidence scoring, browser
+> analysis, and stable report formats are not available yet.
 
 ## What Hemera aims to provide
 
@@ -77,17 +78,37 @@ Go is the planned implementation language. Analyzers will emit a shared signal
 model; a data-driven rule engine will consume those signals without depending on
 `net/http` or Chromium directly.
 
+## Current HTTP scan
+
+Hemera can perform one bounded, passive HTTP navigation:
+
+```sh
+go run ./cmd/hemera scan https://example.com/
+```
+
+The scan validates the initial destination and every redirect, blocks private
+and special-purpose networks, ignores environment proxy settings, and does not
+load page subresources. It reports HTTP status, redirects, response-header names,
+cookie names, and statically referenced scripts, iframes, and third-party hosts.
+Query values, cookie values, sensitive header values, and HTML content are not
+printed.
+
+The current human-readable output is diagnostic and intentionally unstable. No
+JSON contract or product detection is exposed yet. A non-2xx response and a
+truncated body are successful observations; DNS, connection, TLS, timeout, read,
+and unsafe-redirect failures are reported as scan failures.
+
+Only scan public targets that you are authorized to assess.
+
 ## Development
 
 Hemera requires Go 1.24 or later. From the repository root:
 
 ```sh
 go run ./cmd/hemera --help
+go run ./cmd/hemera scan https://example.com/
 go test ./...
 ```
-
-The bootstrap CLI currently exposes help and version information. The `scan`
-command will be introduced by a later Milestone 0 step.
 
 ## Documentation
 
@@ -102,10 +123,9 @@ The original product brief is maintained in
 
 ## Contributing
 
-The repository is not ready for implementation contributions yet. Early feedback
-on the scope, signal model, confidence model, detector format, and safety
-assumptions is welcome. Contribution instructions will be added when the initial
-Go module and test conventions are in place.
+Formal contribution instructions are not available yet. Early feedback on the
+scope, signal model, confidence model, detector format, and safety assumptions is
+welcome.
 
 ## License
 

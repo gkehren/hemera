@@ -7,8 +7,8 @@ are intentionally unchecked while the repository remains in its design phase.
 
 - [x] Initialize the Go module and CLI entry point.
 - [x] Define and test the normalized `Signal` model.
-- [ ] Implement safe URL validation and redirect validation.
-- [ ] Implement the HTTP analyzer.
+- [x] Implement safe URL validation and redirect validation.
+- [x] Implement the HTTP analyzer.
 - [ ] Define and validate the detector rule schema.
 - [ ] Implement rule matching and confidence scoring V1.
 - [ ] Render CLI and JSON reports.

@@ -26,6 +26,27 @@ Before any connection, and again for every redirect or fresh DNS resolution:
 If a hosted scanner is introduced, it also needs isolation, rate limiting,
 admission controls, auditability, and a deployment-specific threat model.
 
+### Implemented HTTP boundary
+
+The current HTTP analyzer applies these controls to its single navigation:
+
+- absolute `http` and `https` URLs only, with no embedded credentials, IPv6
+  zones, ambiguous whitespace/control characters, or invalid ports;
+- rejection of loopback, private, link-local, multicast, unspecified,
+  carrier-grade NAT, documentation, benchmarking, reserved, and metadata address
+  ranges for IPv4 and IPv6;
+- rejection of empty and mixed public/forbidden DNS answers;
+- a dedicated dial path that connects only to a validated IP and preserves the
+  original hostname for TLS SNI and certificate checks;
+- fresh validation before redirects and fresh resolution for every connection,
+  so a public-to-private DNS change is blocked;
+- no use of proxy environment variables and no subresource requests;
+- a 15-second total deadline, 5-second connection/TLS/header deadlines, at most
+  10 redirects, 1 MiB of response headers, and 2 MiB of decompressed body data.
+
+These controls apply to the HTTP analyzer only. Browser and separate DNS/TLS
+analyzers remain planned and must establish equivalent boundaries when added.
+
 ## Browser isolation
 
 Browser analysis executes untrusted content. The implementation should use a
@@ -52,6 +73,12 @@ sensitive material. Implementations should minimize collection, redact secret or
 session-bearing values by default, avoid persisting data unless requested, and
 document what each output format records. Public test fixtures must use synthetic
 or explicitly redistributable data.
+
+The current diagnostic output masks every query string, prints cookie and header
+names without their values, and never prints collected HTML. Internally, HTTP
+signals omit cookie values and redact authorization-, cookie-, token-, secret-,
+authentication-, and API-key-bearing header values. The scanner does not persist
+results.
 
 ## Reporting security issues
 

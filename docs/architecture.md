@@ -1,4 +1,4 @@
-# Planned architecture
+# Architecture
 
 ## Overview
 
@@ -30,11 +30,36 @@ It should accept only HTTP/HTTPS, resolve hosts under controlled rules, reject
 loopback/private/link-local/metadata targets, and enforce redirect, response-size,
 and time limits. See [Security and ethical boundaries](security-and-ethics.md).
 
+The implemented `internal/networkguard` package validates absolute HTTP/HTTPS
+URLs, resolves names through an injectable resolver, rejects mixed public and
+forbidden DNS answers, and composes the validated IP with the requested port for
+an injectable dialer. The HTTP transport therefore cannot silently resolve a
+different address. When DNS returns several public addresses, the dial path tries
+them in resolver order under the same context. Resolution and policy checks occur
+during initial validation, before each redirect, and again for every new
+connection. TLS continues to use the original hostname for SNI and certificate
+validation.
+
 ### HTTP analyzer
 
 The low-cost first pass collects status codes, redirect chains, response headers,
 cookies, initial HTML, statically visible scripts and iframes, and third-party
 hostnames.
+
+This pass is implemented in `internal/httpanalyzer`. It performs one GET
+navigation, ignores environment proxies, and does not fetch subresources. The
+complete operation is limited to 15 seconds; connection, TLS handshake, and
+response-header waits are each limited to 5 seconds. It permits at most 10
+redirects, 1 MiB of response headers, and 2 MiB of decompressed body data.
+Intermediate and final HTTP responses produce normalized signals. Only the final
+body is parsed as HTML, using the HTML5 parser and charset support from
+`golang.org/x/net`.
+
+The analyzer records cookie names without values and redacts sensitive response
+headers. Stored and displayed URL observations mask query values. A body prefix
+at the size limit remains analyzable and is reported as truncated. Unsupported
+HTML charsets and parser failures become warnings without discarding HTTP
+signals; connection, TLS, timeout, header, and body-read failures remain fatal.
 
 ### DNS / TLS analyzer
 
@@ -66,9 +91,11 @@ type Signal struct {
 }
 ```
 
-Candidate signal types include response headers, cookies, script URLs, network
+Signal types include response headers, cookies, script URLs, network
 requests/responses, DOM selectors, iframe URLs, JavaScript globals, DNS records,
-TLS properties, redirects, and page content.
+TLS properties, redirects, page content, and statically referenced third-party
+resource hosts. A `resource_host` signal means that HTML referenced a host; it
+does not mean Hemera contacted that host.
 
 `Type`, `Source`, and `Key` are required. `Confidence` is finite and bounded
 between 0 and 1; it represents certainty in the observation, not the final
@@ -120,6 +147,10 @@ considered later; none is required for the first version.
 The CLI report should favor quick interpretation while retaining evidence. JSON
 is the automation contract and should be versioned before it is declared stable.
 An exportable local HTML report is a later goal.
+
+The current `hemera scan <url>` output is a temporary diagnostic integration of
+the HTTP analyzer. It deliberately omits HTML and header/cookie values, and is
+not a stable reporter or JSON schema.
 
 ## Proposed repository layout
 

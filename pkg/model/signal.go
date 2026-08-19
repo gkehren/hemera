@@ -25,6 +25,7 @@ const (
 	SignalTypeTLSProperty     SignalType = "tls_property"
 	SignalTypeRedirect        SignalType = "redirect"
 	SignalTypePageContent     SignalType = "page_content"
+	SignalTypeResourceHost    SignalType = "resource_host"
 )
 
 var validSignalTypes = map[SignalType]struct{}{
@@ -40,6 +41,7 @@ var validSignalTypes = map[SignalType]struct{}{
 	SignalTypeTLSProperty:     {},
 	SignalTypeRedirect:        {},
 	SignalTypePageContent:     {},
+	SignalTypeResourceHost:    {},
 }
 
 var (
