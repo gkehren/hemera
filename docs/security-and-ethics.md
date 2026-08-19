@@ -67,6 +67,29 @@ use a fresh profile, restrict downloads and external protocol handlers, and
 terminate the browser when time or resource budgets are exceeded. Running
 Chromium with its sandbox disabled is not an acceptable production default.
 
+### Implemented browser bootstrap boundary
+
+`internal/browser` currently implements process and CDP session lifecycle only.
+It uses a locally maintained Chromium or Chrome executable and never downloads a
+browser. Every session receives a new temporary profile, runs headless, listens
+for CDP only on `127.0.0.1` with an operating-system-selected port, and starts at
+`about:blank`. Remote CDP attachment is not supported.
+
+The package explicitly sets the `no-sandbox` allocator option to false. This
+prevents `chromedp` from silently adding `--no-sandbox` when Hemera runs as root;
+the effective Chromium command line is then read through CDP and rejected if a
+launcher added any sandbox-disabling switch. Startup fails when this verification
+is unavailable or the environment cannot launch Chromium with its sandbox. A
+startup timeout of at most 10 seconds covers process launch and the
+`Browser.getVersion` handshake. Caller cancellation, startup failure, loss of
+the CDP session, and explicit close all stop the process and remove the profile;
+explicit close also has a fixed shutdown deadline.
+
+No untrusted destination is navigated in this slice, and it is not used by
+`hemera scan`. Redirect revalidation, address pinning, external protocol and
+download restrictions, navigation timeouts, response and resource limits, and
+evidence minimization must be implemented before browser navigation is enabled.
+
 ## Explicitly prohibited capabilities
 
 Hemera must not include features that:

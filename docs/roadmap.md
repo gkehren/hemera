@@ -20,7 +20,7 @@ result of at least two fixture-backed detector families.
 
 ## Milestone 1 — Browser analysis
 
-- [ ] Integrate Chromium through a mature CDP client.
+- [x] Integrate Chromium through a mature CDP client.
 - [ ] Capture browser network traffic, final DOM, scripts, iframes, and dynamic
   cookies.
 - [ ] Enforce navigation timeouts and resource limits.
