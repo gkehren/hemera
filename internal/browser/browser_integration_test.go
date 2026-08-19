@@ -652,6 +652,7 @@ func configureIntegrationFixture(t *testing.T, config *Config, server *httptest.
 func integrationConfig(t *testing.T) (Config, bool) {
 	t.Helper()
 	config := DefaultConfig()
+	config.StartupTimeout = maxStartupTimeout
 	if path := os.Getenv("HEMERA_CHROMIUM_PATH"); path != "" {
 		config.ExecutablePath = path
 		return config, true

@@ -64,6 +64,7 @@ func TestHTTPDNSTLSAndBrowserProduceOneDeterministicDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	browserConfig := browser.DefaultConfig()
+	browserConfig.StartupTimeout = 10 * time.Second
 	browserPath, explicitBrowser := integrationBrowserPath(t)
 	browserConfig.ExecutablePath = browserPath
 	browserConfig.Resolver = resolver
