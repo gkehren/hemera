@@ -336,6 +336,64 @@ func TestScanTreatsCancellationAndInvalidOutputAsFatal(t *testing.T) {
 	})
 }
 
+func TestScanDistinguishesMissingEvidenceFromIncompleteCoverage(t *testing.T) {
+	t.Parallel()
+	browserSource := analysis.SourceBrowser
+	ruleSet := rules.RuleSet{SchemaVersion: rules.CurrentSchemaVersion, Rules: []rules.Rule{{
+		ID: "browser.fixture", Name: "Browser fixture", Category: rules.CategoryThirdPartySecurity,
+		Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 50,
+		Match: rules.Condition{Signal: &rules.Evidence{
+			ID: "browser-cookie", Group: "browser_cookie", Type: model.SignalTypeCookie,
+			Source: &rules.TextPattern{Exact: &browserSource}, Key: exactPattern("browser_marker"), Weight: 75,
+		}},
+	}}}
+	complete := analysis.Observation{Source: analysis.SourceBrowser}
+	partial := analysis.Observation{Source: analysis.SourceBrowser, Signals: []model.Signal{{
+		Type: model.SignalTypeNetworkRequest, Source: analysis.SourceBrowser, Key: "GET",
+		Value: "https://example.test/", Confidence: 1,
+	}}}
+	matching := analysis.Observation{Source: analysis.SourceBrowser, Signals: []model.Signal{{
+		Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "browser_marker",
+		Value: "example.test", URL: "https://example.test/", Confidence: 1,
+	}}}
+	tests := []struct {
+		name        string
+		observation analysis.Observation
+		err         error
+		wantStatus  DetectionStatus
+	}{
+		{name: "complete absence", observation: complete, wantStatus: DetectionStatusNotDetected},
+		{name: "partial absence", observation: partial, err: errors.New("capture failed"), wantStatus: DetectionStatusInsufficientCoverage},
+		{name: "failed", observation: complete, err: errors.New("browser unavailable"), wantStatus: DetectionStatusInsufficientCoverage},
+		{name: "partial evidence remains usable", observation: matching, err: errors.New("DOM failed"), wantStatus: DetectionStatusDetected},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, err := New(Config{
+				Analyzers: []AnalyzerConfig{{
+					Analyzer:      analyzerStub{source: analysis.SourceBrowser, observation: test.observation, err: test.err},
+					FailurePolicy: FailurePolicyContinue,
+				}},
+				RuleSet: ruleSet,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := engine.Scan(context.Background(), "https://example.test/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Coverage) != 1 || result.Coverage[0].Status != test.wantStatus {
+				t.Fatalf("coverage = %#v, want %s", result.Coverage, test.wantStatus)
+			}
+			if test.wantStatus == DetectionStatusInsufficientCoverage &&
+				!slices.Equal(result.Coverage[0].IncompleteSources, []string{analysis.SourceBrowser}) {
+				t.Errorf("incomplete sources = %#v", result.Coverage[0].IncompleteSources)
+			}
+		})
+	}
+}
+
 func multiSourceRuleSet() rules.RuleSet {
 	staticKey := "script"
 	dynamicKey := "request"

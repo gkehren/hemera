@@ -217,7 +217,7 @@ func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	for _, expected := range []string{`"schema_version": 3`, `"status_code": 404`, `"detections": []`} {
+	for _, expected := range []string{`"schema_version": 4`, `"status_code": 404`, `"detections": []`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("JSON lacks %q: %s", expected, stdout.String())
 		}

@@ -97,7 +97,7 @@ func normalizeCapture(result CaptureResult) ([]model.Signal, error) {
 	finalURL := result.FinalURL
 	signals := make([]model.Signal, 0,
 		len(result.Requests)+len(result.Responses)+len(result.ScriptURLs)+
-			len(result.IframeURLs)+len(result.CookieNames)+1,
+			len(result.IframeURLs)+len(result.Cookies)+1,
 	)
 	for _, request := range result.Requests {
 		method := strings.ToUpper(strings.TrimSpace(request.Method))
@@ -143,13 +143,13 @@ func normalizeCapture(result CaptureResult) ([]model.Signal, error) {
 			Key: "src", Value: iframeURL, URL: finalURL, Confidence: 1,
 		})
 	}
-	for _, cookieName := range result.CookieNames {
-		if cookieName == "" {
+	for _, cookie := range result.Cookies {
+		if cookie.Name == "" || cookie.Domain == "" {
 			continue
 		}
 		signals = append(signals, model.Signal{
 			Type: model.SignalTypeCookie, Source: analysis.SourceBrowser,
-			Key: cookieName, URL: finalURL, Confidence: 1,
+			Key: cookie.Name, Value: cookie.Domain, URL: finalURL, Confidence: 1,
 		})
 	}
 

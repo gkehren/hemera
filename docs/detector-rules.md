@@ -289,7 +289,9 @@ stable channel order:
   value;
 - `script_url` and `iframe_url`: the key is `src` and the cleaned resource URL
   is the value;
-- `cookie`: the cookie name is the key and the value is always empty.
+- `cookie`: the cookie name is the key and the validated cookie domain is the
+  value. A leading dot, when Chromium supplies one, is retained. Cookie values
+  are discarded at the CDP boundary and never enter a signal.
 
 Exact duplicates are removed and normalized fields are sorted before matching.
 MIME and CDP resource types remain internal capture metadata and are not part of
@@ -298,10 +300,62 @@ values. The built-in Turnstile and reCAPTCHA rules remain explicitly scoped to
 `http_analyzer`; browser signatures require their own fixture-backed evidence
 and scoring rationale before becoming supported detectors.
 
+For example, a browser rule can match a request and its status-bearing response
+without depending on internal MIME or resource-type fields:
+
+```json
+{
+  "all": [
+    {
+      "signal": {
+        "id": "challenge-request",
+        "group": "browser_network",
+        "type": "network_request",
+        "source": { "exact": "browser_analyzer" },
+        "key": { "exact": "POST" },
+        "value": { "exact": "https://api.example/challenge" },
+        "weight": 35
+      }
+    },
+    {
+      "signal": {
+        "id": "challenge-response",
+        "group": "browser_network",
+        "type": "network_response",
+        "source": { "exact": "browser_analyzer" },
+        "key": { "exact": "status" },
+        "value": { "exact": "403" },
+        "url": { "exact": "https://api.example/challenge" },
+        "weight": 35
+      }
+    }
+  ]
+}
+```
+
+Cookie-domain predicates can distinguish the same name set by the scanned host
+from one set by a third-party frame. Malformed or unsafe domains are omitted
+instead of rewritten into evidence. Reporters still suppress cookie domains.
+
 Use distinct groups such as `browser_dom` or `browser_network` only for genuinely
 independent evidence. A script URL present in both static HTML and browser
 traffic is correlated observation of the same integration and must not be
-counted twice merely because two analyzers observed it.
+counted twice merely because two analyzers observed it. Such predicates must
+share one group even when their `source` predicates differ. A contributor who
+uses separate groups must document why the observations represent genuinely
+independent facts; analyzer identity alone is not that rationale. Regression
+tests verify that identical HTTP and browser script observations contribute the
+maximum of one shared group rather than two additive proofs.
+
+### Coverage-sensitive negative results
+
+Rules remain independent of Go analyzer implementations. The scanner derives
+mandatory coverage from exact signal `source` predicates: `all` combines source
+requirements, while `any` requires only sources common to every alternative.
+Dependencies also contribute their source requirements. When a rule is not
+detected and a mandatory source is partial, failed, or absent, report V4 emits
+`insufficient_coverage` instead of `not_detected`. A partial source can still
+produce a positive detection when its retained signals satisfy the rule.
 
 Each selected signal field contains exactly one text operation:
 

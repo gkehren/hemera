@@ -109,9 +109,9 @@ func (b chromedpBackend) start(ctx context.Context, config Config) (backendSessi
 
 		arguments, err := cdpbrowser.GetBrowserCommandLine().Do(browserCtx)
 		if err != nil {
-			return fmt.Errorf("verify Chromium sandbox command line: %w", err)
+			return fmt.Errorf("verify Chromium security command line: %w", err)
 		}
-		if err := validateSandboxCommandLine(arguments); err != nil {
+		if err := validateSecurityCommandLine(arguments, proxy.address()); err != nil {
 			return err
 		}
 		session.commandLine = slices.Clone(arguments)
@@ -135,13 +135,43 @@ func (b chromedpBackend) start(ctx context.Context, config Config) (backendSessi
 	return session, version, nil
 }
 
-func validateSandboxCommandLine(arguments []string) error {
-	if len(arguments) == 0 {
-		return errors.New("verify Chromium sandbox command line: Browser.getBrowserCommandLine returned no arguments")
+func validateSecurityCommandLine(arguments []string, expectedProxyAddress string) error {
+	if expectedProxyAddress == "" {
+		return errors.New("verify Chromium security command line: expected proxy address is unavailable")
 	}
+	if len(arguments) == 0 {
+		return errors.New("verify Chromium security command line: Browser.getBrowserCommandLine returned no arguments")
+	}
+	switches := make(map[string][]string)
 	for _, argument := range arguments {
 		if sandboxDisablingSwitch(argument) {
-			return fmt.Errorf("Chromium sandbox is disabled by command-line switch %q", argument)
+			return errors.New("Chromium sandbox is disabled by its effective command line")
+		}
+		if !strings.HasPrefix(argument, "--") {
+			continue
+		}
+		name, value, _ := strings.Cut(strings.TrimPrefix(argument, "--"), "=")
+		switches[name] = append(switches[name], value)
+	}
+	if len(switches["no-proxy-server"]) != 0 {
+		return errors.New("Chromium effective command line disables the Hemera safety proxy")
+	}
+	requireEffectiveSwitch := func(name, value string) error {
+		values := switches[name]
+		if len(values) != 1 || values[0] != value {
+			return fmt.Errorf("Chromium effective command line has invalid %s security configuration", name)
+		}
+		return nil
+	}
+	for _, required := range []struct{ name, value string }{
+		{"proxy-server", "http://" + expectedProxyAddress},
+		{"proxy-bypass-list", "<-loopback>"},
+		{"host-resolver-rules", "MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"},
+		{"disable-quic", ""},
+		{"force-webrtc-ip-handling-policy", "disable_non_proxied_udp"},
+	} {
+		if err := requireEffectiveSwitch(required.name, required.value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -260,19 +290,34 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 
 	listenerCtx, stopListener := context.WithCancel(taskCtx)
 	commandCtx := listenerCtx
+	browserCtx := listenerCtx
 	if chromedpContext := chromedp.FromContext(taskCtx); chromedpContext != nil && chromedpContext.Target != nil {
 		commandCtx = cdp.WithExecutor(listenerCtx, chromedpContext.Target)
+		if chromedpContext.Browser != nil {
+			browserCtx = cdp.WithExecutor(listenerCtx, chromedpContext.Browser)
+		}
 	}
 	pausedRequests := make(chan *fetch.EventRequestPaused, config.MaxRequests+1)
 	requestTracker := newBrowserRequestTracker(config.MaxConcurrentRequests)
+	activity := make(chan struct{}, 1)
+	notifyActivity := func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
+	}
 	stopWorker := make(chan struct{})
 	workerDone := make(chan struct{})
+	blockedTargets := make(chan target.ID, 4)
 	go func() {
 		defer close(workerDone)
 		for {
 			select {
 			case event := <-pausedRequests:
 				handlePausedRequest(commandCtx, budget, requestTracker, event)
+			case targetID := <-blockedTargets:
+				closeErr := target.CloseTarget(targetID).Do(browserCtx)
+				budget.fail(errors.Join(ErrUnsupportedTarget, closeErr))
 			case <-stopWorker:
 				return
 			}
@@ -281,10 +326,12 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 	chromedp.ListenTarget(listenerCtx, func(value any) {
 		switch event := value.(type) {
 		case *network.EventDataReceived:
+			notifyActivity()
 			if err := budget.consumeDecoded(event.DataLength); err != nil {
 				budget.fail(err)
 			}
 		case *fetch.EventRequestPaused:
+			notifyActivity()
 			select {
 			case pausedRequests <- event:
 			default:
@@ -292,10 +339,23 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			}
 		case *network.EventLoadingFinished:
 			requestTracker.release(event.RequestID)
+			notifyActivity()
 		case *network.EventLoadingFailed:
 			requestTracker.release(event.RequestID)
+			notifyActivity()
 		case *network.EventWebSocketCreated:
 			budget.fail(fmt.Errorf("%w: WebSocket transport is not allowed", networkguard.ErrInvalidURL))
+		case *page.EventWindowOpen:
+			budget.fail(ErrUnsupportedTarget)
+		case *target.EventAttachedToTarget:
+			if event.TargetInfo == nil || !blockedChildTargetType(event.TargetInfo.Type) {
+				return
+			}
+			select {
+			case blockedTargets <- event.TargetInfo.TargetID:
+			default:
+				budget.fail(ErrUnsupportedTarget)
+			}
 		default:
 			return
 		}
@@ -308,6 +368,7 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		_ = runChromedpWithCaller(taskCtx, cleanupCtx, fetch.Disable(), page.StopLoading())
+		_ = runChromedpWithCaller(taskCtx, cleanupCtx, target.SetAutoAttach(false, false))
 	}()
 
 	patterns := []*fetch.RequestPattern{
@@ -319,6 +380,13 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 		network.SetCacheDisabled(true),
 		network.SetBypassServiceWorker(true),
 		fetch.Enable().WithPatterns(patterns),
+		target.SetAutoAttach(true, true).WithFlatten(true).WithFilter(target.Filter{
+			{Type: "page"},
+			{Type: "worker"},
+			{Type: "shared_worker"},
+			{Type: "service_worker"},
+			{Exclude: true},
+		}),
 		chromedp.ActionFunc(func(actionCtx context.Context) error {
 			chromedpContext := chromedp.FromContext(actionCtx)
 			if chromedpContext == nil || chromedpContext.Browser == nil {
@@ -332,6 +400,9 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 	}
 
 	navigationErr := runChromedpWithCaller(taskCtx, runCtx, chromedp.Navigate(targetURL))
+	if navigationErr == nil {
+		navigationErr = waitForNetworkQuiet(runCtx, activity, requestTracker, config.NetworkIdleTime, config.PostLoadTimeout)
+	}
 	if failure := budget.failure(); failure != nil {
 		return failure
 	}
@@ -339,6 +410,54 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 		return err
 	}
 	return navigationErr
+}
+
+func blockedChildTargetType(targetType string) bool {
+	switch targetType {
+	case "page", "worker", "shared_worker", "service_worker":
+		return true
+	default:
+		return false
+	}
+}
+
+// waitForNetworkQuiet keeps the complete navigation boundary alive after load.
+// It returns once no browser request is active and no meaningful network event
+// has occurred for idleTime, or when the hard post-load deadline is reached.
+func waitForNetworkQuiet(ctx context.Context, activity <-chan struct{}, tracker *browserRequestTracker, idleTime, hardTimeout time.Duration) error {
+	for {
+		select {
+		case <-activity:
+			continue
+		default:
+		}
+		break
+	}
+	idle := time.NewTimer(idleTime)
+	defer idle.Stop()
+	hard := time.NewTimer(hardTimeout)
+	defer hard.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-hard.C:
+			return nil
+		case <-activity:
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(idleTime)
+		case <-idle.C:
+			if tracker.activeCount() == 0 {
+				return nil
+			}
+			idle.Reset(idleTime)
+		}
+	}
 }
 
 func handlePausedRequest(ctx context.Context, budget *navigationBudget, tracker *browserRequestTracker, event *fetch.EventRequestPaused) {
@@ -353,7 +472,7 @@ func handlePausedRequest(ctx context.Context, budget *navigationBudget, tracker 
 	}
 	requestID := event.NetworkID
 	if requestID == "" {
-		err := errors.New("CDP paused request has no network lifecycle identifier")
+		err := ErrUnsupportedTarget
 		failErr := fetch.FailRequest(event.RequestID, network.ErrorReasonAborted).Do(ctx)
 		budget.fail(errors.Join(err, failErr))
 		return
@@ -437,6 +556,12 @@ func (t *browserRequestTracker) releaseAll() {
 	}
 }
 
+func (t *browserRequestTracker) activeCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.active)
+}
+
 type chromedpCapture struct {
 	collector *captureCollector
 	stop      context.CancelFunc
@@ -499,7 +624,7 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 		c.stop()
 		var finalURL string
 		var domSnapshot boundedDOMSnapshot
-		var cookieNames []string
+		var cookies []CaptureCookie
 		c.err = c.run(ctx, chromedp.ActionFunc(func(actionCtx context.Context) error {
 			var captureErrors []error
 			chromedpContext := chromedp.FromContext(actionCtx)
@@ -513,17 +638,18 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 				} else if info != nil {
 					finalURL = info.URL
 				}
-				cookies, err := storage.GetCookies().Do(browserCtx)
+				rawCookies, err := storage.GetCookies().Do(browserCtx)
 				if err != nil {
 					captureErrors = append(captureErrors, fmt.Errorf("Storage.getCookies: %w", err))
 				} else {
-					cookieNames = make([]string, 0, len(cookies))
-					for _, cookie := range cookies {
+					minimized := make([]CaptureCookie, 0, len(rawCookies))
+					for _, cookie := range rawCookies {
 						if cookie != nil {
 							cookie.Value = ""
-							cookieNames = append(cookieNames, cookie.Name)
+							minimized = append(minimized, CaptureCookie{Name: cookie.Name, Domain: cookie.Domain})
 						}
 					}
+					cookies = minimized
 				}
 			}
 
@@ -532,7 +658,7 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 			}
 			return errors.Join(captureErrors...)
 		}))
-		c.result = c.collector.snapshotBounded(finalURL, domSnapshot, cookieNames)
+		c.result = c.collector.snapshotBounded(finalURL, domSnapshot, cookies)
 		close(c.done)
 	})
 	<-c.done

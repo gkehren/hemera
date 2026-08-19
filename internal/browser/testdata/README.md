@@ -12,8 +12,15 @@ path/query pair, an expected status and content type, and either a relative
 Routes may declare an `expected_authorization` value to prove that synthetic
 credentials reached the fixture while remaining absent from captured metadata.
 The `cases` array defines each capture scenario's entry and final route,
-synchronization selector, DOM markers, ordered traffic, scripts, iframes,
-cookie names, and values that must never occur in minimized metadata.
+expected final marker, DOM markers, ordered traffic, scripts, iframes, cookie
+names, and values that must never occur in minimized metadata. Integration tests
+do not wait on the marker; the production post-load network-idle/deadline phase
+must make it visible before final capture.
+
+The `limits` assets are adversarial synthetic inputs for redirects, compression,
+post-load DOM growth, continuous requests, long polling, recursive frames,
+workers, popups, WebSockets, and downloads. Unsupported child targets are
+deliberately blocked.
 
 To add a fixture:
 

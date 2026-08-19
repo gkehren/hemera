@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -436,6 +437,35 @@ func TestBuildReportsPartialAnalyzerCoverageWithoutErrorDetails(t *testing.T) {
 	if !strings.Contains(textOutput.String(), "HTTP observation: unavailable") ||
 		strings.Contains(textOutput.String(), "HTTP status: 0") || strings.Contains(textOutput.String(), "Final URL:") {
 		t.Errorf("text report fabricated HTTP observations: %s", textOutput.String())
+	}
+}
+
+func TestBuildReportsInsufficientRuleCoverageWithoutCallingItNotDetected(t *testing.T) {
+	t.Parallel()
+	result := scanner.Result{
+		Detections: []scoring.Detection{{
+			RuleID: "browser.only", Name: "Browser-only product", Level: scoring.LevelNotDetected,
+		}},
+		Coverage: []scanner.DetectionCoverage{{
+			RuleID: "browser.only", Status: scanner.DetectionStatusInsufficientCoverage,
+			RequiredSources: []string{analysis.SourceBrowser}, IncompleteSources: []string{analysis.SourceBrowser},
+		}},
+	}
+	built := Build("dev", result)
+	if got := built.Detections[0]; got.Status != scanner.DetectionStatusInsufficientCoverage ||
+		!slices.Equal(got.IncompleteSources, []string{analysis.SourceBrowser}) || got.Detected {
+		t.Fatalf("detection coverage = %#v", got)
+	}
+	var output bytes.Buffer
+	if err := WriteText(&output, built); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if !strings.Contains(text, "Insufficient coverage:\n  Browser-only product  missing browser_analyzer") {
+		t.Fatalf("text did not distinguish insufficient coverage:\n%s", text)
+	}
+	if strings.Contains(text, "Not detected:\n  Browser-only product") {
+		t.Fatalf("text presented incomplete rule as not detected:\n%s", text)
 	}
 }
 

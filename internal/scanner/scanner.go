@@ -66,6 +66,25 @@ const (
 	AnalyzerStatusFailed AnalyzerStatus = "failed"
 )
 
+// DetectionStatus distinguishes a negative result from a result that could not
+// be evaluated because a source required by every rule branch was incomplete.
+type DetectionStatus string
+
+const (
+	DetectionStatusDetected             DetectionStatus = "detected"
+	DetectionStatusNotDetected          DetectionStatus = "not_detected"
+	DetectionStatusInsufficientCoverage DetectionStatus = "insufficient_coverage"
+)
+
+// DetectionCoverage records the coverage-sensitive status of one rule without
+// coupling that rule to a concrete analyzer package.
+type DetectionCoverage struct {
+	RuleID            string
+	Status            DetectionStatus
+	RequiredSources   []string
+	IncompleteSources []string
+}
+
 // AnalyzerResult records one analyzer's observation and coverage status. Err is
 // retained for diagnostics but reporters decide what is safe to disclose.
 type AnalyzerResult struct {
@@ -81,6 +100,7 @@ type Result struct {
 	Analyzers  []AnalyzerResult
 	Signals    []model.Signal
 	Detections []scoring.Detection
+	Coverage   []DetectionCoverage
 }
 
 type configuredAnalyzer struct {
@@ -207,7 +227,35 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		return Result{}, fmt.Errorf("scan canceled during detector evaluation: %w", err)
 	}
 	result.Detections = detections
+	result.Coverage = buildDetectionCoverage(s.ruleSet, detections, result.Analyzers)
 	return result, nil
+}
+
+func buildDetectionCoverage(ruleSet rules.RuleSet, detections []scoring.Detection, analyzers []AnalyzerResult) []DetectionCoverage {
+	statusBySource := make(map[string]AnalyzerStatus, len(analyzers))
+	for _, analyzer := range analyzers {
+		statusBySource[analyzer.Observation.Source] = analyzer.Status
+	}
+	coverage := make([]DetectionCoverage, 0, len(ruleSet.Rules))
+	for index, rule := range ruleSet.Rules {
+		required := rules.RequiredSources(rule, ruleSet)
+		incomplete := make([]string, 0, len(required))
+		for _, source := range required {
+			if status, ok := statusBySource[source]; !ok || status != AnalyzerStatusComplete {
+				incomplete = append(incomplete, source)
+			}
+		}
+		status := DetectionStatusNotDetected
+		if index < len(detections) && detections[index].Detected {
+			status = DetectionStatusDetected
+		} else if len(incomplete) > 0 {
+			status = DetectionStatusInsufficientCoverage
+		}
+		coverage = append(coverage, DetectionCoverage{
+			RuleID: rule.ID, Status: status, RequiredSources: required, IncompleteSources: incomplete,
+		})
+	}
+	return coverage
 }
 
 func priorObservations(results []AnalyzerResult) []analysis.Observation {

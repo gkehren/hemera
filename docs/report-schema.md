@@ -1,8 +1,8 @@
-# JSON report schema V3
+# JSON report schema V4
 
 `hemera scan --format json <url>` writes one JSON document to stdout. Input and
 scan errors are written to stderr and do not enter the JSON document. The
-top-level `schema_version` is mandatory and is currently `3`.
+top-level `schema_version` is mandatory and is currently `4`.
 
 > **Compatibility status: experimental.** Hemera has not published its first
 > stable release. JSON is the versioned automation interface, but the current
@@ -55,10 +55,26 @@ detector matched them as evidence; the report does not otherwise add a raw
 network-observation inventory. `final_url` remains the final HTTP URL rather
 than a browser redirect field.
 
-Each detection contains identity fields, `detected`, the matching gates,
-`evidence_score`, final `score`, `level`, grouped positive/negative/ambiguous
-evidence, `positive_evidence_groups`, missing evidence and dependencies, and
-applied conflict penalties.
+Each detection contains identity fields, `detected`, `status`,
+`incomplete_sources`, the matching gates, `evidence_score`, final `score`,
+`level`, grouped positive/negative/ambiguous evidence,
+`positive_evidence_groups`, missing evidence and dependencies, and applied
+conflict penalties.
+
+`status` is one of `detected`, `not_detected`, or `insufficient_coverage`.
+`not_detected` is emitted only when every signal source required by all
+successful branches of the rule completed. `insufficient_coverage` means the
+rule did not reach its threshold and at least one mandatory source was partial,
+failed, or absent; `incomplete_sources` lists those stable source identities.
+A detected rule remains `detected` when retained evidence is sufficient even if
+another part of an analyzer result was partial. The `detected` boolean remains
+for convenient positive-result filtering, but consumers must use `status` to
+distinguish a conclusive negative from unavailable coverage.
+
+Mandatory sources are derived from exact `source` predicates in rule condition
+trees, not from analyzer-specific flags. An `all` condition requires the union
+of its branches; an `any` condition requires only sources shared by every
+alternative. Rule dependencies contribute their mandatory sources as well.
 
 Every evidence item includes its rule identifier, signal type/source/key,
 observation confidence, weight, `raw_contribution`, and `contribution`. Positive
@@ -95,9 +111,10 @@ and have user information, fragments, and query values removed or masked. Empty
 arrays are encoded as `[]`, not `null`, to keep automation deterministic.
 Matched DNS names and bounded TLS properties may be included as explanatory
 evidence. Their producers reject control characters and bound certificate-derived
-values before they reach reporting. Browser cookie and page-content values are
-always omitted. Browser request and resource URLs are sanitized again by the
-reporter before selected evidence is serialized.
+values before they reach reporting. Browser cookie signals internally use the
+signal value for a validated cookie domain, never a cookie value; reporters
+omit that provenance together with page content. Browser request and resource
+URLs are sanitized again by the reporter before selected evidence is serialized.
 
 ## Compatibility
 
@@ -122,6 +139,11 @@ changes.
 
 ### Schema history
 
+Report V4 adds detection `status` and `incomplete_sources`. This is a semantic
+change because an unavailable mandatory observation source is no longer
+presented as a definitive negative result. V3 consumers must not interpret V4
+as V3.
+
 Fields documented here use `snake_case`. Report V3 adds the required `analyzers`
 array so partial multi-analyzer coverage is explicit and deterministic. It also
 allows `final_url` and `http` to be `null` when HTTP observations are unavailable;
@@ -135,7 +157,7 @@ value, while V2 exposes zero for a non-selected correlated predicate and retains
 that weighted value in `raw_contribution`. V2 also added positive evidence
 `group` and `positive_evidence_groups`.
 
-Consumers must dispatch on `schema_version`. The current CLI emits V3; it does
+Consumers must dispatch on `schema_version`. The current CLI emits V4; it does
 not offer an older output mode. An incompatible future report requires a new
 `schema_version` even during pre-release development.
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,6 +28,9 @@ func TestDefaultConfig(t *testing.T) {
 	if config.NavigationTimeout != defaultNavigationTimeout || config.ConnectTimeout != defaultConnectTimeout {
 		t.Errorf("navigation/connect timeouts = %s/%s", config.NavigationTimeout, config.ConnectTimeout)
 	}
+	if config.PostLoadTimeout != defaultPostLoadTimeout || config.NetworkIdleTime != defaultNetworkIdleTime {
+		t.Errorf("post-load/idle timeouts = %s/%s", config.PostLoadTimeout, config.NetworkIdleTime)
+	}
 	if config.MaxRequests != defaultMaxBrowserRequests || config.MaxRedirects != defaultMaxBrowserRedirects ||
 		config.MaxTransferBytes != defaultMaxBrowserBytes || config.MaxConcurrentRequests != defaultMaxBrowserConcurrency {
 		t.Errorf("browser budgets = requests %d redirects %d bytes %d concurrency %d",
@@ -45,6 +50,11 @@ func TestNewValidatesConfig(t *testing.T) {
 		{"timeout above ceiling", func(config *Config) { config.StartupTimeout = maxStartupTimeout + time.Nanosecond }},
 		{"zero navigation timeout", func(config *Config) { config.NavigationTimeout = 0 }},
 		{"navigation timeout above ceiling", func(config *Config) { config.NavigationTimeout = maxNavigationTimeout + time.Nanosecond }},
+		{"zero post-load timeout", func(config *Config) { config.PostLoadTimeout = 0 }},
+		{"post-load timeout above ceiling", func(config *Config) { config.PostLoadTimeout = maxPostLoadTimeout + time.Nanosecond }},
+		{"zero network idle time", func(config *Config) { config.NetworkIdleTime = 0 }},
+		{"network idle time above ceiling", func(config *Config) { config.NetworkIdleTime = maxNetworkIdleTime + time.Nanosecond }},
+		{"network idle exceeds post-load", func(config *Config) { config.NetworkIdleTime = config.PostLoadTimeout + time.Nanosecond }},
 		{"zero connect timeout", func(config *Config) { config.ConnectTimeout = 0 }},
 		{"connect timeout above ceiling", func(config *Config) { config.ConnectTimeout = maxBrowserConnectTimeout + time.Nanosecond }},
 		{"zero requests", func(config *Config) { config.MaxRequests = 0 }},
@@ -247,8 +257,18 @@ func TestStopPendingStartPreservesBackendAndCloseErrors(t *testing.T) {
 	}
 }
 
-func TestValidateSandboxCommandLine(t *testing.T) {
+func TestValidateSecurityCommandLine(t *testing.T) {
 	t.Parallel()
+	const proxyAddress = "127.0.0.1:4321"
+	valid := []string{
+		"/usr/bin/chromium", "--headless", "--proxy-server=http://" + proxyAddress,
+		"--proxy-bypass-list=<-loopback>",
+		"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+		"--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+	}
+	if err := validateSecurityCommandLine(valid, ""); err == nil {
+		t.Error("validateSecurityCommandLine accepted an empty expected proxy")
+	}
 	tests := []struct {
 		name      string
 		arguments []string
@@ -256,7 +276,7 @@ func TestValidateSandboxCommandLine(t *testing.T) {
 	}{
 		{
 			name:      "sandboxed Chromium",
-			arguments: []string{"/usr/bin/chromium", "--headless", "--disable-dev-shm-usage"},
+			arguments: valid,
 		},
 		{
 			name:      "no arguments cannot be verified",
@@ -264,30 +284,37 @@ func TestValidateSandboxCommandLine(t *testing.T) {
 		},
 		{
 			name:      "no sandbox",
-			arguments: []string{"chromium", "--no-sandbox"},
+			arguments: append(append([]string{}, valid...), "--no-sandbox"),
 			wantError: true,
 		},
 		{
 			name:      "no sandbox with value",
-			arguments: []string{"chromium", "--no-sandbox=false"},
+			arguments: append(append([]string{}, valid...), "--no-sandbox=false"),
 			wantError: true,
 		},
 		{
 			name:      "setuid sandbox disabled",
-			arguments: []string{"chromium", "--disable-setuid-sandbox"},
+			arguments: append(append([]string{}, valid...), "--disable-setuid-sandbox"),
 			wantError: true,
 		},
 		{
 			name:      "GPU sandbox disabled",
-			arguments: []string{"chromium", "--disable-gpu-sandbox=1"},
+			arguments: append(append([]string{}, valid...), "--disable-gpu-sandbox=1"),
 			wantError: true,
 		},
+		{name: "missing proxy", arguments: slices.DeleteFunc(append([]string{}, valid...), func(value string) bool { return strings.HasPrefix(value, "--proxy-server=") }), wantError: true},
+		{name: "unexpected proxy", arguments: append(append([]string{}, valid...), "--proxy-server=http://127.0.0.1:9"), wantError: true},
+		{name: "no proxy server", arguments: append(append([]string{}, valid...), "--no-proxy-server"), wantError: true},
+		{name: "missing bypass", arguments: slices.DeleteFunc(append([]string{}, valid...), func(value string) bool { return strings.HasPrefix(value, "--proxy-bypass-list=") }), wantError: true},
+		{name: "missing resolver rule", arguments: slices.DeleteFunc(append([]string{}, valid...), func(value string) bool { return strings.HasPrefix(value, "--host-resolver-rules=") }), wantError: true},
+		{name: "missing QUIC restriction", arguments: slices.Delete(append([]string{}, valid...), 5, 6), wantError: true},
+		{name: "missing WebRTC restriction", arguments: valid[:len(valid)-1], wantError: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateSandboxCommandLine(test.arguments)
+			err := validateSecurityCommandLine(test.arguments, proxyAddress)
 			if (err != nil) != test.wantError {
-				t.Errorf("validateSandboxCommandLine(%q) error = %v, wantError %t", test.arguments, err, test.wantError)
+				t.Errorf("validateSecurityCommandLine(%q) error = %v, wantError %t", test.arguments, err, test.wantError)
 			}
 		})
 	}

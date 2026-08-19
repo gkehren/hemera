@@ -131,14 +131,23 @@ tokenizer passes and does not construct a DOM tree. TLS uses certificate
 validation, hostname-derived SNI, and TLS 1.2 or later.
 
 The browser analyzer runs after HTTP and DNS/TLS with a non-fatal failure
-policy. A missing or unusable local Chromium installation therefore produces an
-explicit failed browser coverage entry while preserving HTTP and DNS/TLS
-results. An unsafe initial HTTP target remains fatal and stops the pipeline
-before Chromium starts.
+policy. After the page load event, it keeps the complete validated network
+boundary active until 250 ms of network quiet or a hard 1.5-second post-load
+deadline. Delayed requests, cookies, scripts, iframes, and DOM mutations within
+that window are included in the final snapshot. Continuous traffic and long
+polling cannot extend the window. Configuration can lower these values but
+cannot exceed three seconds post-load or one second idle. A missing or unusable
+local Chromium installation produces an explicit failed browser coverage entry while
+preserving HTTP and DNS/TLS results. An unsafe initial HTTP target remains fatal
+and stops the pipeline before Chromium starts.
+
+Detection results distinguish `not_detected` from `insufficient_coverage` when
+a source required by a rule predicate was partial, failed, or absent. Rules
+remain coupled only to normalized source names, not analyzer implementations.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V3](docs/report-schema.md). The JSON schema is
+documented in [JSON report schema V4](docs/report-schema.md). The JSON schema is
 experimental while Hemera is pre-release: intentional breaking changes require
 a documented `schema_version` increment, but historical schemas are not yet
 promised long-term support. Text output is intended for people and may evolve
@@ -204,7 +213,8 @@ planned.
 
 The internal browser package uses `chromedp` but does not download a browser. It
 can record bounded, minimized CDP network events and snapshot the current
-target's final DOM, script and iframe URLs, and cookie names. The browser
+target's final DOM, script and iframe URLs, and cookie names plus validated
+domains. Cookie values are discarded immediately. The browser
 analyzer converts this raw result to normalized, deterministic signals; only
 evidence selected by detector rules can enter reports. Its opt-in integration
 tests require a locally installed Chromium or Chrome that can run with its
@@ -235,7 +245,12 @@ counts only to the documented hard ceilings of 4096 and 32. Browser URLs are
 limited to 8192 bytes.
 Downloads, cache reuse, service workers, direct DNS resolution, and QUIC are
 disabled for the bounded navigation. WebRTC is restricted from non-proxied UDP.
-WebSocket transports are rejected.
+WebSocket transports are rejected. Dedicated/shared workers and service workers
+are fail-closed before their code can issue child-target traffic; their startup
+requests remain subject to the normal budgets. Popup attempts fail the
+navigation before a child page can load. Chromium's effective command line is
+validated at runtime for the exact Hemera proxy, bypass, resolver, QUIC, WebRTC,
+and sandbox invariants.
 
 ## Documentation
 

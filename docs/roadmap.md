@@ -82,9 +82,13 @@ Browser -----┘
   become available. The initial Linux job runs standard and race tests.
 - [x] Aggregate HTTP, DNS/TLS, and browser observations into one deterministic
   report without coupling detector rules to an analyzer implementation.
+- [x] Harden bounded post-load observation, Chromium security invariants,
+  child-target behavior, cookie provenance, and coverage-aware reporting
+  ([issue #7](https://github.com/gkehren/hemera/issues/7)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
-in detections without coupling detector rules to a specific analyzer.
+in detections without coupling detector rules to a specific analyzer, while
+bounded post-load activity and incomplete source coverage remain explicit.
 
 ## Milestone 2 — Detector quality and coverage
 

@@ -26,9 +26,13 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 			{URL: "https://api.example.test/z?redacted", Status: 204},
 			{URL: "https://api.example.test/a", Status: 200},
 		},
-		ScriptURLs:  []string{"https://cdn.example.test/z.js", "https://cdn.example.test/a.js", "https://cdn.example.test/a.js"},
-		IframeURLs:  []string{"https://frame.example.test/widget"},
-		CookieNames: []string{"zeta", "alpha", "alpha"},
+		ScriptURLs: []string{"https://cdn.example.test/z.js", "https://cdn.example.test/a.js", "https://cdn.example.test/a.js"},
+		IframeURLs: []string{"https://frame.example.test/widget"},
+		Cookies: []CaptureCookie{
+			{Name: "zeta", Domain: "example.test"},
+			{Name: "alpha", Domain: "example.test"},
+			{Name: "alpha", Domain: ".third.example.test"},
+		},
 	}
 
 	signals, err := normalizeCapture(result)
@@ -44,8 +48,9 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 		{Type: model.SignalTypeScriptURL, Source: analysis.SourceBrowser, Key: "src", Value: "https://cdn.example.test/a.js", URL: result.FinalURL, Confidence: 1},
 		{Type: model.SignalTypeScriptURL, Source: analysis.SourceBrowser, Key: "src", Value: "https://cdn.example.test/z.js", URL: result.FinalURL, Confidence: 1},
 		{Type: model.SignalTypeIframeURL, Source: analysis.SourceBrowser, Key: "src", Value: "https://frame.example.test/widget", URL: result.FinalURL, Confidence: 1},
-		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "alpha", URL: result.FinalURL, Confidence: 1},
-		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "zeta", URL: result.FinalURL, Confidence: 1},
+		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "alpha", Value: ".third.example.test", URL: result.FinalURL, Confidence: 1},
+		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "alpha", Value: "example.test", URL: result.FinalURL, Confidence: 1},
+		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "zeta", Value: "example.test", URL: result.FinalURL, Confidence: 1},
 	}
 	if !reflect.DeepEqual(signals, want) {
 		t.Fatalf("signals = %#v\nwant %#v", signals, want)
@@ -54,15 +59,15 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 		if err := signal.Validate(); err != nil {
 			t.Errorf("signal %d is invalid: %v", index, err)
 		}
-		if signal.Type == model.SignalTypeCookie && signal.Value != "" {
-			t.Errorf("cookie signal retained a value: %#v", signal)
+		if signal.Type == model.SignalTypeCookie && strings.Contains(signal.Value, "synthetic-secret") {
+			t.Errorf("cookie signal retained a cookie value: %#v", signal)
 		}
 	}
 }
 
 func TestNormalizeCaptureRejectsInvalidNormalizedSignal(t *testing.T) {
 	t.Parallel()
-	_, err := normalizeCapture(CaptureResult{CookieNames: []string{" "}})
+	_, err := normalizeCapture(CaptureResult{Cookies: []CaptureCookie{{Name: " ", Domain: "example.test"}}})
 	if !errors.Is(err, ErrInvalidSignal) {
 		t.Fatalf("normalizeCapture() error = %v, want ErrInvalidSignal", err)
 	}
@@ -124,8 +129,8 @@ func TestAnalyzerObserveReturnsNavigationPartialResultAndCloseError(t *testing.T
 	navigationErr := errors.New("navigation budget exceeded")
 	closeErr := errors.New("profile cleanup failed")
 	source := &fakeCaptureSource{result: CaptureResult{
-		FinalURL:    "https://example.test/",
-		CookieNames: []string{"partial_cookie"},
+		FinalURL: "https://example.test/",
+		Cookies:  []CaptureCookie{{Name: "partial_cookie", Domain: "example.test"}},
 	}}
 	backend := newFakeAnalyzerBackend(source, navigationErr)
 	backend.closeErr = closeErr

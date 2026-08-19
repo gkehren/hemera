@@ -125,8 +125,11 @@ Session shutdown is idempotent, bounded, tied to the caller's context, and
 removes the temporary profile after the process stops. The package deliberately
 overrides `chromedp`'s root behavior so Chromium is never launched with
 `--no-sandbox`. It also verifies Chromium's effective command line and rejects
-sandbox-disabling switches added by a launcher; environments that cannot prove
-and preserve the sandbox fail startup.
+sandbox-disabling switches added by a launcher. Startup requires the exact
+Hemera loopback proxy, loopback-bypass exclusion, direct-DNS suppression, QUIC
+disable, and non-proxied WebRTC UDP restriction. Missing, duplicate, or
+conflicting security switches are fatal; environments that cannot prove these
+invariants fail startup.
 
 `Session.BeginCapture` now permits one recorder for the current target. It
 enables the CDP Network and Page domains and records requests, responses, and
@@ -136,7 +139,10 @@ The serializer walks at most 100,000 DOM nodes and attributes, appends at most
 2 MiB while walking instead of materializing an unbounded outer HTML string,
 and collects bounded `script[src]` and `iframe[src]` URLs in document order. It
 does not invoke JavaScript supplied by the page. Finalization also reads only
-cookie names from the isolated profile. Cookies are sorted and deduplicated.
+cookie names and domains from the isolated profile. Values are overwritten
+before the minimized cookie object is constructed. Malformed domains are
+omitted; cookies are sorted and deduplicated by name and domain so first- and
+third-party observations with the same name remain distinguishable.
 The raw result retains no headers, bodies, POST data, timestamps, CDP IDs, remote
 addresses, or cookie values. HTTP(S) URLs have credentials and fragments removed
 and query strings replaced with `?redacted`; non-web URLs are omitted.
@@ -179,6 +185,24 @@ preserves a typed error for the caller. Downloads are denied, cache reuse and
 service workers are bypassed, and the proxy is inactive outside an authorized
 navigation.
 
+After the load event, navigation remains active for a bounded observation phase.
+The default phase ends after 250 ms with no meaningful HTTP(S) activity and no
+active request, or unconditionally after 1.5 seconds. Configuration may lower
+these durations but cannot exceed one second of idle time or three seconds of
+post-load time. Requests, completions, failures, and decoded-byte events reset
+the quiet timer. Caller cancellation remains immediate. The proxy, Fetch and
+Network domains, request lifecycle tracking, and every request, redirect,
+transfer, decoded-byte, and concurrency budget remain active through this phase;
+continuous traffic and long polling stop at the hard deadline.
+
+Milestone 1 fails closed on execution targets that would need independent CDP
+policy attachment. Dedicated/shared workers and service workers are
+auto-attached paused and closed before their code runs. Their script requests
+still traverse the validated proxy and consume ordinary request, concurrency,
+and byte budgets. Popup creation fails the navigation on `Page.windowOpen`
+before child loading. WebSockets remain rejected, and downloads are denied
+without writing a file.
+
 The tagged integration test loads a versioned, entirely synthetic corpus from
 `internal/browser/testdata`. Its test-only manifest declares the sole synthetic
 host, every route and resource, capture completion selectors, ordered traffic,
@@ -188,11 +212,15 @@ or protocol-relative HTTP(S) references, and undeclared redirect destinations
 without starting Chromium. The server accepts only declared GET requests for
 `fixture.test`.
 
-Each capture scenario receives a fresh browser session and profile. The dynamic
-scenario uses a bounded local completion barrier and an explicit CDP selector
-wait before capture finalization; the negative scenario verifies that a static
-page produces no dynamic resources, cookies, or extra traffic. Injected resolver
-and dialer dependencies make the synthetic hostname validate as a permitted
+Each capture scenario receives a fresh browser session and profile. Dynamic
+scenarios rely only on production post-load quiet/deadline semantics before
+capture finalization; tests do not call a completion-selector wait. A delayed
+fixture schedules fetch, cookie, script, and DOM work after `load`. Negative and
+adversarial cases cover quiet pages, continuous traffic, request/concurrency/byte
+limits, private and rebinding destinations, redirect loops, credential
+redirects, malformed and oversized URLs, compressed bodies, recursive iframes,
+workers, popups, WebSockets, downloads, and post-load DOM growth. Injected
+resolver and dialer dependencies make the synthetic hostname validate as a permitted
 public destination while connecting the production proxy to loopback
 `httptest`. This exercises validation and pinning without weakening the global
 destination policy or contacting public DNS or a third party.
@@ -202,9 +230,11 @@ navigation, finishes capture after the bounded navigation completes, and closes
 the session deterministically. It emits `network_request`, `network_response`,
 `page_content`, `script_url`, `iframe_url`, and `cookie` signals under
 `browser_analyzer`. Exact duplicates are removed and signals are sorted by
-channel and normalized fields before scanner aggregation. The raw DOM and
-cookie values never enter reporters; page content can only influence rule
-matching, and a selected page-content evidence value is omitted from reports.
+channel and normalized fields before scanner aggregation. Cookie signals use
+the name as key and validated domain as value; cookie values never enter the
+signal model. The raw DOM and cookie provenance never enter reporters; page
+content can only influence rule matching, and a selected page-content evidence
+value is omitted from reports.
 
 The CLI configures HTTP as fatal and DNS/TLS plus browser observation as
 non-fatal. An unsafe initial HTTP target therefore stops the pipeline before
@@ -212,7 +242,10 @@ Chromium starts. Browser startup, navigation, capture, or cleanup failures
 retain safe partial signals where available and otherwise produce a failed
 coverage entry. The scanner validates all three observations, aggregates their
 signals in configured order, and invokes the analyzer-independent scoring engine
-once.
+once. For a negative rule result, the scanner derives mandatory signal sources
+from exact `source` predicates and dependencies. A partial, failed, or absent
+mandatory source produces `insufficient_coverage` in report V4 instead of a
+definitive `not_detected`; rules never import or name a Go analyzer type.
 
 ### Signal model
 
@@ -374,13 +407,13 @@ dependencies or mutable aliasing. The current CLI configures HTTP first with
 The CLI renders that model as human-oriented text by default or as versioned,
 deterministic JSON with `--format json`. Both formats explain detected and
 non-detected rules, including raw positive evidence, its correlation group, the
-selected maximum contribution, and later penalties. JSON V3 also records each
+selected maximum contribution, and later penalties. JSON V4 also records each
 analyzer's source, coverage status, and producer-sanitized warnings. They omit
 HTML, header/cookie values, and analyzer error details and sanitize every emitted
 URL. The JSON schema is experimental until the first stable release; breaking
 pre-release changes still require a documented schema-version increment. The
 contract and text-output expectations are documented in
-[JSON report schema V3](report-schema.md). An exportable local HTML report
+[JSON report schema V4](report-schema.md). An exportable local HTML report
 remains a later goal.
 
 ## Proposed repository layout

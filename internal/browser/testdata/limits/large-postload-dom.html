@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><body><script>
+window.addEventListener("load", () => setTimeout(() => {
+  const fragment = document.createDocumentFragment();
+  for (let index = 0; index < 110000; index++) {
+    fragment.appendChild(document.createElement("span"));
+  }
+  document.body.appendChild(fragment);
+}, 50));
+</script></body></html>

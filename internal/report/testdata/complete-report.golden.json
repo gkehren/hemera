@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "tool_version": "1.2.3",
   "requested_url": "https://example.test/start?redacted",
   "final_url": "https://example.test/final?redacted",
@@ -46,6 +46,8 @@
       "vendor": "Example",
       "product": "Widget",
       "detected": true,
+      "status": "detected",
+      "incomplete_sources": [],
       "condition_matched": true,
       "minimum_evidence_met": true,
       "evidence_score": 82.5,

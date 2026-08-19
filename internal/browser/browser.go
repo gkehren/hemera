@@ -20,6 +20,10 @@ const (
 
 	defaultNavigationTimeout           = 15 * time.Second
 	maxNavigationTimeout               = 15 * time.Second
+	defaultPostLoadTimeout             = 1500 * time.Millisecond
+	maxPostLoadTimeout                 = 3 * time.Second
+	defaultNetworkIdleTime             = 250 * time.Millisecond
+	maxNetworkIdleTime                 = time.Second
 	defaultConnectTimeout              = 5 * time.Second
 	maxBrowserConnectTimeout           = 5 * time.Second
 	defaultMaxBrowserRequests          = 256
@@ -52,6 +56,9 @@ var (
 	ErrTransferLimit = errors.New("browser transfer limit exceeded")
 	// ErrConcurrencyLimit indicates that a page exceeded its active request budget.
 	ErrConcurrencyLimit = errors.New("browser concurrency limit exceeded")
+	// ErrUnsupportedTarget indicates that a page attempted to create a worker,
+	// popup, or another child execution target blocked by the Milestone 1 model.
+	ErrUnsupportedTarget = errors.New("unsupported browser child target")
 )
 
 // Config controls local Chromium startup. ExecutablePath may be empty to use
@@ -60,6 +67,8 @@ type Config struct {
 	ExecutablePath        string
 	StartupTimeout        time.Duration
 	NavigationTimeout     time.Duration
+	PostLoadTimeout       time.Duration
+	NetworkIdleTime       time.Duration
 	ConnectTimeout        time.Duration
 	MaxRequests           int
 	MaxRedirects          int
@@ -74,6 +83,8 @@ func DefaultConfig() Config {
 	return Config{
 		StartupTimeout:        defaultStartupTimeout,
 		NavigationTimeout:     defaultNavigationTimeout,
+		PostLoadTimeout:       defaultPostLoadTimeout,
+		NetworkIdleTime:       defaultNetworkIdleTime,
 		ConnectTimeout:        defaultConnectTimeout,
 		MaxRequests:           defaultMaxBrowserRequests,
 		MaxRedirects:          defaultMaxBrowserRedirects,
@@ -106,6 +117,12 @@ func newClient(config Config, backend backend, newTimer timerFactory) (*Client, 
 	}
 	if config.NavigationTimeout <= 0 || config.NavigationTimeout > maxNavigationTimeout {
 		return nil, fmt.Errorf("%w: navigation timeout must be between 1ns and %s", ErrInvalidConfig, maxNavigationTimeout)
+	}
+	if config.PostLoadTimeout <= 0 || config.PostLoadTimeout > maxPostLoadTimeout {
+		return nil, fmt.Errorf("%w: post-load timeout must be between 1ns and %s", ErrInvalidConfig, maxPostLoadTimeout)
+	}
+	if config.NetworkIdleTime <= 0 || config.NetworkIdleTime > maxNetworkIdleTime || config.NetworkIdleTime > config.PostLoadTimeout {
+		return nil, fmt.Errorf("%w: network idle time must be between 1ns and the post-load timeout, with a ceiling of %s", ErrInvalidConfig, maxNetworkIdleTime)
 	}
 	if config.ConnectTimeout <= 0 || config.ConnectTimeout > maxBrowserConnectTimeout {
 		return nil, fmt.Errorf("%w: connect timeout must be between 1ns and %s", ErrInvalidConfig, maxBrowserConnectTimeout)
