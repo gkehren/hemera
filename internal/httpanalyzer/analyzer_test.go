@@ -99,6 +99,31 @@ func TestAnalyzeDoesNotFetchSubresources(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAppliesFirstValidBaseToEntireDocument(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, `<script src="before.js"></script>`+
+			`<base href="javascript:void(0)"><base href="/assets/">`+
+			`<base href="/ignored/"><iframe src="after.html"></iframe>`)
+	}))
+	defer server.Close()
+
+	result, err := analyzerForServer(t, server.URL, nil).Analyze(context.Background(), "http://example.test/page/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resources []string
+	for _, signal := range result.Signals {
+		if signal.Type == model.SignalTypeScriptURL || signal.Type == model.SignalTypeIframeURL {
+			resources = append(resources, signal.Value)
+		}
+	}
+	if got, want := strings.Join(resources, "|"), "http://example.test/assets/before.js|http://example.test/assets/after.html"; got != want {
+		t.Errorf("resource URLs = %q, want %q", got, want)
+	}
+}
+
 func TestAnalyzeCollectsRedirectHTTPAndHTMLSignals(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
@@ -318,6 +343,42 @@ func TestAnalyzeEnforcesRedirectLimit(t *testing.T) {
 	_, err := analyzerForServer(t, server.URL, func(config *Config) { config.MaxRedirects = 2 }).Analyze(context.Background(), "http://example.test/a")
 	if !errors.Is(err, networkguard.ErrTooManyRedirects) {
 		t.Fatalf("error = %v, want ErrTooManyRedirects", err)
+	}
+}
+
+func TestAnalyzeStopsRedirectLoop(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/a" {
+			http.Redirect(w, r, "/b", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/a", http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := analyzerForServer(t, server.URL, func(config *Config) { config.MaxRedirects = 3 }).Analyze(context.Background(), "http://example.test/a")
+	if !errors.Is(err, networkguard.ErrTooManyRedirects) {
+		t.Fatalf("error = %v, want ErrTooManyRedirects", err)
+	}
+}
+
+func TestAnalyzeDoesNotSendOrRetainFragment(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.RequestURI, "fragment-secret") {
+			t.Errorf("request URI retained fragment: %q", r.RequestURI)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	result, err := analyzerForServer(t, server.URL, nil).Analyze(context.Background(), "http://example.test/path#fragment-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.RequestedURL+result.FinalURL, "fragment-secret") {
+		t.Errorf("result retained fragment: %#v", result)
 	}
 }
 

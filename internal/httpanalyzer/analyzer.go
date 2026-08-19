@@ -289,19 +289,11 @@ func (a *Analyzer) collectHTML(result *Result, documentURL *url.URL, contentType
 	if err != nil {
 		return fmt.Errorf("parse HTML: %w", err)
 	}
-	baseURL := documentURL
-	baseChosen := false
+	baseURL := firstBaseURL(document, documentURL)
 	seen := make(map[string]struct{})
 	var walk func(*html.Node) error
 	walk = func(node *html.Node) error {
 		if node.Type == html.ElementNode {
-			if node.Data == "base" && !baseChosen {
-				if value, ok := attr(node, "href"); ok {
-					if resolved, ok := resolveHTTPURL(documentURL, value); ok {
-						baseURL, baseChosen = resolved, true
-					}
-				}
-			}
 			var signalType model.SignalType
 			switch node.Data {
 			case "script":
@@ -347,6 +339,35 @@ func (a *Analyzer) collectHTML(result *Result, documentURL *url.URL, contentType
 		return nil
 	}
 	return walk(document)
+}
+
+func firstBaseURL(document *html.Node, documentURL *url.URL) *url.URL {
+	var selected *url.URL
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if selected != nil {
+			return
+		}
+		if node.Type == html.ElementNode && node.Data == "base" {
+			if value, ok := attr(node, "href"); ok {
+				if resolved, ok := resolveHTTPURL(documentURL, value); ok {
+					selected = resolved
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+			if selected != nil {
+				return
+			}
+		}
+	}
+	walk(document)
+	if selected != nil {
+		return selected
+	}
+	return documentURL
 }
 
 func appendSignal(result *Result, signal model.Signal) error {

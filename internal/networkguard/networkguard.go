@@ -74,6 +74,7 @@ func ParseURL(rawURL string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidURL, err)
 	}
+	u.Scheme = strings.ToLower(u.Scheme)
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("%w: scheme must be http or https", ErrInvalidURL)
 	}
@@ -85,6 +86,9 @@ func ParseURL(rawURL string) (*url.URL, error) {
 	}
 	if strings.Contains(u.Hostname(), "%") {
 		return nil, fmt.Errorf("%w: IPv6 zones are not allowed", ErrInvalidURL)
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return nil, fmt.Errorf("%w: port is empty", ErrInvalidURL)
 	}
 	if _, err := url.ParseRequestURI(u.RequestURI()); err != nil {
 		return nil, fmt.Errorf("%w: invalid request target", ErrInvalidURL)
