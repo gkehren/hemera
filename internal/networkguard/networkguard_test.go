@@ -22,6 +22,7 @@ func TestParseURL(t *testing.T) {
 		wantErr bool
 	}{
 		{"http", "http://example.com/path", false},
+		{"case-insensitive HTTPS scheme", "HTTPS://example.com/path", false},
 		{"https nonstandard port", "https://example.com:8443/", false},
 		{"IPv4", "http://8.8.8.8/", false},
 		{"IPv6", "https://[2606:4700:4700::1111]/", false},
@@ -30,6 +31,7 @@ func TestParseURL(t *testing.T) {
 		{"userinfo", "https://user:pass@example.com", true},
 		{"empty host", "https:///path", true},
 		{"invalid port", "https://example.com:abc", true},
+		{"empty port", "https://example.com:/", true},
 		{"zero port", "https://example.com:0", true},
 		{"large port", "https://example.com:65536", true},
 		{"IPv6 zone", "http://[fe80::1%25eth0]/", true},
