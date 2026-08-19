@@ -26,8 +26,9 @@ Project decisions should follow this order of priority:
    visible and results reviewable.
 5. **Extensibility:** analyzers, normalized signals, rules, scoring, and reporting
    should remain separate so each can evolve without tightly coupling the rest.
-6. **Usability:** installation and CLI usage should remain simple, while stable
-   JSON output supports automation.
+6. **Usability:** installation and CLI usage should remain simple, while
+   versioned, deterministic JSON output supports automation and gains a stable
+   compatibility policy at the first stable release.
 
 ## Primary objectives
 
@@ -36,7 +37,8 @@ Project decisions should follow this order of priority:
 - Detect at least five protection families with documented limitations.
 - Attach positive, missing, negative, and conflicting evidence to detections.
 - Produce an explainable confidence score from 0 to 100.
-- Offer readable terminal output and a versioned, stable JSON representation.
+- Offer readable terminal output and a versioned JSON representation, with
+  explicit experimental pre-release and stable-release compatibility policies.
 - Support data-driven detector definitions and a documented contribution path.
 - Maintain a regression corpus that measures known false positives and false
   negatives.

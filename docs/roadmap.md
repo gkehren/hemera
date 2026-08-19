@@ -50,7 +50,7 @@ prerequisites.
   - Linux: format verification, `go vet ./...`, `go test ./...`,
     `go test -race ./...`, `govulncheck ./...`, and a CLI build.
   - macOS and Windows: `go test ./...` and a CLI build.
-- [ ] Clarify that JSON report-schema compatibility remains experimental until
+- [x] Clarify that JSON report-schema compatibility remains experimental until
   the first stable release
   ([issue #6](https://github.com/gkehren/hemera/issues/6)).
 - [x] Synchronize roadmap status with the rule, scoring, schema-documentation,
@@ -122,8 +122,9 @@ Milestone 0.5 rather than this release phase.
 - [ ] Add a contribution guide and code of conduct.
 - [ ] Publish a private security-reporting process.
 - [ ] Select and add an open-source license.
-- [ ] Define stable public compatibility guarantees for rules, reports, and the
-  CLI before the first stable release.
+- [ ] Adopt and document stable public compatibility guarantees for rules,
+  reports, and the CLI before the first stable release, including any supported
+  historical-schema lifecycle.
 - [ ] Produce reproducible Linux, macOS, and Windows release binaries and a
   multi-platform release pipeline.
 - [ ] Publish a container image if it adds practical value.
