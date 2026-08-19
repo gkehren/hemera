@@ -31,8 +31,8 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 | Rule ID | Category | Vendor | Product | Precision | Recall | FPR | FNR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `cloudflare.proxy` | `cdn_reverse_proxy` | Cloudflare | *(Infrastructure)* | 100.0% | 100.0% | 0.0% | 0.0% |
-| `cloudflare.waf` | `waf` | Cloudflare | WAF | 100.0% | 100.0% | 0.0% | 0.0% |
-| `cloudflare.bot_management` | `bot_management` | Cloudflare | Bot Management | 100.0% | 100.0% | 0.0% | 0.0% |
+| `cloudflare.challenge_page` | `captcha_challenge` | Cloudflare | Challenge Page | 100.0% | 100.0% | 0.0% | 0.0% |
+| `cloudflare.bot_protection` | `bot_management` | Cloudflare | Bot Protection | 100.0% | 100.0% | 0.0% | 0.0% |
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare | Turnstile | 100.0% | 100.0% | 0.0% | 0.0% |
 | `google.recaptcha` | `captcha_challenge` | Google | reCAPTCHA | 100.0% | 100.0% | 0.0% | 0.0% |
 | `aws.cloudfront` | `cdn_reverse_proxy` | AWS | *(Infrastructure)* | 100.0% | 100.0% | 0.0% | 0.0% |
@@ -54,7 +54,7 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 | **Phishing / Lookalike Domains** | Turnstile, reCAPTCHA, DataDome, hCaptcha, Arkose | Malicious or deceptive pages loading lookalike URLs (e.g. `https://not-challenges.cloudflare.com/api.js`, `https://google.com.attacker.example/recaptcha/api.js`). | Strict regex anchoring (`^https://`) with exact subdomain and domain boundaries prevents lookalike prefix/suffix hijacking. |
 | **Direct Origin S3 Headers** | `aws.cloudfront` | S3 direct origin buckets emit `x-amz-request-id` and `x-amz-id-2` headers without CloudFront routing. | `aws.cloudfront` matches CloudFront-specific headers (`x-amz-cf-id`, `x-amz-cf-pop`, `Server: CloudFront`) rather than generic S3 bucket headers. |
 | **Commented-Out or Inactive Markup** | All rules | Dead code, commented-out script tags (`<!-- <script src="..."></script> -->`), or JSON-LD schema descriptions. | `httpanalyzer` extracts script and iframe sources from valid DOM node attributes (`<script src>`, `<iframe src>`), ignoring HTML comments and schema text. |
-| **Vendor Infrastructure Generalization** | `cloudflare.waf`, `aws.waf`, `akamai.bot_manager`, etc. | Assuming that because a site uses Cloudflare, CloudFront, or Akamai CDN, it also has WAF or Bot Management active. | Strict **product-level separation**: vendor infrastructure rules (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) match routing headers, while product rules require explicit product evidence (SDKs, action headers, sensor scripts, block pages). |
+| **Vendor Infrastructure Generalization** | `cloudflare.challenge_page`, `aws.waf`, `akamai.bot_manager`, etc. | Assuming that because a site uses Cloudflare, CloudFront, or Akamai CDN, it also has WAF or Bot Management active. | Strict **product-level separation**: vendor infrastructure rules (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) match routing headers, while product rules require explicit product evidence (SDKs, action headers, sensor scripts, block pages). |
 | **Correlation Weight Inflation** | All rules | Sites containing multiple redundant supporting markers (e.g. 5 `g-recaptcha` divs and 3 inline calls). | Correlation groups (e.g. `static_integration`, `response_headers`) evaluate to $\max(\text{weights})$ rather than $\sum(\text{weights})$, preventing repetitive markup from reaching the detection threshold. |
 
 ---
@@ -65,15 +65,15 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 | --- | --- | --- | --- |
 | **Self-Hosted Reverse Proxy Wrappers** | Turnstile, reCAPTCHA, DataDome, hCaptcha, Arkose | Enterprises mirroring client SDK scripts to a first-party path (e.g. `/static/js/captcha.js`) to evade content blockers or ad-block lists. | **Known false negative.** Passive HTTP analysis does not execute or deobfuscate first-party scripts without browser runtime inspection. Browser analyzer CDP instrumentation will observe dynamic network endpoints in subsequent milestones. |
 | **Dynamic Post-Hydration Injection** | All client-side rules | Single Page Applications (SPAs) injecting CAPTCHA or bot sensor scripts dynamically after user interaction (e.g. on clicking "Submit") rather than on initial page load. | **Known false negative for static HTTP.** Passive HTTP analyzer inspects initial document HTML. Dynamic post-load capture in the browser analyzer captures network requests within bounded post-load navigation budgets. |
-| **API-Only Backend Protection** | `cloudflare.waf`, `aws.waf`, `datadome.bot_protection` | API endpoints protected by server-side middleware without client-side HTML, headers, or cookies on benign requests. | **Known false negative.** Benign API requests returning standard JSON without custom security headers cannot be distinguished from unprotected origins without probing (which Hemera strictly avoids). |
-| **Count / Monitor-Only Mode WAF Rules** | `cloudflare.waf`, `aws.waf`, `akamai.app_and_api_protector` | WAF rules configured in passive `Count` / `Monitor` mode that do not block requests, issue challenge pages, or attach diagnostic action headers. | **Known false negative.** Non-interfering passive monitoring emits no externally observable HTTP or DOM signals on public requests. |
+| **API-Only Backend Protection** | `aws.waf`, `datadome.bot_protection`, `cloudflare.bot_protection` | API endpoints protected by server-side middleware without client-side HTML, headers, or cookies on benign requests. | **Known false negative.** Benign API requests returning standard JSON without custom security headers cannot be distinguished from unprotected origins without probing (which Hemera strictly avoids). |
+| **Count / Monitor-Only Mode WAF Rules** | `aws.waf`, `akamai.app_and_api_protector` | WAF rules configured in passive `Count` / `Monitor` mode that do not block requests, issue challenge pages, or attach diagnostic action headers. | **Known false negative.** Non-interfering passive monitoring emits no externally observable HTTP or DOM signals on public requests. |
 | **Stripped Diagnostic Headers** | `cloudflare.proxy`, `aws.cloudfront`, `akamai.edge` | Custom enterprise edge distributions configured with `Server` masking and stripped diagnostic headers (`x-amz-cf-id`, `x-akamai-transformed`). | **Mitigated by DNS/TLS evidence.** Detection falls back to canonical CNAME records (`*.cloudfront.net`, `*.edgekey.net`) and TLS certificate issuers. |
 
 ---
 
 ## 4. Regression Corpus Fixture Inventory
 
-The regression suite in `internal/scanner/testdata/cases.json` contains 24 synthetic test cases:
+The regression suite in `internal/scanner/testdata/cases.json` contains 25 synthetic test cases:
 
 1. `turnstile documented client` &mdash; `turnstile-positive.html`
 2. `recaptcha documented client` &mdash; `recaptcha-positive.html`
@@ -84,18 +84,19 @@ The regression suite in `internal/scanner/testdata/cases.json` contains 24 synth
 7. `unrelated protection page` &mdash; `negative.html`
 8. `documentation text regression` &mdash; `documentation-regression.html`
 9. `cloudflare reverse proxy edge` &mdash; `cloudflare-proxy-positive.html`
-10. `cloudflare waf managed challenge` &mdash; `cloudflare-waf-challenge.html`
-11. `cloudflare bot management telemetry` &mdash; `cloudflare-bot-management-positive.html`
-12. `aws cloudfront edge` &mdash; `aws-cloudfront-positive.html`
-13. `aws waf sdk integration` &mdash; `aws-waf-positive.html`
-14. `datadome bot protection` &mdash; `datadome-positive.html`
-15. `datadome cookie ambiguity` &mdash; `negative.html` with DataDome cookie
-16. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
-17. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
-18. `akamai waf block page` &mdash; `akamai-waf-positive.html`
-19. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
-20. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
-21. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
-22. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
-23. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
-24. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)
+10. `cloudflare challenge page` &mdash; `cloudflare-waf-challenge.html`
+11. `cloudflare bot protection telemetry` &mdash; `cloudflare-bot-management-positive.html`
+12. `cloudflare challenge ambiguity` &mdash; `ambiguous-markers.html` with Cloudflare proxy headers
+13. `aws cloudfront edge` &mdash; `aws-cloudfront-positive.html`
+14. `aws waf sdk integration` &mdash; `aws-waf-positive.html`
+15. `datadome bot protection` &mdash; `datadome-positive.html`
+16. `datadome cookie ambiguity` &mdash; `negative.html` with DataDome cookie
+17. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
+18. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
+19. `akamai waf block page` &mdash; `akamai-waf-positive.html`
+20. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
+21. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
+22. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
+23. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
+24. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
+25. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)

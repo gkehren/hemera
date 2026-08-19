@@ -16,8 +16,8 @@ Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome
 | Rule ID | Category | Product | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
 | `cloudflare.proxy` | `cdn_reverse_proxy` | (Infrastructure) | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
-| `cloudflare.waf` | `waf` | Cloudflare WAF | `cf-mitigated: challenge`, `cf-error-code`, WAF block page DOM | Challenge orchestration scripts, `cf-error-details` marker |
-| `cloudflare.bot_management` | `bot_management` | Cloudflare Bot Management | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` script | `__cf_bm` cookie |
+| `cloudflare.challenge_page` | `captcha_challenge` | Cloudflare Challenge Page | `cf-mitigated: challenge`, `cf-error-code`, challenge block DOM | Challenge orchestration scripts, `cf-error-details` marker |
+| `cloudflare.bot_protection` | `bot_management` | Cloudflare Bot Protection | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` script | `__cf_bm` cookie |
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
 | `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
@@ -39,7 +39,7 @@ All vendor rules strictly maintain **product-level separation**: detecting
 infrastructure (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) never implies
 that a corresponding WAF, Bot Management, or CAPTCHA product is active.
 Product rules requiring edge infrastructure declare formal prerequisites via `requires`
-(e.g., `cloudflare.bot_management`, `akamai.bot_manager`, `akamai.app_and_api_protector`),
+(e.g., `cloudflare.challenge_page`, `cloudflare.bot_protection`, `akamai.bot_manager`, `akamai.app_and_api_protector`),
 while standalone products (`cloudflare.turnstile`, `google.recaptcha`, `aws.waf`, `datadome.bot_protection`, `hcaptcha.challenge`, `arkoselabs.matchkey`)
 operate on any origin.
 
