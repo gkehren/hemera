@@ -128,13 +128,14 @@ use a fresh profile, restrict downloads and external protocol handlers, and
 terminate the browser when time or resource budgets are exceeded. Running
 Chromium with its sandbox disabled is not an acceptable production default.
 
-### Implemented browser bootstrap boundary
+### Implemented browser bootstrap, navigation, and capture boundary
 
-`internal/browser` currently implements process and CDP session lifecycle only.
-It uses a locally maintained Chromium or Chrome executable and never downloads a
-browser. Every session receives a new temporary profile, runs headless, listens
-for CDP only on `127.0.0.1` with an operating-system-selected port, and starts at
-`about:blank`. Remote CDP attachment is not supported.
+`internal/browser` implements process and CDP session lifecycle plus bounded
+capture of the current target. It uses a locally maintained Chromium or Chrome
+executable and never downloads a browser. Every session receives a new temporary
+profile, runs headless, listens for CDP only on `127.0.0.1` with an
+operating-system-selected port, and starts at `about:blank`. Remote CDP
+attachment is not supported.
 
 The package explicitly sets the `no-sandbox` allocator option to false. This
 prevents `chromedp` from silently adding `--no-sandbox` when Hemera runs as root;
@@ -146,10 +147,57 @@ startup timeout of at most 10 seconds covers process launch and the
 the CDP session, and explicit close all stop the process and remove the profile;
 explicit close also has a fixed shutdown deadline.
 
-No untrusted destination is navigated in this slice, and it is not used by
-`hemera scan`. Redirect revalidation, address pinning, external protocol and
-download restrictions, navigation timeouts, response and resource limits, and
-evidence minimization must be implemented before browser navigation is enabled.
+At most one recorder and one navigation are active per session. Cancellation,
+explicit recorder close, CDP loss, and session shutdown all stop collection.
+Requests and responses retain only cleaned HTTP(S) URLs, methods, statuses, MIME
+types, and resource types. Redirect responses are recorded, but headers, bodies,
+POST data,
+timestamps, CDP identifiers, remote addresses, and cookie values are never
+retained. Final cookie values are discarded immediately while names are sorted
+and deduplicated. URL credentials and fragments are removed, queries are reduced
+to `?redacted`, and invalid or non-web metadata is omitted.
+
+The internal result has fixed per-collection and URL ceilings. A Hemera-owned
+serializer runs in an isolated JavaScript world and stops appending after 2 MiB
+or after 100,000 DOM node and attribute visits. It therefore never asks Chromium
+or Go to construct an unbounded serialized document. The bounded snapshot
+remains in memory and is not persisted or passed to a reporter; like all page
+content, it must still be treated as sensitive and untrusted. Limit warnings are
+generic and contain no page-controlled text.
+
+Internal production code can now navigate an untrusted HTTP(S) target, but the
+capability is not used by `hemera scan`. Chromium receives a per-session
+loopback proxy and is configured without proxy bypass, direct hostname
+resolution, QUIC, or non-proxied WebRTC UDP. WebSocket transports are rejected.
+The proxy parses the initial target, redirects, and HTTP subresources through
+the shared URL policy. It re-resolves at connection time
+and passes only the validated IP to the injected dialer, preventing Chromium DNS
+behavior or rebinding from selecting a forbidden address. HTTPS remains
+end-to-end between Chromium and the original hostname through a validated
+CONNECT tunnel; the proxy does not decrypt page traffic.
+
+Every navigation has a total timeout, connection timeouts, request and redirect
+counts, active browser-request concurrency, response-header size, total
+transferred-byte, and decoded-response-byte ceilings. Directly forwarded HTTP
+also has a response-header timeout. CDP pauses HTTP(S) requests before dispatch
+to enforce counts and tracks each lifecycle until loading succeeds or fails.
+This prevents HTTP/2 streams multiplexed through one HTTPS tunnel from bypassing
+the concurrency ceiling. Decoded byte events cover compression inside opaque
+HTTPS tunnels. Exceeding a budget cancels navigation and active proxy work.
+Downloads are denied, cache reuse and service workers are bypassed, and no proxy
+destination is available between navigations. Initial
+targets with credentials, ambiguous syntax, non-HTTP(S) schemes, or forbidden
+addresses fail before page loading. Browser URLs also have a fixed byte limit,
+and proxy transfer accounting includes headers, uploads, downloads, and opaque
+tunnel traffic.
+
+The tagged integration test injects a synthetic public DNS answer and maps only
+the validated dial to its loopback `httptest` server. Loopback remains forbidden
+under the production policy. Browser observations are still internal and are
+not converted to signals or reports. External protocol handling, normalized
+evidence minimization, and scanner-level aggregation remain future integration
+work; the current navigation method does not authorize challenge bypass,
+fingerprint spoofing, or active probing.
 
 ## Explicitly prohibited capabilities
 

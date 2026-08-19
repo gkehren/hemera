@@ -73,9 +73,9 @@ Browser -----┘
 - [x] Implement bounded DNS/TLS observation and normalized `dns_record` and
   `tls_property` signals, reusing validated HTTP/TLS state where practical
   ([issue #4](https://github.com/gkehren/hemera/issues/4)).
-- [ ] Capture browser network traffic, final DOM, scripts, iframes, and dynamic
+- [x] Capture browser network traffic, final DOM, scripts, iframes, and dynamic
   cookies.
-- [ ] Enforce browser destination validation, navigation timeouts, and resource
+- [x] Enforce browser destination validation, navigation timeouts, and resource
   limits.
 - [ ] Add browser fixtures that do not depend on live third-party pages.
 - [ ] Add browser-specific CI incrementally as deterministic navigation fixtures

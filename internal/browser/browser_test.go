@@ -23,6 +23,14 @@ func TestDefaultConfig(t *testing.T) {
 	if config.StartupTimeout <= 0 || config.StartupTimeout > maxStartupTimeout {
 		t.Errorf("StartupTimeout = %s, want positive value at or below %s", config.StartupTimeout, maxStartupTimeout)
 	}
+	if config.NavigationTimeout != defaultNavigationTimeout || config.ConnectTimeout != defaultConnectTimeout {
+		t.Errorf("navigation/connect timeouts = %s/%s", config.NavigationTimeout, config.ConnectTimeout)
+	}
+	if config.MaxRequests != defaultMaxBrowserRequests || config.MaxRedirects != defaultMaxBrowserRedirects ||
+		config.MaxTransferBytes != defaultMaxBrowserBytes || config.MaxConcurrentRequests != defaultMaxBrowserConcurrency {
+		t.Errorf("browser budgets = requests %d redirects %d bytes %d concurrency %d",
+			config.MaxRequests, config.MaxRedirects, config.MaxTransferBytes, config.MaxConcurrentRequests)
+	}
 }
 
 func TestNewValidatesConfig(t *testing.T) {
@@ -35,6 +43,18 @@ func TestNewValidatesConfig(t *testing.T) {
 		{"zero timeout", func(config *Config) { config.StartupTimeout = 0 }},
 		{"negative timeout", func(config *Config) { config.StartupTimeout = -time.Nanosecond }},
 		{"timeout above ceiling", func(config *Config) { config.StartupTimeout = maxStartupTimeout + time.Nanosecond }},
+		{"zero navigation timeout", func(config *Config) { config.NavigationTimeout = 0 }},
+		{"navigation timeout above ceiling", func(config *Config) { config.NavigationTimeout = maxNavigationTimeout + time.Nanosecond }},
+		{"zero connect timeout", func(config *Config) { config.ConnectTimeout = 0 }},
+		{"connect timeout above ceiling", func(config *Config) { config.ConnectTimeout = maxBrowserConnectTimeout + time.Nanosecond }},
+		{"zero requests", func(config *Config) { config.MaxRequests = 0 }},
+		{"requests above ceiling", func(config *Config) { config.MaxRequests = maxBrowserRequests + 1 }},
+		{"negative redirects", func(config *Config) { config.MaxRedirects = -1 }},
+		{"redirects above ceiling", func(config *Config) { config.MaxRedirects = maxBrowserRedirects + 1 }},
+		{"zero transfer bytes", func(config *Config) { config.MaxTransferBytes = 0 }},
+		{"transfer bytes above ceiling", func(config *Config) { config.MaxTransferBytes = maxBrowserBytes + 1 }},
+		{"zero concurrency", func(config *Config) { config.MaxConcurrentRequests = 0 }},
+		{"concurrency above ceiling", func(config *Config) { config.MaxConcurrentRequests = maxBrowserConcurrency + 1 }},
 		{"missing executable", func(config *Config) { config.ExecutablePath = missingExecutable }},
 	}
 	for _, test := range tests {
