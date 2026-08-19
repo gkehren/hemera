@@ -63,8 +63,8 @@ Hemera ships built-in detector rules with explicit product-level separation acro
 
 - **Cloudflare:**
   - `cloudflare.proxy` (Reverse Proxy / CDN edge infrastructure);
-  - `cloudflare.waf` (WAF block pages, security error codes, and managed challenges);
-  - `cloudflare.bot_management` (Bot Management / Bot Fight Mode JavaScript telemetry);
+  - `cloudflare.challenge_page` (Managed challenge pages, security error codes, and challenge interstitials);
+  - `cloudflare.bot_protection` (Bot Protection / Bot Fight Mode JavaScript detection telemetry);
   - `cloudflare.turnstile` (Turnstile client challenge widget).
 - **Google:**
   - `google.recaptcha` (Standard and Enterprise reCAPTCHA client integrations).
