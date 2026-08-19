@@ -46,8 +46,9 @@ Hemera is in early development. The repository currently contains:
 - the Go module `github.com/gkehren/hemera`, requiring Go 1.26 or later;
 - a CLI in `cmd/hemera` with help, version, and bounded `scan` commands;
 - safe URL/DNS validation and passive HTTP analysis;
-- internal sandboxed Chromium/CDP session startup and deterministic lifecycle
-  tests, without browser navigation or signal capture;
+- internal sandboxed Chromium/CDP session startup, bounded capture of the
+  current target, and validated resource-bounded navigation, without browser
+  signal conversion or scanner integration;
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
 - deterministic multi-analyzer orchestration and typed HTTP metadata;
@@ -56,9 +57,9 @@ Hemera is in early development. The repository currently contains:
 - deterministic unit, integration, security, and detector fixture tests;
 - baseline GitHub Actions checks on Linux, macOS, and Windows.
 
-Do not document planned behavior as implemented. Browser navigation and signal
-capture, separate DNS/TLS analysis, broader detector coverage, and release
-packaging remain planned until their roadmap steps are completed and verified.
+Do not document planned behavior as implemented. Browser signal conversion and
+scanner aggregation, broader detector coverage, and release packaging remain
+planned until their roadmap steps are completed and verified.
 
 ## Architecture boundaries
 

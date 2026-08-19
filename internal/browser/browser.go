@@ -5,32 +5,81 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/gkehren/hemera/internal/networkguard"
 )
 
 const (
 	defaultStartupTimeout = 5 * time.Second
 	maxStartupTimeout     = 10 * time.Second
 	backendStopTimeout    = 5 * time.Second
+
+	defaultNavigationTimeout           = 15 * time.Second
+	maxNavigationTimeout               = 15 * time.Second
+	defaultConnectTimeout              = 5 * time.Second
+	maxBrowserConnectTimeout           = 5 * time.Second
+	defaultMaxBrowserRequests          = 256
+	maxBrowserRequests                 = 4096
+	defaultMaxBrowserRedirects         = 10
+	maxBrowserRedirects                = 10
+	defaultMaxBrowserBytes       int64 = 16 << 20
+	maxBrowserBytes              int64 = 16 << 20
+	defaultMaxBrowserConcurrency       = 16
+	maxBrowserConcurrency              = 32
+	maxBrowserURLBytes                 = 8192
 )
 
 var (
 	// ErrInvalidConfig identifies browser configuration outside safe bounds.
 	ErrInvalidConfig = errors.New("invalid browser configuration")
+	// ErrCaptureActive indicates that a session already has an active recorder.
+	ErrCaptureActive = errors.New("browser capture is already active")
+	// ErrSessionClosed indicates that an operation targeted a stopped session.
+	ErrSessionClosed = errors.New("browser session is closed")
+	// ErrRecorderClosed indicates that a recorder was abandoned before finishing.
+	ErrRecorderClosed = errors.New("browser recorder is closed")
+	// ErrNavigationActive indicates that the session is already navigating.
+	ErrNavigationActive = errors.New("browser navigation is already active")
+	// ErrRequestLimit indicates that a page exceeded its request budget.
+	ErrRequestLimit = errors.New("browser request limit exceeded")
+	// ErrRedirectLimit indicates that a page exceeded its redirect budget.
+	ErrRedirectLimit = errors.New("browser redirect limit exceeded")
+	// ErrTransferLimit indicates that a page exceeded its byte budget.
+	ErrTransferLimit = errors.New("browser transfer limit exceeded")
+	// ErrConcurrencyLimit indicates that a page exceeded its active request budget.
+	ErrConcurrencyLimit = errors.New("browser concurrency limit exceeded")
 )
 
 // Config controls local Chromium startup. ExecutablePath may be empty to use
 // chromedp's platform-specific executable discovery.
 type Config struct {
-	ExecutablePath string
-	StartupTimeout time.Duration
+	ExecutablePath        string
+	StartupTimeout        time.Duration
+	NavigationTimeout     time.Duration
+	ConnectTimeout        time.Duration
+	MaxRequests           int
+	MaxRedirects          int
+	MaxTransferBytes      int64
+	MaxConcurrentRequests int
+	Resolver              networkguard.Resolver
+	Dialer                networkguard.Dialer
 }
 
 // DefaultConfig returns the browser startup defaults and safety ceiling.
 func DefaultConfig() Config {
-	return Config{StartupTimeout: defaultStartupTimeout}
+	return Config{
+		StartupTimeout:        defaultStartupTimeout,
+		NavigationTimeout:     defaultNavigationTimeout,
+		ConnectTimeout:        defaultConnectTimeout,
+		MaxRequests:           defaultMaxBrowserRequests,
+		MaxRedirects:          defaultMaxBrowserRedirects,
+		MaxTransferBytes:      defaultMaxBrowserBytes,
+		MaxConcurrentRequests: defaultMaxBrowserConcurrency,
+	}
 }
 
 // Version contains the minimal browser identity returned by Browser.getVersion.
@@ -54,6 +103,27 @@ func New(config Config) (*Client, error) {
 func newClient(config Config, backend backend, newTimer timerFactory) (*Client, error) {
 	if config.StartupTimeout <= 0 || config.StartupTimeout > maxStartupTimeout {
 		return nil, fmt.Errorf("%w: startup timeout must be between 1ns and %s", ErrInvalidConfig, maxStartupTimeout)
+	}
+	if config.NavigationTimeout <= 0 || config.NavigationTimeout > maxNavigationTimeout {
+		return nil, fmt.Errorf("%w: navigation timeout must be between 1ns and %s", ErrInvalidConfig, maxNavigationTimeout)
+	}
+	if config.ConnectTimeout <= 0 || config.ConnectTimeout > maxBrowserConnectTimeout {
+		return nil, fmt.Errorf("%w: connect timeout must be between 1ns and %s", ErrInvalidConfig, maxBrowserConnectTimeout)
+	}
+	if config.MaxRequests <= 0 || config.MaxRequests > maxBrowserRequests {
+		return nil, fmt.Errorf("%w: request count must be between 1 and %d", ErrInvalidConfig, maxBrowserRequests)
+	}
+	if config.MaxRedirects < 0 || config.MaxRedirects > maxBrowserRedirects {
+		return nil, fmt.Errorf("%w: redirect count must be between 0 and %d", ErrInvalidConfig, maxBrowserRedirects)
+	}
+	if config.MaxTransferBytes <= 0 || config.MaxTransferBytes > maxBrowserBytes {
+		return nil, fmt.Errorf("%w: transfer bytes must be between 1 and %d", ErrInvalidConfig, maxBrowserBytes)
+	}
+	if config.MaxConcurrentRequests <= 0 || config.MaxConcurrentRequests > maxBrowserConcurrency {
+		return nil, fmt.Errorf("%w: concurrent requests must be between 1 and %d", ErrInvalidConfig, maxBrowserConcurrency)
+	}
+	if config.Dialer == nil {
+		config.Dialer = (&net.Dialer{Timeout: config.ConnectTimeout}).DialContext
 	}
 	if config.ExecutablePath != "" {
 		resolved, err := exec.LookPath(config.ExecutablePath)
@@ -171,14 +241,72 @@ type backendSession interface {
 	Done() <-chan struct{}
 }
 
+type captureBackendSession interface {
+	backendSession
+	beginCapture(context.Context) (captureSource, error)
+}
+
+type navigationBackendSession interface {
+	backendSession
+	navigate(context.Context, string) error
+}
+
+type captureSource interface {
+	finish(context.Context) (CaptureResult, error)
+	Close() error
+}
+
 // Session owns one Chromium process and its isolated temporary profile.
 type Session struct {
-	version   Version
-	backend   backendSession
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-	closeDone chan struct{}
-	closeErr  error
+	version      Version
+	backend      backendSession
+	cancel       context.CancelFunc
+	closeOnce    sync.Once
+	closeDone    chan struct{}
+	closeErr     error
+	captureMu    sync.Mutex
+	active       *Recorder
+	stopped      bool
+	navigationMu sync.Mutex
+	navigating   bool
+}
+
+// Navigate performs one bounded navigation through the session's validated
+// network boundary. It does not return observations; callers may use a Recorder
+// around the navigation when raw capture is needed.
+func (s *Session) Navigate(ctx context.Context, rawURL string) error {
+	if ctx == nil {
+		return errors.New("navigate browser: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("navigate browser: %w", err)
+	}
+	s.captureMu.Lock()
+	stopped := s.stopped
+	s.captureMu.Unlock()
+	if stopped {
+		return ErrSessionClosed
+	}
+	s.navigationMu.Lock()
+	if s.navigating {
+		s.navigationMu.Unlock()
+		return ErrNavigationActive
+	}
+	s.navigating = true
+	s.navigationMu.Unlock()
+	defer func() {
+		s.navigationMu.Lock()
+		s.navigating = false
+		s.navigationMu.Unlock()
+	}()
+	backend, ok := s.backend.(navigationBackendSession)
+	if !ok {
+		return errors.New("navigate browser: backend does not support navigation")
+	}
+	if err := backend.navigate(ctx, rawURL); err != nil {
+		return fmt.Errorf("navigate browser: %w", err)
+	}
+	return nil
 }
 
 func newSession(version Version, backend backendSession, cancel context.CancelFunc) *Session {
@@ -190,6 +318,7 @@ func newSession(version Version, backend backendSession, cancel context.CancelFu
 	}
 	go func() {
 		<-backend.Done()
+		session.stopActiveRecorder()
 		cancel()
 	}()
 	return session
@@ -200,16 +329,87 @@ func (s *Session) Version() Version {
 	return s.version
 }
 
+// BeginCapture enables passive CDP collection for the current target. A
+// session permits only one active recorder at a time.
+func (s *Session) BeginCapture(ctx context.Context) (*Recorder, error) {
+	if ctx == nil {
+		return nil, errors.New("begin browser capture: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("begin browser capture: %w", err)
+	}
+
+	s.captureMu.Lock()
+	defer s.captureMu.Unlock()
+	if s.stopped {
+		return nil, ErrSessionClosed
+	}
+	select {
+	case <-s.backend.Done():
+		s.stopped = true
+		return nil, ErrSessionClosed
+	default:
+	}
+	if s.active != nil {
+		return nil, ErrCaptureActive
+	}
+	backend, ok := s.backend.(captureBackendSession)
+	if !ok {
+		return nil, errors.New("begin browser capture: backend does not support capture")
+	}
+	source, err := backend.beginCapture(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin browser capture: %w", err)
+	}
+	if source == nil {
+		return nil, errors.New("begin browser capture: backend returned no recorder")
+	}
+	recorder := newRecorder(source, func(recorder *Recorder) {
+		s.captureMu.Lock()
+		if s.active == recorder {
+			s.active = nil
+		}
+		s.captureMu.Unlock()
+	})
+	s.active = recorder
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = recorder.Close()
+		case <-recorder.done:
+		}
+	}()
+	return recorder, nil
+}
+
 // Close stops Chromium and removes its temporary profile. It is idempotent and
 // bounded by the backend's shutdown deadline.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() {
-		s.closeErr = s.backend.Close()
+		s.captureMu.Lock()
+		s.stopped = true
+		recorder := s.active
+		s.captureMu.Unlock()
+		var recorderErr error
+		if recorder != nil {
+			recorderErr = recorder.Close()
+		}
+		s.closeErr = errors.Join(recorderErr, s.backend.Close())
 		s.cancel()
 		close(s.closeDone)
 	})
 	<-s.closeDone
 	return s.closeErr
+}
+
+func (s *Session) stopActiveRecorder() {
+	s.captureMu.Lock()
+	s.stopped = true
+	recorder := s.active
+	s.captureMu.Unlock()
+	if recorder != nil {
+		_ = recorder.Close()
+	}
 }
 
 // Done is closed after Chromium has stopped and its temporary profile cleanup

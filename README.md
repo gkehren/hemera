@@ -10,8 +10,10 @@ security services.
 > collection, detector rule matching, correlation-aware confidence scoring,
 > initial Turnstile and reCAPTCHA detectors, text/JSON reports, deterministic
 > multi-analyzer orchestration, bounded DNS/TLS supporting signals, and internal
-> sandboxed Chromium/CDP session startup are implemented. Browser page analysis
-> and broader detector coverage are not available yet.
+> sandboxed Chromium/CDP session startup and bounded capture are implemented.
+> Internal browser navigation now enforces destination validation and fixed
+> resource budgets, but it is not connected to scans. Broader detector coverage
+> is not available yet.
 
 ## What Hemera aims to provide
 
@@ -190,16 +192,36 @@ GitHub Actions runs formatting, vetting, unit and race tests, vulnerability
 scanning, and a CLI build on Linux. It also runs tests and a CLI build on macOS
 and Windows.
 
-The internal browser package uses `chromedp` but does not download a browser.
-Its opt-in integration test requires a locally installed Chromium or Chrome that
-can run with its sandbox enabled:
+The internal browser package uses `chromedp` but does not download a browser. It
+can record bounded, minimized CDP network events and snapshot the current
+target's final DOM, script and iframe URLs, and cookie names. This raw internal
+result is not converted to signals or reports. Its opt-in integration test
+requires a locally installed Chromium or Chrome that can run with its sandbox
+enabled:
 
 ```sh
 go test -tags=browser_integration ./internal/browser
 ```
 
-Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The current CLI does
-not start Chromium; browser navigation and signal capture remain planned.
+Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The integration test
+uses injected DNS and dialing dependencies to reach a loopback `httptest`
+fixture through the same validated proxy boundary used in production. The
+current CLI does not start Chromium. Browser signal conversion and scanner
+integration remain planned.
+
+Internal navigation accepts only HTTP(S) targets and sends Chromium traffic
+through a per-session loopback proxy. The proxy applies the shared public-address
+policy to the IP used for every upstream connection, including redirects and
+subresources. Navigation is limited to 15 seconds, 256 requests by default, 10
+redirects, independent 16 MiB ceilings for transferred and decoded response
+data, and 16 concurrent browser request lifecycles. The concurrency limit is
+enforced through CDP even when HTTPS requests share one multiplexed tunnel.
+Configuration may lower these defaults and may raise request or concurrency
+counts only to the documented hard ceilings of 4096 and 32. Browser URLs are
+limited to 8192 bytes.
+Downloads, cache reuse, service workers, direct DNS resolution, and QUIC are
+disabled for the bounded navigation. WebRTC is restricted from non-proxied UDP.
+WebSocket transports are rejected.
 
 ## Documentation
 

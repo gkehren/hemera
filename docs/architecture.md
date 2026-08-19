@@ -117,22 +117,74 @@ scripts and iframes, JavaScript-created cookies, browser redirects, visible
 challenges, and a small set of relevant JavaScript globals. Navigation remains
 normal: the analyzer must not implement bypass behavior.
 
-The first browser vertical slice is implemented in `internal/browser`. It starts
-a locally installed Chromium through `chromedp`, creates a fresh temporary
-profile, binds the random CDP port to `127.0.0.1`, and verifies the connection
-with `Browser.getVersion`. Startup is limited to a positive configurable timeout
-with a hard ceiling of 10 seconds. Session shutdown is idempotent, bounded, tied
-to the caller's context, and removes the temporary profile after the process
-stops. The package deliberately overrides `chromedp`'s root behavior so Chromium
-is never launched with `--no-sandbox`. It also verifies Chromium's effective
-command line and rejects sandbox-disabling switches added by a launcher;
-environments that cannot prove and preserve the sandbox fail startup.
+The browser bootstrap in `internal/browser` starts a locally installed Chromium
+through `chromedp`, creates a fresh temporary profile, binds the random CDP port
+to `127.0.0.1`, and verifies the connection with `Browser.getVersion`. Startup
+is limited to a positive configurable timeout with a hard ceiling of 10 seconds.
+Session shutdown is idempotent, bounded, tied to the caller's context, and
+removes the temporary profile after the process stops. The package deliberately
+overrides `chromedp`'s root behavior so Chromium is never launched with
+`--no-sandbox`. It also verifies Chromium's effective command line and rejects
+sandbox-disabling switches added by a launcher; environments that cannot prove
+and preserve the sandbox fail startup.
 
-This slice exposes only the browser product and CDP protocol version. It neither
-navigates nor captures DOM, network, cookies, or signals, and it is not connected
-to `internal/scanner` or either report format. Browser destination validation,
-navigation budgets, resource limits, and deterministic page fixtures remain
-requirements for the next slices before browser analysis can become user-facing.
+`Session.BeginCapture` now permits one recorder for the current target. It
+enables the CDP Network and Page domains and records requests, responses, and
+redirect responses in CDP order. Finalization stops the listener, reads target
+metadata, and runs a Hemera-owned serializer in an isolated JavaScript world.
+The serializer walks at most 100,000 DOM nodes and attributes, appends at most
+2 MiB while walking instead of materializing an unbounded outer HTML string,
+and collects bounded `script[src]` and `iframe[src]` URLs in document order. It
+does not invoke JavaScript supplied by the page. Finalization also reads only
+cookie names from the isolated profile. Cookies are sorted and deduplicated.
+The raw result retains no headers, bodies, POST data, timestamps, CDP IDs, remote
+addresses, or cookie values. HTTP(S) URLs have credentials and fragments removed
+and query strings replaced with `?redacted`; non-web URLs are omitted.
+
+Capture storage is fixed at 2 MiB of serialized final DOM, 100,000 DOM traversal
+work items, 4096 entries for each traffic or resource collection, and 8192 bytes
+per URL. Generic, deduplicated warnings mark truncation without embedding
+page-controlled data. Results are cloned at the recorder boundary. No unbounded
+serialized DOM is constructed in Chromium or Go, and the bounded internal
+observation is not sent to reporters.
+
+`Session.Navigate` provides the next internal slice. It accepts one absolute
+HTTP(S) target and permits only one navigation at a time. The complete operation,
+including initial DNS validation, is bounded by 15 seconds. Chromium is forced
+through a random per-session proxy listening only on `127.0.0.1`; direct host
+resolution is disabled and QUIC is unavailable, so HTTP, HTTPS CONNECT tunnels,
+redirects, and subresource connections cannot bypass the proxy. The proxy uses
+`internal/networkguard` to resolve every destination and dials the validated IP
+while preserving the original hostname for HTTP and end-to-end TLS. Initial
+validation and connection-time resolution are separate, so a rebinding answer
+is rejected before the connection is opened.
+
+Non-proxied WebRTC UDP is disabled as an additional direct-network boundary.
+WebSocket transports are rejected rather than allowed to escape HTTP(S) request
+accounting.
+CDP Fetch interception authorizes HTTP(S) requests before they leave Chromium
+and enforces a default limit of 256, with a hard ceiling of 4096. Redirects are
+limited to 10. CDP request lifecycle tracking permits 16 active requests by
+default, configurable only up to 32. This accounting is independent of proxy
+connections, so requests multiplexed inside one HTTPS CONNECT tunnel each
+consume a slot. The proxy applies a 5-second connection timeout. Directly
+forwarded HTTP responses also have a 5-second response-header timeout.
+Each navigation has independent 16 MiB ceilings for proxy transfer and decoded
+response data; `Network.dataReceived` accounts for decompressed bytes that an
+encrypted tunnel cannot inspect. Proxy transfer accounting includes request and
+response headers, request bodies, and tunnel bytes. Individual proxy headers are
+bounded to 1 MiB and every browser URL to 8192 bytes. Limit
+failure cancels navigation, closes active proxy work, stops page loading, and
+preserves a typed error for the caller. Downloads are denied, cache reuse and
+service workers are bypassed, and the proxy is inactive outside an authorized
+navigation.
+
+The tagged integration test reaches a loopback `httptest` fixture only through
+injected resolver and dialer dependencies: the synthetic hostname resolves to a
+permitted public address, while the test dialer connects to its local server.
+This exercises the production validation and pinning path without weakening the
+global destination policy. The package still emits no normalized browser
+signals and has no scanner or report integration.
 
 ### Signal model
 
@@ -311,7 +363,7 @@ internal/scanner/         scan orchestration
 internal/analysis/        shared observations and typed analyzer metadata
 internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
-internal/browser/         Chromium/CDP session lifecycle; collection planned
+internal/browser/         validated Chromium navigation and bounded raw capture
 internal/dnstls/          DNS/TLS normalization and bounded CNAME observation
 internal/signals/         normalization
 internal/rules/           rule loading and matching
