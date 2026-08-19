@@ -1,6 +1,10 @@
 package detectors
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gkehren/hemera/internal/rules"
+)
 
 func TestLoadBuiltInRules(t *testing.T) {
 	t.Parallel()
@@ -10,6 +14,9 @@ func TestLoadBuiltInRules(t *testing.T) {
 	}
 	if len(ruleSet.Rules) != 2 {
 		t.Fatalf("built-in rules = %d, want 2", len(ruleSet.Rules))
+	}
+	if ruleSet.SchemaVersion != rules.CurrentSchemaVersion {
+		t.Errorf("built-in schema version = %d, want %d", ruleSet.SchemaVersion, rules.CurrentSchemaVersion)
 	}
 	wantIDs := []string{"cloudflare.turnstile", "google.recaptcha"}
 	for i, want := range wantIDs {

@@ -1,12 +1,13 @@
-# Detector rule schema V1
+# Detector rule schema V2
 
 Hemera detector rules are strict, versioned JSON documents. The implementation
 lives in `internal/rules`; matching consumes only normalized `pkg/model.Signal`
 values and has no access to HTTP, DNS, TLS, Chromium, or reporters.
 
-The V1 engine is implemented and `hemera scan` evaluates the built-in rules
+The V2 engine is implemented and `hemera scan` evaluates the built-in rules
 embedded by `internal/detectors`. The resulting scores and evidence are exposed
-through the text and JSON reporters.
+through the text and JSON reporters. V1 documents remain readable with their
+original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
@@ -19,10 +20,13 @@ Milestone 0 ships two `captcha_challenge` product rules:
 
 The decisive script contributes the 75-point detection threshold. Supporting
 markers cannot produce a detection by themselves, which limits false positives
-from documentation, copied markup, or dormant code. A Turnstile result describes
-only the product integration; it is not evidence that Cloudflare proxy, WAF, or
-Bot Management is active. The reCAPTCHA rule does not yet classify v2, v3,
-invisible, and Enterprise separately.
+from documentation, copied markup, or dormant code. The script and markers share
+the `static_integration` evidence group, whose contribution is their maximum
+rather than their sum. A static-only integration therefore remains `high` at 75
+instead of becoming `very_high` through correlated markup. A Turnstile result
+describes only the product integration; it is not evidence that Cloudflare
+proxy, WAF, or Bot Management is active. The reCAPTCHA rule does not yet classify
+v2, v3, invisible, and Enterprise separately.
 
 The signatures follow the vendors' documented client integrations:
 
@@ -39,7 +43,7 @@ the referenced third parties.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "rules": [
     {
       "id": "example.challenge",
@@ -55,6 +59,7 @@ the referenced third parties.
           {
             "signal": {
               "id": "challenge-script",
+              "group": "static_integration",
               "description": "Product-specific script URL",
               "type": "script_url",
               "value": {
@@ -69,6 +74,7 @@ the referenced third parties.
               {
                 "signal": {
                   "id": "challenge-frame",
+                  "group": "browser_dom",
                   "type": "iframe_url",
                   "value": {
                     "prefix": "https://challenge.example/"
@@ -79,6 +85,7 @@ the referenced third parties.
               {
                 "signal": {
                   "id": "challenge-cookie",
+                  "group": "cookies",
                   "type": "cookie",
                   "key": {
                     "exact": "example_challenge"
@@ -132,6 +139,7 @@ the referenced third parties.
       "match": {
         "signal": {
           "id": "example-server",
+          "group": "response_headers",
           "type": "response_header",
           "key": {
             "exact": "Server",
@@ -156,6 +164,7 @@ the referenced third parties.
       "match": {
         "signal": {
           "id": "other-frame",
+          "group": "browser_dom",
           "type": "iframe_url",
           "value": {
             "prefix": "https://challenge.other.example/"
@@ -177,10 +186,10 @@ The example is intentionally synthetic and is not a supported detector.
 | `id` | Yes | Unique lowercase identifier using letters, digits, `.`, `_`, or `-`. |
 | `name` | Yes | Human-readable detection name. |
 | `description` | No | Contributor-facing explanation of the rule. |
-| `category` | Yes | One of the V1 categories listed below. |
+| `category` | Yes | One of the supported categories listed below. |
 | `vendor` | Yes | Vendor or project represented by the rule. |
 | `product` | No | Specific product. Omit it for a vendor-level rule. |
-| `minimum_evidence` | Yes | Minimum number of matched positive predicates. |
+| `minimum_evidence` | Yes | Minimum number of distinct matched positive evidence groups. |
 | `minimum_score` | Yes | Detection threshold from 25 through 100. |
 | `match` | Yes | Positive signal condition tree. |
 | `negative_evidence` | No | Matching signals whose weighted confidence is subtracted. |
@@ -188,7 +197,7 @@ The example is intentionally synthetic and is not a supported detector.
 | `requires` | No | Rules that must be detected before this rule can be detected. |
 | `conflicts` | No | Directional fixed penalties activated by another candidate rule. |
 
-V1 categories are `cdn_reverse_proxy`, `waf`, `bot_management`,
+V1 and V2 categories are `cdn_reverse_proxy`, `waf`, `bot_management`,
 `captcha_challenge`, `client_fingerprinting`, and `third_party_security`.
 
 Dependencies must reference rules in the same document and must form an acyclic
@@ -205,14 +214,26 @@ Every condition contains exactly one of:
 - `all`: a non-empty list in which every child must match;
 - `any`: a non-empty list in which at least one child must match.
 
-When several branches of a satisfied `any` group match, all their independent
-evidence contributes to the score. Evidence identifiers must be unique within a
-rule. A predicate selects the matching signal with the highest observation
-confidence; document and signal order break ties deterministically.
+When several branches of a satisfied `any` condition match, all matched evidence
+is retained for explanation. Only the strongest weighted observation in each
+evidence group contributes to the score. Evidence identifiers must be unique
+within a rule. A predicate selects the matching signal with the highest
+observation confidence. Equal-confidence signals use a lexical comparison of
+their normalized fields, so signal order cannot change the selected observation.
 
-A signal predicate requires `id`, `type`, `weight`, and at least one of `source`,
-`key`, `value`, or `url`. Its type must be a valid normalized `SignalType`.
-Weights are finite numbers greater than zero and at most 100.
+A positive signal predicate requires `id`, `type`, `weight`, and at least one of
+`source`, `key`, `value`, or `url`. Its optional `group` is a lowercase
+identifier with the same syntax as an evidence ID. When omitted, the evidence ID
+forms its own independent group. Correlated predicates should explicitly share a
+group such as `static_integration`; complementary channels can use groups such as
+`browser_network`, `browser_dom`, `response_headers`, `cookies`, `dns`, or `tls`.
+Group names describe scoring semantics rather than analyzer implementation and
+are local to one rule.
+
+Grouping is supported only for positive evidence. Negative and ambiguous
+evidence remains additive and specifying `group` on either list is rejected.
+Signal types must be valid normalized `SignalType` values. Weights are finite
+numbers greater than zero and at most 100.
 
 Each selected signal field contains exactly one text operation:
 
@@ -232,12 +253,16 @@ cross-rule references are rejected.
 
 Matching retains positive, negative, ambiguous, and missing positive evidence so
 later reporters can explain the outcome. A rule becomes a scoring candidate only
-when its positive condition and `minimum_evidence` both pass.
+when its positive condition passes and at least `minimum_evidence` distinct
+positive groups match. Correlated predicates therefore cannot satisfy an
+independence requirement by themselves.
 
-V1 calculates:
+V2 calculates:
 
 ```text
-positive = sum(positive weight × observation confidence)
+raw evidence contribution = weight × observation confidence
+group contribution = max(raw contribution for matched evidence in group)
+positive = sum(group contributions)
 negative = sum(negative weight × observation confidence)
 ambiguous = sum(ambiguous weight × observation confidence)
 
@@ -249,6 +274,14 @@ A cross-rule penalty is active when the referenced rule's positive condition and
 minimum evidence match with non-zero effective confidence. This uses observed
 conflicting evidence even if the referenced rule later misses its own score
 threshold or dependency. Zero-confidence observations never activate a conflict.
+
+Per-group maximum aggregation is deterministic, keeps every raw match available
+for explanation, and bounds duplicate or correlated observations without hiding
+them. If two predicates in a group have the same effective contribution, the
+first predicate in rule order is selected for attribution; the group score does
+not depend on that tie-break. Distinct groups remain additive, so complementary
+runtime or protocol evidence can raise a static-only `high` result to
+`very_high`.
 
 The rule is detected when its evidence score reaches `minimum_score` and all
 declared dependencies are detected. A missing dependency blocks the result and
@@ -262,7 +295,11 @@ sets its final score to zero while preserving `evidence_score` for explanation.
 | 25–49.999… | `low` |
 | 0–24.999… | `not_detected` |
 
-Scores are deliberately simple in V1. They are not calibrated probabilities.
+The normalized signal's `confidence` is certainty in one observation. The final
+detection confidence score measures the strength of grouped rule evidence after
+penalties and dependencies. Neither value is a calibrated statistical
+probability; a score of 82 means `82/100 — high`, not an estimated 82% chance that
+the product is present.
 
 ## Resource limits and compatibility
 
@@ -271,5 +308,13 @@ rule, 16 condition levels, and 2,048 bytes per text operand. These bounds make
 local rule loading predictable and prevent pathological documents from consuming
 unbounded memory or evaluation time.
 
-`schema_version` is required. Incompatible schema changes require a new version;
-unknown versions are rejected rather than interpreted approximately.
+`schema_version` is required. The current version is 2. The decoder also accepts
+V1 documents, but V1 positive predicates cannot declare `group`, every predicate
+contributes independently, and `minimum_evidence` counts matched predicates.
+This preserves the contract understood by existing V1 decoders and scorers
+instead of silently reinterpreting a V1 document.
+
+V2 adds positive-evidence correlation groups, maximum-per-group aggregation, and
+distinct-group `minimum_evidence`. A document using `group` must therefore set
+`schema_version` to 2. Unknown versions are rejected rather than interpreted
+approximately. Any future incompatible change requires another version.

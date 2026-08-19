@@ -32,23 +32,27 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 			RuleID: "test.rule", Name: "Test detector", Vendor: "Test", Product: "Widget",
 			Detected: true, ConditionMatched: true, MinimumEvidenceMet: true,
 			EvidenceScore: 75, Score: 75, Level: scoring.LevelHigh,
-			PositiveEvidence: []rules.EvidenceMatch{
-				{EvidenceID: "script", Weight: 75, Signal: model.Signal{
+			PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+				ID: "static_integration", EvidenceIDs: []string{"script", "header", "cookie", "body"},
+				SelectedEvidenceID: "script", RawContribution: 105, Contribution: 75,
+			}},
+			PositiveEvidence: []scoring.ScoredEvidence{
+				{Match: rules.EvidenceMatch{EvidenceID: "script", Group: "static_integration", Weight: 75, Signal: model.Signal{
 					Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src",
 					Value: "https://cdn.test/app.js?api_key=secret#fragment", URL: "https://example.test/?token=secret", Confidence: 1,
-				}},
-				{EvidenceID: "header", Weight: 10, Signal: model.Signal{
+				}}, RawContribution: 75, Contribution: 75},
+				{Match: rules.EvidenceMatch{EvidenceID: "header", Group: "static_integration", Weight: 10, Signal: model.Signal{
 					Type: model.SignalTypeResponseHeader, Source: "http_analyzer", Key: "Authorization",
 					Value: "header-secret", Confidence: 1,
-				}},
-				{EvidenceID: "cookie", Weight: 10, Signal: model.Signal{
+				}}, RawContribution: 10},
+				{Match: rules.EvidenceMatch{EvidenceID: "cookie", Group: "static_integration", Weight: 10, Signal: model.Signal{
 					Type: model.SignalTypeCookie, Source: "http_analyzer", Key: "session",
 					Value: "cookie-secret", Confidence: 1,
-				}},
-				{EvidenceID: "body", Weight: 10, Signal: model.Signal{
+				}}, RawContribution: 10},
+				{Match: rules.EvidenceMatch{EvidenceID: "body", Group: "static_integration", Weight: 10, Signal: model.Signal{
 					Type: model.SignalTypePageContent, Source: "http_analyzer", Key: "body",
 					Value: "<html>private-body</html>", Confidence: 1,
-				}},
+				}}, RawContribution: 10},
 			},
 		}},
 	}
@@ -71,6 +75,13 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 		if evidence.Value != "" {
 			t.Errorf("sensitive evidence %q value = %q, want empty", evidence.ID, evidence.Value)
 		}
+		if evidence.RawContribution != 10 || evidence.Contribution != 0 {
+			t.Errorf("correlated evidence %q contributions = %v/%v, want 10/0", evidence.ID, evidence.RawContribution, evidence.Contribution)
+		}
+	}
+	groups := report.Detections[0].PositiveEvidenceGroups
+	if len(groups) != 1 || groups[0].RawContribution != 105 || groups[0].Contribution != 75 {
+		t.Errorf("positive evidence groups = %#v, want raw 105 capped to 75", groups)
 	}
 
 	var output bytes.Buffer
@@ -136,27 +147,41 @@ func TestWriteJSONPreservesCompleteDetectionShape(t *testing.T) {
 			Category: rules.CategoryCAPTCHAChallenge, Vendor: "Example", Product: "Widget",
 			Detected: true, ConditionMatched: true, MinimumEvidenceMet: true,
 			EvidenceScore: 82.5, Score: 82.5, Level: scoring.LevelHigh,
-			PositiveEvidence: []rules.EvidenceMatch{{
-				EvidenceID: "client-script", Description: "Documented client script", Weight: 100,
-				Signal: model.Signal{
-					Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src",
-					Value: "https://challenges.cloudflare.com/turnstile/v0/api.js?key=secret#fragment",
-					URL:   "https://example.test/final?session=secret", Confidence: 1,
-				},
+			PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+				ID: "static_integration", EvidenceIDs: []string{"client-script"},
+				SelectedEvidenceID: "client-script", RawContribution: 100, Contribution: 100,
 			}},
-			NegativeEvidence: []rules.EvidenceMatch{{
-				EvidenceID: "conflicting-cookie", Description: "Synthetic conflicting cookie", Weight: 12.5,
-				Signal: model.Signal{
-					Type: model.SignalTypeCookie, Source: "http_analyzer", Key: "session",
-					Value: "cookie-secret", URL: "https://example.test/final?session=secret", Confidence: 0.8,
+			PositiveEvidence: []scoring.ScoredEvidence{{
+				Match: rules.EvidenceMatch{
+					EvidenceID: "client-script", Group: "static_integration",
+					Description: "Documented client script", Weight: 100,
+					Signal: model.Signal{
+						Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src",
+						Value: "https://challenges.cloudflare.com/turnstile/v0/api.js?key=secret#fragment",
+						URL:   "https://example.test/final?session=secret", Confidence: 1,
+					},
 				},
+				RawContribution: 100, Contribution: 100,
 			}},
-			AmbiguousEvidence: []rules.EvidenceMatch{{
-				EvidenceID: "shared-host", Description: "Shared infrastructure host", Weight: 5,
-				Signal: model.Signal{
-					Type: model.SignalTypeResourceHost, Source: "http_analyzer", Key: "host",
-					Value: "shared.example", URL: "https://shared.example/frame?token=secret", Confidence: 0.5,
+			NegativeEvidence: []scoring.ScoredEvidence{{
+				Match: rules.EvidenceMatch{
+					EvidenceID: "conflicting-cookie", Description: "Synthetic conflicting cookie", Weight: 12.5,
+					Signal: model.Signal{
+						Type: model.SignalTypeCookie, Source: "http_analyzer", Key: "session",
+						Value: "cookie-secret", URL: "https://example.test/final?session=secret", Confidence: 0.8,
+					},
 				},
+				RawContribution: -10, Contribution: -10,
+			}},
+			AmbiguousEvidence: []scoring.ScoredEvidence{{
+				Match: rules.EvidenceMatch{
+					EvidenceID: "shared-host", Description: "Shared infrastructure host", Weight: 5,
+					Signal: model.Signal{
+						Type: model.SignalTypeResourceHost, Source: "http_analyzer", Key: "host",
+						Value: "shared.example", URL: "https://shared.example/frame?token=secret", Confidence: 0.5,
+					},
+				},
+				RawContribution: -2.5, Contribution: -2.5,
 			}},
 			MissingPositiveEvidence: []string{"html-marker"},
 			AppliedConflicts:        []scoring.AppliedConflict{{RuleID: "other.product", Penalty: 5}},
@@ -181,17 +206,86 @@ func TestWriteJSONPreservesCompleteDetectionShape(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsPartialEvidenceRawButNotContributing(t *testing.T) {
+	t.Parallel()
+	report := Build("dev", scanner.Result{Detections: []scoring.Detection{{
+		RuleID: "partial", Name: "Partial detector",
+		PositiveEvidence: []scoring.ScoredEvidence{{
+			Match: rules.EvidenceMatch{
+				EvidenceID: "marker", Group: "static_integration", Weight: 30,
+				Signal: model.Signal{
+					Type: model.SignalTypePageContent, Source: "fixture", Key: "body", Confidence: 1,
+				},
+			},
+			RawContribution: 30,
+		}},
+		PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+			ID: "static_integration", EvidenceIDs: []string{"marker"},
+			SelectedEvidenceID: "marker", RawContribution: 30,
+		}},
+	}}})
+
+	evidence := report.Detections[0].Evidence.Positive[0]
+	if evidence.RawContribution != 30 || evidence.Contribution != 0 {
+		t.Errorf("partial evidence contributions = %v/%v, want 30/0", evidence.RawContribution, evidence.Contribution)
+	}
+	group := report.Detections[0].PositiveEvidenceGroups[0]
+	if group.RawContribution != 30 || group.Contribution != 0 {
+		t.Errorf("partial group contributions = %v/%v, want 30/0", group.RawContribution, group.Contribution)
+	}
+}
+
+func TestBuildCopiesScoringContributions(t *testing.T) {
+	t.Parallel()
+	report := Build("dev", scanner.Result{Detections: []scoring.Detection{{
+		RuleID: "scored", Name: "Scored detector",
+		ConditionMatched: true, MinimumEvidenceMet: true,
+		PositiveEvidence: []scoring.ScoredEvidence{{
+			Match: rules.EvidenceMatch{
+				EvidenceID: "evidence", Group: "channel", Weight: 99,
+				Signal: model.Signal{
+					Type: model.SignalTypeCookie, Source: "fixture", Key: "cookie", Confidence: 1,
+				},
+			},
+			RawContribution: 17, Contribution: 7,
+		}},
+		PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+			ID: "channel", EvidenceIDs: []string{"evidence"},
+			SelectedEvidenceID: "evidence", RawContribution: 17, Contribution: 7,
+		}},
+	}}})
+
+	evidence := report.Detections[0].Evidence.Positive[0]
+	if evidence.RawContribution != 17 || evidence.Contribution != 7 {
+		t.Errorf("report recomputed evidence contributions: %#v", evidence)
+	}
+	group := report.Detections[0].PositiveEvidenceGroups[0]
+	if group.RawContribution != 17 || group.Contribution != 7 {
+		t.Errorf("report recomputed group contributions: %#v", group)
+	}
+}
+
 func TestWriteTextExplainsDetectionsWithoutSecrets(t *testing.T) {
 	t.Parallel()
 	report := Build("dev", scanner.Result{
 		HTTP: httpanalyzer.Result{RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200},
 		Detections: []scoring.Detection{
 			{
-				RuleID: "detected", Name: "Detected product", Detected: true, Score: 75, Level: scoring.LevelHigh,
-				PositiveEvidence: []rules.EvidenceMatch{{EvidenceID: "script", Weight: 75, Signal: model.Signal{
-					Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src",
-					Value: "https://cdn.test/api.js?token=secret", Confidence: 1,
-				}}},
+				RuleID: "detected", Name: "Detected product", Detected: true,
+				ConditionMatched: true, MinimumEvidenceMet: true,
+				EvidenceScore: 75, Score: 75, Level: scoring.LevelHigh,
+				PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+					ID: "static_integration", EvidenceIDs: []string{"script"},
+					SelectedEvidenceID: "script", RawContribution: 80, Contribution: 80,
+				}},
+				PositiveEvidence: []scoring.ScoredEvidence{{
+					Match: rules.EvidenceMatch{EvidenceID: "script", Group: "static_integration", Weight: 80, Signal: model.Signal{
+						Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: "src",
+						Value: "https://cdn.test/api.js?token=secret", Confidence: 1,
+					}},
+					RawContribution: 80, Contribution: 80,
+				}},
+				AppliedConflicts: []scoring.AppliedConflict{{RuleID: "other.product", Penalty: 5}},
 			},
 			{RuleID: "missing", Name: "Missing product", Score: 0, Level: scoring.LevelNotDetected, MissingPositiveEvidence: []string{"marker"}},
 		},
@@ -200,7 +294,11 @@ func TestWriteTextExplainsDetectionsWithoutSecrets(t *testing.T) {
 	if err := WriteText(&output, report); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Detected product", "75.0", "HIGH", "script", "api.js?redacted", "Missing product", "missing: marker"} {
+	for _, expected := range []string{
+		"Detected product", "75.0", "HIGH", "script", "api.js?redacted",
+		"group static_integration", "80.0 raw", "conflict other.product: -5.0",
+		"Missing product", "missing: marker",
+	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("text output lacks %q: %s", expected, output.String())
 		}

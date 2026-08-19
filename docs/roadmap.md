@@ -16,7 +16,7 @@ is tracked in [issue #1](https://github.com/gkehren/hemera/issues/1).
 - [x] Implement safe URL validation and redirect validation.
 - [x] Implement the HTTP analyzer.
 - [x] Define, validate, and document the detector rule schema.
-- [x] Implement deterministic rule matching and confidence scoring V1,
+- [x] Implement deterministic rule matching and initial confidence scoring,
   including positive, missing, negative, ambiguous, dependency, and directional
   conflict semantics.
 - [x] Render CLI and JSON reports.
@@ -34,7 +34,7 @@ does not add protection vendors. The Chromium process/CDP bootstrap landed early
 but it does not navigate or produce signals and does not remove these
 prerequisites.
 
-- [ ] Prevent correlated observations from being counted as independent proof
+- [x] Prevent correlated observations from being counted as independent proof
   in confidence scores ([issue #2](https://github.com/gkehren/hemera/issues/2)).
 - [ ] Decouple scanner orchestration from `httpanalyzer.Result` and define
   deterministic multi-analyzer aggregation and partial-failure semantics

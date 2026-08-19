@@ -39,11 +39,38 @@ func TestMatchEvaluatesAllAnyAndPenaltyEvidence(t *testing.T) {
 	if got := edge.PositiveEvidence[2].Signal.Confidence; got != 0.9 {
 		t.Errorf("resource confidence = %v, want strongest 0.9", got)
 	}
+	if got, want := evidenceGroups(edge.PositiveEvidence), []string{"response_headers", "cookies", "static_integration"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("positive evidence groups = %v, want %v", got, want)
+	}
 	if got, want := evidenceIDs(edge.NegativeEvidence), []string{"origin-exposed"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("negative evidence = %v, want %v", got, want)
 	}
 	if got, want := evidenceIDs(edge.AmbiguousEvidence), []string{"generic-via"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("ambiguous evidence = %v, want %v", got, want)
+	}
+}
+
+func TestMatchMinimumEvidenceCountsDistinctGroups(t *testing.T) {
+	t.Parallel()
+	ruleSet := RuleSet{SchemaVersion: CurrentSchemaVersion, Rules: []Rule{{
+		ID: "grouped.rule", Name: "Grouped rule", Category: CategoryThirdPartySecurity, Vendor: "Fixture",
+		MinimumEvidence: 2, MinimumScore: 50,
+		Match: Condition{Any: []Condition{
+			{Signal: &Evidence{ID: "static-script", Group: "static_integration", Type: model.SignalTypeScriptURL, Key: exact("script"), Weight: 75}},
+			{Signal: &Evidence{ID: "static-marker", Group: "static_integration", Type: model.SignalTypePageContent, Key: exact("marker"), Weight: 30}},
+			{Signal: &Evidence{ID: "network-request", Group: "browser_network", Type: model.SignalTypeNetworkRequest, Key: exact("request"), Weight: 15}},
+		}},
+	}}}
+
+	results, err := Match(ruleSet, []model.Signal{
+		signal(model.SignalTypeScriptURL, "script", "", 1),
+		signal(model.SignalTypePageContent, "marker", "", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !results[0].ConditionMatched || results[0].MinimumEvidenceMet || results[0].Candidate() {
+		t.Fatalf("correlated evidence satisfied minimum evidence: %#v", results[0])
 	}
 }
 
@@ -80,6 +107,29 @@ func TestMatchANYDoesNotReportUnselectedAlternativesMissing(t *testing.T) {
 	}
 	if got := results[0].MissingPositiveEvidence; len(got) != 0 {
 		t.Errorf("missing evidence = %v, want none for satisfied any", got)
+	}
+}
+
+func TestMatchEqualConfidenceTieIsIndependentOfSignalOrder(t *testing.T) {
+	t.Parallel()
+	ruleSet := validRuleSet()
+	ruleSet.Rules[0].Match.Signal.Value = &TextPattern{Contains: stringPointer("Acme")}
+	first := signal(model.SignalTypeResponseHeader, "Server", "Acme z", 1)
+	second := signal(model.SignalTypeResponseHeader, "Server", "Acme a", 1)
+
+	forward, err := Match(ruleSet, []model.Signal{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverse, err := Match(ruleSet, []model.Signal{second, first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := forward[0].PositiveEvidence[0].Signal, reverse[0].PositiveEvidence[0].Signal; got != want {
+		t.Errorf("signal order changed selected evidence: got %#v, want %#v", got, want)
+	}
+	if got := forward[0].PositiveEvidence[0].Signal.Value; got != "Acme a" {
+		t.Errorf("selected signal value = %q, want lexical tie-break Acme a", got)
 	}
 }
 
@@ -168,4 +218,12 @@ func evidenceIDs(evidence []EvidenceMatch) []string {
 		ids = append(ids, match.EvidenceID)
 	}
 	return ids
+}
+
+func evidenceGroups(evidence []EvidenceMatch) []string {
+	groups := make([]string, 0, len(evidence))
+	for _, match := range evidence {
+		groups = append(groups, match.Group)
+	}
+	return groups
 }

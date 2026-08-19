@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -27,6 +28,9 @@ func TestDecodeJSONFixture(t *testing.T) {
 	}
 	if got := ruleSet.Rules[2].Requires; len(got) != 1 || got[0] != "acme.edge" {
 		t.Errorf("product dependencies = %v", got)
+	}
+	if got := ruleSet.Rules[0].Match.All[0].Signal.Group; got != "response_headers" {
+		t.Errorf("evidence group = %q, want response_headers", got)
 	}
 }
 
@@ -63,7 +67,7 @@ func TestDecodeJSONRejectsInvalidDocuments(t *testing.T) {
 		{"unknown nested field", `{"schema_version":1,"rules":[{"unknown":true}]}`, ErrInvalidSchema},
 		{"duplicate field", `{"schema_version":1,"schema_version":1,"rules":[]}`, ErrInvalidSchema},
 		{"multiple values", `{"schema_version":1,"rules":[]} {}`, ErrInvalidSchema},
-		{"unsupported version", `{"schema_version":2,"rules":[]}`, ErrInvalidSchema},
+		{"unsupported version", `{"schema_version":3,"rules":[]}`, ErrInvalidSchema},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +94,7 @@ func TestRuleSetValidateRejectsInvalidSchema(t *testing.T) {
 		name   string
 		change func(*RuleSet)
 	}{
-		{"schema version", func(s *RuleSet) { s.SchemaVersion = 2 }},
+		{"schema version", func(s *RuleSet) { s.SchemaVersion = 3 }},
 		{"no rules", func(s *RuleSet) { s.Rules = nil }},
 		{"duplicate rule id", func(s *RuleSet) { s.Rules = append(s.Rules, s.Rules[0]) }},
 		{"invalid rule id", func(s *RuleSet) { s.Rules[0].ID = "Bad ID" }},
@@ -113,6 +117,7 @@ func TestRuleSetValidateRejectsInvalidSchema(t *testing.T) {
 			s.Rules[0].Match = condition
 		}},
 		{"invalid evidence id", func(s *RuleSet) { s.Rules[0].Match.Signal.ID = "Bad ID" }},
+		{"invalid evidence group", func(s *RuleSet) { s.Rules[0].Match.Signal.Group = "Bad Group" }},
 		{"invalid signal type", func(s *RuleSet) { s.Rules[0].Match.Signal.Type = "unknown" }},
 		{"zero weight", func(s *RuleSet) { s.Rules[0].Match.Signal.Weight = 0 }},
 		{"NaN weight", func(s *RuleSet) { s.Rules[0].Match.Signal.Weight = math.NaN() }},
@@ -124,6 +129,12 @@ func TestRuleSetValidateRejectsInvalidSchema(t *testing.T) {
 		{"invalid regex", func(s *RuleSet) { s.Rules[0].Match.Signal.Key = regex("[") }},
 		{"duplicate evidence id", func(s *RuleSet) {
 			s.Rules[0].NegativeEvidence = []Evidence{*s.Rules[0].Match.Signal}
+		}},
+		{"group on negative evidence", func(s *RuleSet) {
+			evidence := *s.Rules[0].Match.Signal
+			evidence.ID = "negative"
+			evidence.Group = "headers"
+			s.Rules[0].NegativeEvidence = []Evidence{evidence}
 		}},
 		{"unknown dependency", func(s *RuleSet) { s.Rules[0].Requires = []string{"missing"} }},
 		{"self dependency", func(s *RuleSet) { s.Rules[0].Requires = []string{s.Rules[0].ID} }},
@@ -165,6 +176,28 @@ func TestRuleSetValidateRejectsInvalidSchema(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want ErrInvalidSchema", err)
 			}
 		})
+	}
+}
+
+func TestRuleSetValidatePreservesStrictV1Rules(t *testing.T) {
+	t.Parallel()
+	ruleSet := validRuleSet()
+	ruleSet.SchemaVersion = schemaVersionV1
+	data, err := json.Marshal(ruleSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeJSON(strings.NewReader(string(data))); err != nil {
+		t.Fatalf("DecodeJSON() rejected a V1 rule: %v", err)
+	}
+
+	ruleSet.Rules[0].Match.Signal.Group = "response_headers"
+	data, err = json.Marshal(ruleSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeJSON(strings.NewReader(string(data))); !errors.Is(err, ErrInvalidSchema) {
+		t.Fatalf("DecodeJSON() V1 group error = %v, want ErrInvalidSchema", err)
 	}
 }
 
