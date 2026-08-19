@@ -23,8 +23,8 @@ func TestLoadBuiltInRules(t *testing.T) {
 	}
 	wantIDs := []string{
 		"cloudflare.proxy",
-		"cloudflare.waf",
-		"cloudflare.bot_management",
+		"cloudflare.challenge_page",
+		"cloudflare.bot_protection",
 		"cloudflare.turnstile",
 		"google.recaptcha",
 		"aws.cloudfront",

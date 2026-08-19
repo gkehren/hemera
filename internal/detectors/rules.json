@@ -105,19 +105,22 @@
       }
     },
     {
-      "id": "cloudflare.waf",
-      "name": "Cloudflare WAF",
-      "description": "Detects Cloudflare WAF block pages, challenge pages, or security error headers.",
-      "category": "waf",
+      "id": "cloudflare.challenge_page",
+      "name": "Cloudflare Challenge Page",
+      "description": "Detects Cloudflare managed challenge pages and challenge mitigation response headers.",
+      "category": "captcha_challenge",
       "vendor": "Cloudflare",
-      "product": "WAF",
+      "product": "Challenge Page",
       "minimum_evidence": 1,
       "minimum_score": 75,
+      "requires": [
+        "cloudflare.proxy"
+      ],
       "match": {
         "any": [
           {
             "signal": {
-              "id": "cloudflare-waf-mitigated-header",
+              "id": "cloudflare-challenge-mitigated-header",
               "group": "response_headers",
               "description": "Cloudflare challenge mitigation header",
               "type": "response_header",
@@ -134,7 +137,20 @@
           },
           {
             "signal": {
-              "id": "cloudflare-waf-error-header",
+              "id": "cloudflare-challenge-script",
+              "group": "static_integration",
+              "description": "Cloudflare managed challenge platform script",
+              "type": "script_url",
+              "value": {
+                "regex": "^https?://[^/]+/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-challenge-error-header",
               "group": "response_headers",
               "description": "Cloudflare security error code header",
               "type": "response_header",
@@ -142,43 +158,17 @@
                 "exact": "cf-error-code",
                 "case_insensitive": true
               },
-              "weight": 75
+              "weight": 35
             }
           },
           {
             "signal": {
-              "id": "cloudflare-waf-block-page",
+              "id": "cloudflare-challenge-block-marker",
               "group": "static_integration",
-              "description": "Cloudflare WAF error or challenge block page marker",
+              "description": "Cloudflare block or error page marker",
               "type": "page_content",
               "value": {
-                "regex": "(?:Attention Required! \\| Cloudflare|Cloudflare Ray ID:.*Cloudflare|Sorry, you have been blocked)",
-                "case_insensitive": true
-              },
-              "weight": 75
-            }
-          },
-          {
-            "signal": {
-              "id": "cloudflare-waf-challenge-script",
-              "group": "static_integration",
-              "description": "Cloudflare managed challenge platform script",
-              "type": "script_url",
-              "value": {
-                "regex": "/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1",
-                "case_insensitive": true
-              },
-              "weight": 75
-            }
-          },
-          {
-            "signal": {
-              "id": "cloudflare-waf-marker",
-              "group": "static_integration",
-              "description": "Cloudflare error wrapper or details marker",
-              "type": "page_content",
-              "value": {
-                "regex": "(?:cf-error-details|cf-wrapper)",
+                "regex": "(?:Attention Required! \\| Cloudflare|Sorry, you have been blocked|cf-error-details|cf-wrapper)",
                 "case_insensitive": true
               },
               "weight": 35
@@ -188,12 +178,12 @@
       }
     },
     {
-      "id": "cloudflare.bot_management",
-      "name": "Cloudflare Bot Management",
-      "description": "Detects Cloudflare Bot Management or Bot Fight Mode client-side telemetry scripts and tracking cookies.",
+      "id": "cloudflare.bot_protection",
+      "name": "Cloudflare Bot Protection",
+      "description": "Detects Cloudflare bot protection, Bot Fight Mode, and JavaScript Detections (JSD) telemetry scripts and cookies.",
       "category": "bot_management",
       "vendor": "Cloudflare",
-      "product": "Bot Management",
+      "product": "Bot Protection",
       "minimum_evidence": 1,
       "minimum_score": 75,
       "requires": [
@@ -205,10 +195,10 @@
             "signal": {
               "id": "cloudflare-bot-telemetry-script",
               "group": "static_integration",
-              "description": "Cloudflare Bot Management JavaScript detection telemetry script",
+              "description": "Cloudflare JavaScript Detections (JSD) telemetry script",
               "type": "script_url",
               "value": {
-                "regex": "^https?://[^/]+/cdn-cgi/challenge-platform/(?:scripts/jsd/main\\.js|h/[a-z]/scripts/|invisible\\.js)",
+                "regex": "^https?://[^/]+/cdn-cgi/challenge-platform/scripts/jsd/(?:main|api)\\.js",
                 "case_insensitive": true
               },
               "weight": 75
@@ -218,7 +208,7 @@
             "signal": {
               "id": "cloudflare-bot-cookie",
               "group": "cookies",
-              "description": "Cloudflare Bot Management cookie",
+              "description": "Cloudflare bot telemetry cookie",
               "type": "cookie",
               "key": {
                 "exact": "__cf_bm",
