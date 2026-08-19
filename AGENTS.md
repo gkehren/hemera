@@ -252,6 +252,9 @@ Rules:
 - Use `BREAKING CHANGE:` in the footer for incompatible public API, CLI, rule
   schema, or stable JSON changes.
 - Reference issues in footers when applicable, for example `Closes #42`.
+- Never add an AI agent as a commit co-author or include an AI attribution
+  trailer such as `Co-authored-by`. Only the human developer may be credited as
+  the author or co-author of a commit.
 - Do not use vague summaries such as `update`, `fix stuff`, or `changes`.
 - Do not mix unrelated refactors, documentation, and behavior changes in one
   commit merely to reduce commit count.
