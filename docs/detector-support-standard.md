@@ -368,6 +368,254 @@ The following detector families currently meet the support standard:
 
 ---
 
+### 6. Amazon CloudFront (`aws.cloudfront`)
+
+- **Category:** `cdn_reverse_proxy`
+- **Vendor:** `AWS`
+- **Product:** (Vendor-level infrastructure)
+- **Rule ID:** `aws.cloudfront`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `aws-cf-id-header` | `response_headers` | `response_header` | `x-amz-cf-id` | 75 | Decisive | Unique CloudFront request ID header assigned to every request ([AWS docs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UnderstandingAttributesOfRequestAndResponse.html)). |
+| `aws-cf-pop-header` | `response_headers` | `response_header` | `x-amz-cf-pop` | 75 | Decisive | CloudFront Edge POP identifier header. |
+| `aws-cf-server-header` | `response_headers` | `response_header` | `Server: CloudFront` | 75 | Decisive | Standard CloudFront edge server banner. |
+| `aws-cf-cache-header` | `response_headers` | `response_header` | `x-cache` contains `cloudfront` | 35 | Supporting | CloudFront edge caching diagnostic header. |
+| `aws-cf-cname` | `dns` | `dns_record` | `cname` suffix `.cloudfront.net` | 30 | Supporting | Canonical CloudFront distribution CNAME record. |
+| `aws-cf-cert-issuer` | `tls` | `tls_property` | `certificate_issuer` contains `Amazon` | 20 | Supporting | Amazon Trust Services TLS certificate issuer. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- Any decisive header (`x-amz-cf-id`, `x-amz-cf-pop`, `Server: CloudFront`) independently satisfies the 75-point threshold.
+- All response headers share the `response_headers` group so their contribution is `max(75, 75, 75, 35) = 75`.
+
+#### Vendor vs. product separation
+
+- Detection of Amazon CloudFront indicates edge infrastructure routing only. It does **not** imply that AWS WAF or Shield Advanced is active on the distribution.
+
+#### Fixture coverage
+
+- **Positive:** `aws-cloudfront-positive.html` &mdash; returns `Server: CloudFront` and `x-amz-cf-id` (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `ambiguous-markers.html` &mdash; contains `x-cache: Hit from cloudfront` (`score: 35`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Reverse proxies forwarding `x-amz-cf-id` from upstream S3/CloudFront origins without edge termination.
+- **Known false negatives:** Custom distributions with stripped `Server` and diagnostic headers.
+
+---
+
+### 7. AWS WAF (`aws.waf`)
+
+- **Category:** `waf`
+- **Vendor:** `AWS`
+- **Product:** `AWS WAF`
+- **Rule ID:** `aws.waf`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `aws-waf-sdk-script` | `static_integration` | `script_url` | `^https://[a-f0-9]+\.(awswaf\|waf\.aws\.amazon)\.com/` | 75 | Decisive | Documented AWS WAF JavaScript SDK client integration URL ([AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/waf-javascript-sdk.html)). |
+| `aws-waf-action-header` | `response_headers` | `response_header` | `x-amzn-waf-action` | 75 | Decisive | AWS WAF rule action header emitted on challenge or block responses. |
+| `aws-waf-errortype-header` | `response_headers` | `response_header` | `x-amzn-errortype` contains `WAF` | 75 | Decisive | AWS WAF error type header on blocked requests. |
+| `aws-waf-block-page` | `static_integration` | `page_content` | `405 Method Not Allowed.*AWS WAF` or `<title>403 Forbidden</title>.*AWS WAF` | 75 | Decisive | Standard AWS WAF default block page HTML content. |
+| `aws-waf-token-cookie` | `cookies` | `cookie` | `aws-waf-token` | 40 | Supporting | AWS WAF client token cookie. |
+| `aws-waf-marker` | `static_integration` | `page_content` | `aws-waf-` or `AwsWafIntegration` | 30 | Supporting | Client-side SDK configuration marker. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- The official SDK script, action header, or block page independently reaches 75 points (`high`).
+- The `aws-waf-token` cookie alone provides 40 points (`low`), resulting in `not_detected` without decisive evidence.
+
+#### Vendor vs. product separation
+
+- Detection of AWS WAF requires explicit WAF SDK scripts, action headers, or block page DOM markers. `aws.cloudfront` alone never triggers `aws.waf`.
+
+#### Fixture coverage
+
+- **Positive:** `aws-waf-positive.html` &mdash; contains official SDK script and token cookie (`score: 100`, `level: very_high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `aws-cloudfront-positive.html` with token cookie alone (`score: 40`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Documentation pages describing AWS WAF error structures.
+- **Known false negatives:** Passive WAF rules configured in `Count` mode without client-side token or mitigation headers.
+
+---
+
+### 8. DataDome (`datadome.bot_protection`)
+
+- **Category:** `bot_management`
+- **Vendor:** `DataDome`
+- **Product:** `DataDome`
+- **Rule ID:** `datadome.bot_protection`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `datadome-js-tag` | `static_integration` | `script_url` | `^https://js\.datadome\.co/tags\.js` | 75 | Decisive | Documented DataDome client-side JavaScript tag URL ([DataDome docs](https://docs.datadome.co/docs/javascript-tag)). |
+| `datadome-header` | `response_headers` | `response_header` | `x-datadome` | 75 | Decisive | DataDome protection status response header (`x-datadome: protected` or `x-datadome: bypass`). |
+| `datadome-response-header` | `response_headers` | `response_header` | `x-datadome-response` | 75 | Decisive | DataDome mitigation response header emitted on challenge responses. |
+| `datadome-interstitial-url` | `static_integration` | `iframe_url` | `^https://geo\.captcha-delivery\.com/captcha/` | 75 | Decisive | DataDome interstitial CAPTCHA and challenge delivery iframe URL. |
+| `datadome-interstitial-script` | `static_integration` | `script_url` | `^https://geo\.captcha-delivery\.com/captcha/` | 75 | Decisive | DataDome interstitial challenge JavaScript payload. |
+| `datadome-cookie` | `cookies` | `cookie` | `datadome` | 40 | Supporting | DataDome tracking cookie. |
+| `datadome-marker` | `static_integration` | `page_content` | `window\.datadomeOptions` or `datadome\.init` | 35 | Supporting | Client-side tag initialization configuration. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- The official JavaScript tag, `x-datadome` header, or challenge iframe reaches 75 points (`high`).
+- The `datadome` cookie alone provides 40 points (`low`), resulting in `not_detected` without decisive evidence.
+
+#### Vendor vs. product separation
+
+- DataDome is a standalone bot management product that can be deployed across any origin, CDN, or cloud provider without infrastructure dependency.
+
+#### Fixture coverage
+
+- **Positive:** `datadome-positive.html` &mdash; contains `js.datadome.co/tags.js` and `x-datadome: protected` (`score: 100`, `level: very_high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `datadome cookie ambiguity` &mdash; `datadome` cookie alone (`score: 40`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible.
+- **Known false negatives:** API-only protections using server-side SDKs without client-side JavaScript tags or response headers.
+
+---
+
+### 9. Akamai Edge (`akamai.edge`)
+
+- **Category:** `cdn_reverse_proxy`
+- **Vendor:** `Akamai`
+- **Product:** (Vendor-level infrastructure)
+- **Rule ID:** `akamai.edge`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `akamai-ghost-server-header` | `response_headers` | `response_header` | `Server: AkamaiGHost` or `Server: Ghost` | 75 | Decisive | Akamai Global Host (GHost) edge server banner ([Akamai community](https://community.akamai.com/)). |
+| `akamai-transformed-header` | `response_headers` | `response_header` | `x-akamai-transformed` | 75 | Decisive | Akamai Edge optimization and transformation header. |
+| `akamai-cname` | `dns` | `dns_record` | `cname` suffix `.edgekey.net`, `.edgesuite.net`, `.akamaiedge.net` | 75 | Decisive | Canonical Akamai edge hostname routing domains. |
+| `akamai-request-id-header` | `response_headers` | `response_header` | `x-akamai-request-id` | 35 | Supporting | Edge request tracing identifier. |
+| `akamai-cacheable-header` | `response_headers` | `response_header` | `x-check-cacheable` | 25 | Supporting | Akamai diagnostic caching header. |
+| `akamai-cert-issuer` | `tls` | `tls_property` | `certificate_issuer` contains `Akamai` | 20 | Supporting | Akamai Edge TLS certificate authority. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- `Server: AkamaiGHost`, `x-akamai-transformed`, or canonical CNAME routing independently reaches 75 points (`high`).
+
+#### Vendor vs. product separation
+
+- Detection of Akamai Edge indicates edge reverse proxy routing only. It does **not** imply that Akamai Bot Manager or App & API Protector is active.
+
+#### Fixture coverage
+
+- **Positive:** `akamai-edge-positive.html` &mdash; returns `Server: AkamaiGHost` and `x-akamai-transformed` (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `ambiguous-markers.html` &mdash; contains `x-check-cacheable: YES` (`score: 25`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Reverse proxies mirroring `Server: AkamaiGHost`.
+- **Known false negatives:** Custom enterprise setups stripping `Server` and `x-akamai-transformed` headers.
+
+---
+
+### 10. Akamai Bot Manager (`akamai.bot_manager`)
+
+- **Category:** `bot_management`
+- **Vendor:** `Akamai`
+- **Product:** `Bot Manager`
+- **Rule ID:** `akamai.bot_manager`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `akamai-bm-sensor-script` | `static_integration` | `script_url` | `(?:^\|/)(_sec/verify\.js\|akam/13/\|akamai/bmp/)` | 75 | Decisive | Akamai Bot Manager client-side JavaScript sensor script URL ([Akamai docs](https://techdocs.akamai.com/bot-manager/docs/javascript-sensor)). |
+| `akamai-bm-cookie` | `cookies` | `cookie` | `ak_bmsc`, `bm_sv`, `bm_sz` | 40 | Supporting | Akamai Bot Manager telemetry and session score cookies. |
+| `akamai-bm-abck-cookie` | `cookies` | `cookie` | `_abck` | 40 | Supporting | Akamai Bot Manager sensor challenge tracking cookie. |
+| `akamai-bm-marker` | `static_integration` | `page_content` | `window\._sec` or `akamai\.bmp` | 35 | Supporting | Client-side sensor initialization markup. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- `requires`: `["akamai.edge"]` &mdash; Bot Manager runs on Akamai edge infrastructure.
+- The sensor script provides 75 points (`high`).
+- Tracking cookies (`_abck`, `ak_bmsc`) provide 40 points (`low`), resulting in `not_detected` without the sensor script.
+
+#### Vendor vs. product separation
+
+- Requires both `akamai.edge` and Bot Manager-specific sensor scripts. An Akamai-proxied origin without Bot Manager does not trigger `akamai.bot_manager`.
+
+#### Fixture coverage
+
+- **Positive:** `akamai-bot-manager-positive.html` &mdash; proxied page with `/_sec/verify.js` and `_abck` cookie (`score: 100`, `level: very_high`, `detected: true`).
+- **Hard negative:** `akamai-edge-positive.html` &mdash; proxied page with `_abck` cookie alone (`score: 40`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible.
+- **Known false negatives:** API endpoints protected by server-side Bot Manager without client-side sensor script injection.
+
+---
+
+### 11. Akamai App & API Protector (`akamai.app_and_api_protector`)
+
+- **Category:** `waf`
+- **Vendor:** `Akamai`
+- **Product:** `App & API Protector`
+- **Rule ID:** `akamai.app_and_api_protector`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `akamai-waf-session-header` | `response_headers` | `response_header` | `x-akamai-session-info` | 75 | Decisive | Akamai WAF mitigation session info header emitted on security actions. |
+| `akamai-waf-block-page` | `static_integration` | `page_content` | `Access Denied.*Reference&#32;&#35;[0-9a-fA-F.]` | 75 | Decisive | Standard Akamai WAF reference error block page HTML content. |
+| `akamai-waf-action-header` | `response_headers` | `response_header` | `x-akamai-waf-action` | 35 | Supporting | Akamai WAF action diagnostic header. |
+| `akamai-waf-marker` | `static_integration` | `page_content` | `Reference&#32;&#35;[0-9a-fA-F.]+` | 35 | Supporting | Akamai reference error number marker. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- `requires`: `["akamai.edge"]` &mdash; App & API Protector runs on Akamai edge infrastructure.
+- The reference error block page or `x-akamai-session-info` header independently reaches 75 points (`high`).
+
+#### Vendor vs. product separation
+
+- Detection requires explicit WAF block page DOM or session mitigation headers. Standard Akamai Edge traffic never triggers `akamai.app_and_api_protector`.
+
+#### Fixture coverage
+
+- **Positive:** `akamai-waf-positive.html` &mdash; 403 status with `x-akamai-session-info` and reference error block page (`score: 100`, `level: very_high`, `detected: true`).
+- **Hard negative:** `akamai-edge-positive.html` &mdash; normal proxied page (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `akamai waf ambiguity` &mdash; `x-akamai-waf-action: monitor` alone (`score: 35`, `level: low`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Documentation pages quoting Akamai reference error formats.
+- **Known false negatives:** Silent WAF policies in monitor/alert-only mode without mitigation headers or block pages.
+
+---
+
 ## Contributor checklist for new detector families
 
 When proposing a new detector family or adding rules to an existing family:

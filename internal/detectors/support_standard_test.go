@@ -267,6 +267,34 @@ func TestVendorSignalsDoNotIncurProductDetections(t *testing.T) {
 			Type:       model.SignalTypeResponseHeader,
 			Source:     analysis.SourceHTTP,
 			Key:        "Server",
+			Value:      "CloudFront",
+			Confidence: 1.0,
+		},
+		{
+			Type:       model.SignalTypeResponseHeader,
+			Source:     analysis.SourceHTTP,
+			Key:        "x-amz-cf-id",
+			Value:      "sample-cf-id",
+			Confidence: 1.0,
+		},
+		{
+			Type:       model.SignalTypeResponseHeader,
+			Source:     analysis.SourceHTTP,
+			Key:        "Server",
+			Value:      "AkamaiGHost",
+			Confidence: 1.0,
+		},
+		{
+			Type:       model.SignalTypeResponseHeader,
+			Source:     analysis.SourceHTTP,
+			Key:        "x-akamai-transformed",
+			Value:      "9 1234 0 pmb=mRUM,1",
+			Confidence: 1.0,
+		},
+		{
+			Type:       model.SignalTypeResponseHeader,
+			Source:     analysis.SourceHTTP,
+			Key:        "Server",
 			Value:      "gws",
 			Confidence: 1.0,
 		},
@@ -277,26 +305,26 @@ func TestVendorSignalsDoNotIncurProductDetections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var proxyDetected bool
+	detectedProxies := make(map[string]bool)
 	for _, d := range detections {
-		if d.RuleID == "cloudflare.proxy" {
-			if !d.Detected || d.Score < 75 {
-				t.Errorf("vendor infrastructure signals did not detect cloudflare.proxy: score = %v", d.Score)
+		if d.Product == "" {
+			if d.Detected && d.Score >= 75 {
+				detectedProxies[d.RuleID] = true
 			}
-			proxyDetected = true
 			continue
 		}
-		if d.Product != "" {
-			if d.Detected {
-				t.Errorf("vendor infrastructure signals triggered product detection %q (score = %v)", d.RuleID, d.Score)
-			}
-			if d.Score != 0 {
-				t.Errorf("vendor infrastructure signals produced non-zero score for product %q (score = %v)", d.RuleID, d.Score)
-			}
+		if d.Detected {
+			t.Errorf("vendor infrastructure signals triggered product detection %q (score = %v)", d.RuleID, d.Score)
+		}
+		if d.Score != 0 {
+			t.Errorf("vendor infrastructure signals produced non-zero score for product %q (score = %v)", d.RuleID, d.Score)
 		}
 	}
-	if !proxyDetected {
-		t.Error("cloudflare.proxy was not evaluated")
+
+	for _, wantProxy := range []string{"cloudflare.proxy", "aws.cloudfront", "akamai.edge"} {
+		if !detectedProxies[wantProxy] {
+			t.Errorf("vendor infrastructure signals did not detect %q", wantProxy)
+		}
 	}
 }
 

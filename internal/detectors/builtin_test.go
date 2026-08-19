@@ -15,8 +15,8 @@ func TestLoadBuiltInRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ruleSet.Rules) != 5 {
-		t.Fatalf("built-in rules = %d, want 5", len(ruleSet.Rules))
+	if len(ruleSet.Rules) != 11 {
+		t.Fatalf("built-in rules = %d, want 11", len(ruleSet.Rules))
 	}
 	if ruleSet.SchemaVersion != rules.CurrentSchemaVersion {
 		t.Errorf("built-in schema version = %d, want %d", ruleSet.SchemaVersion, rules.CurrentSchemaVersion)
@@ -27,6 +27,12 @@ func TestLoadBuiltInRules(t *testing.T) {
 		"cloudflare.bot_management",
 		"cloudflare.turnstile",
 		"google.recaptcha",
+		"aws.cloudfront",
+		"aws.waf",
+		"datadome.bot_protection",
+		"akamai.edge",
+		"akamai.bot_manager",
+		"akamai.app_and_api_protector",
 	}
 	for i, want := range wantIDs {
 		if got := ruleSet.Rules[i].ID; got != want {

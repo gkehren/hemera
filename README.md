@@ -59,7 +59,7 @@ Detections:
 
 ## Detector coverage
 
-Hemera ships built-in detector rules with explicit product-level separation:
+Hemera ships built-in detector rules with explicit product-level separation across 5 vendor families:
 
 - **Cloudflare:**
   - `cloudflare.proxy` (Reverse Proxy / CDN edge infrastructure);
@@ -68,17 +68,22 @@ Hemera ships built-in detector rules with explicit product-level separation:
   - `cloudflare.turnstile` (Turnstile client challenge widget).
 - **Google:**
   - `google.recaptcha` (Standard and Enterprise reCAPTCHA client integrations).
+- **Amazon Web Services (AWS):**
+  - `aws.cloudfront` (Amazon CloudFront edge CDN infrastructure);
+  - `aws.waf` (AWS WAF JavaScript SDK, action headers, and block pages).
+- **DataDome:**
+  - `datadome.bot_protection` (DataDome bot management client tag, headers, and challenge interstitials).
+- **Akamai:**
+  - `akamai.edge` (Akamai Edge reverse proxy infrastructure);
+  - `akamai.bot_manager` (Akamai Bot Manager JavaScript sensors and telemetry cookies);
+  - `akamai.app_and_api_protector` (App & API Protector / Kona Site Defender WAF reference error block pages).
 
 Vendor infrastructure alone does not imply that a specific product is enabled.
-For example, detecting `cloudflare.proxy` via `Server: cloudflare` or `cf-ray`
-never automatically produces a `cloudflare.waf`, `cloudflare.bot_management`,
-or `cloudflare.turnstile` detection.
+For example, detecting `aws.cloudfront` or `akamai.edge` never automatically
+produces an `aws.waf`, `akamai.bot_manager`, or `akamai.app_and_api_protector` detection.
 
 Later detector families are planned around:
 
-- AWS WAF;
-- Akamai protections and Bot Manager;
-- DataDome;
 - hCaptcha and Arkose Labs, subject to signature quality.
 
 ## Architecture

@@ -11,15 +11,21 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Hemera ships 5 built-in detector rules across Cloudflare and Google:
+Hemera ships 11 built-in detector rules across Cloudflare, Google, AWS, DataDome, and Akamai:
 
 | Rule ID | Category | Product | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
 | `cloudflare.proxy` | `cdn_reverse_proxy` | (Infrastructure) | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
-| `cloudflare.waf` | `waf` | Cloudflare WAF | `cf-mitigated: challenge`, `cf-error-code`, WAF block page DOM | Challenge orchestration scripts |
+| `cloudflare.waf` | `waf` | Cloudflare WAF | `cf-mitigated: challenge`, `cf-error-code`, WAF block page DOM | Challenge orchestration scripts, `cf-error-details` marker |
 | `cloudflare.bot_management` | `bot_management` | Cloudflare Bot Management | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` script | `__cf_bm` cookie |
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
+| `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
+| `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, `x-amzn-errortype`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
+| `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js`, `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
+| `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, Akamai TLS |
+| `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
+| `akamai.app_and_api_protector` | `waf` | Akamai App & API Protector | Reference error block page DOM, `x-akamai-session-info` | `x-akamai-waf-action`, `Reference #` marker |
 
 Decisive evidence contributes the 75-point detection threshold. Supporting
 markers cannot produce a detection by themselves, which limits false positives
@@ -27,11 +33,13 @@ from documentation, copied markup, or dormant code. Correlated observations shar
 evidence groups (`static_integration`, `response_headers`, `cookies`, `dns`,
 `tls`), whose contribution is their maximum rather than their sum.
 
-Cloudflare rules strictly maintain **product-level separation**: detecting
-`cloudflare.proxy` does not imply `cloudflare.waf`, `cloudflare.bot_management`,
-or `cloudflare.turnstile`. `cloudflare.bot_management` requires `cloudflare.proxy`
-as a prerequisite dependency, while `cloudflare.turnstile` operates standalone on
-any origin.
+All vendor rules strictly maintain **product-level separation**: detecting
+infrastructure (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) never implies
+that a corresponding WAF, Bot Management, or CAPTCHA product is active.
+Product rules requiring edge infrastructure declare formal prerequisites via `requires`
+(e.g., `cloudflare.bot_management`, `akamai.bot_manager`, `akamai.app_and_api_protector`),
+while standalone products (`cloudflare.turnstile`, `google.recaptcha`, `aws.waf`, `datadome`)
+operate on any origin.
 
 The signatures follow the vendors' documented client integrations and edge specifications:
 
@@ -40,6 +48,9 @@ The signatures follow the vendors' documented client integrations and edge speci
 - [Google reCAPTCHA v2 display](https://developers.google.com/recaptcha/docs/display)
 - [Google reCAPTCHA v3](https://developers.google.com/recaptcha/docs/v3)
 - [Google reCAPTCHA Enterprise web integration](https://docs.cloud.google.com/recaptcha/docs/instrument-web-pages)
+- [AWS WAF JavaScript SDK integration](https://docs.aws.amazon.com/waf/latest/developerguide/waf-javascript-sdk.html)
+- [DataDome JavaScript tag integration](https://docs.datadome.co/docs/javascript-tag)
+- [Akamai Bot Manager sensor integration](https://techdocs.akamai.com/bot-manager/docs/javascript-sensor)
 
 Checked-in synthetic fixtures cover positive, negative, ambiguous, and
 regression cases. They run through the real HTTP analyzer without contacting
