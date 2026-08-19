@@ -85,8 +85,8 @@ constraints in rule condition trees. Condition trees evaluate tri-state coverage
   `insufficient_coverage`.
 - If the upper bound of achievable score or evidence groups cannot reach
   `minimum_score` or `minimum_evidence` (e.g. unknown evidence is in the same
-  correlation group as an already observed match), coverage evaluates to
-  `not_detected`.
+  correlation group and cannot exceed the group's already observed maximum),
+  coverage evaluates to `not_detected`.
 - Rule dependencies propagate coverage uncertainty: if a required prerequisite
   is `insufficient_coverage`, dependent rules that could otherwise detect also
   become `insufficient_coverage`.
