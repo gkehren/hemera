@@ -80,7 +80,7 @@ Browser -----┘
 - [x] Add browser fixtures that do not depend on live third-party pages.
 - [x] Add browser-specific CI incrementally as deterministic navigation fixtures
   become available. The initial Linux job runs standard and race tests.
-- [ ] Aggregate HTTP, DNS/TLS, and browser observations into one deterministic
+- [x] Aggregate HTTP, DNS/TLS, and browser observations into one deterministic
   report without coupling detector rules to an analyzer implementation.
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate

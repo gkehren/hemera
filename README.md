@@ -9,11 +9,10 @@ security services.
 > Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
 > collection, detector rule matching, correlation-aware confidence scoring,
 > initial Turnstile and reCAPTCHA detectors, text/JSON reports, deterministic
-> multi-analyzer orchestration, bounded DNS/TLS supporting signals, and internal
-> sandboxed Chromium/CDP session startup and bounded capture are implemented.
-> Internal browser navigation now enforces destination validation and fixed
-> resource budgets, but it is not connected to scans. Broader detector coverage
-> is not available yet.
+> multi-analyzer orchestration, bounded DNS/TLS supporting signals, and
+> sandboxed Chromium/CDP navigation are implemented. Browser observations are
+> normalized and included in the same rule and scoring pass as HTTP and DNS/TLS
+> evidence. Broader detector coverage is not available yet.
 
 ## What Hemera aims to provide
 
@@ -106,9 +105,10 @@ scanner validates and aggregates those signals in configured analyzer order.
 The data-driven rule engine and scoring layer consume only the aggregate signals
 without depending on `net/http`, DNS/TLS, or Chromium implementation types.
 
-## Current HTTP scan
+## Current scan pipeline
 
-Hemera can perform one bounded, passive HTTP navigation:
+Hemera performs one bounded passive HTTP navigation, bounded DNS/TLS
+observation, and one sandboxed browser navigation:
 
 ```sh
 go run ./cmd/hemera scan https://example.com/
@@ -129,6 +129,12 @@ redirects, 1 MiB of response headers, 2 MiB of decompressed body data, and 4096
 unique script or iframe URLs. Static HTML extraction uses two cancellable HTML5
 tokenizer passes and does not construct a DOM tree. TLS uses certificate
 validation, hostname-derived SNI, and TLS 1.2 or later.
+
+The browser analyzer runs after HTTP and DNS/TLS with a non-fatal failure
+policy. A missing or unusable local Chromium installation therefore produces an
+explicit failed browser coverage entry while preserving HTTP and DNS/TLS
+results. An unsafe initial HTTP target remains fatal and stops the pipeline
+before Chromium starts.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
@@ -172,8 +178,9 @@ correlation groups aggregated by their maximum contribution, minimum independent
 evidence, dependencies, and cross-rule conflict penalties. Scores are bounded
 confidence indicators, not calibrated probabilities.
 
-`hemera scan` evaluates the embedded rules after HTTP analysis and passes the
-scored results to the selected reporter. See the
+`hemera scan` evaluates the embedded rules once after aggregating HTTP, DNS/TLS,
+and browser signals, then passes the scored results to the selected reporter.
+See the
 [detector rule schema V2](docs/detector-rules.md) for the implemented contract,
 built-in rules, and scoring semantics.
 
@@ -197,13 +204,14 @@ planned.
 
 The internal browser package uses `chromedp` but does not download a browser. It
 can record bounded, minimized CDP network events and snapshot the current
-target's final DOM, script and iframe URLs, and cookie names. This raw internal
-result is not converted to signals or reports. Its opt-in integration test
-requires a locally installed Chromium or Chrome that can run with its sandbox
-enabled:
+target's final DOM, script and iframe URLs, and cookie names. The browser
+analyzer converts this raw result to normalized, deterministic signals; only
+evidence selected by detector rules can enter reports. Its opt-in integration
+tests require a locally installed Chromium or Chrome that can run with its
+sandbox enabled:
 
 ```sh
-go test -tags=browser_integration ./internal/browser
+go test -tags=browser_integration ./internal/browser ./internal/scanner
 ```
 
 Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The integration test
@@ -211,9 +219,9 @@ uses the versioned synthetic corpus in `internal/browser/testdata`, injected DNS
 and dialing dependencies, and a loopback `httptest` server reached only through
 the same validated proxy boundary used in production. The manifest-driven
 dynamic and negative scenarios use a fresh Chromium profile, declare every
-allowed route, and never contact a live page or third-party asset. The current
-CLI does not start Chromium. Browser signal conversion and scanner integration
-remain planned.
+allowed route, and never contact a live page or third-party asset. The scanner
+fixture additionally proves combined HTTP, DNS, and browser scoring without
+contacting public DNS or a third party.
 
 Internal navigation accepts only HTTP(S) targets and sends Chromium traffic
 through a per-session loopback proxy. The proxy applies the shared public-address

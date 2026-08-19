@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <title>Browser aggregation fixture</title>
+</head>
+<body>
+  <main id="initial">ready</main>
+  <script>
+    document.cookie = "browser_only_cookie=synthetic-value; SameSite=Lax";
+    const marker = document.createElement("div");
+    marker.id = "browser-only-marker";
+    document.body.appendChild(marker);
+  </script>
+</body>
+</html>

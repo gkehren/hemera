@@ -24,6 +24,18 @@
       "warnings": [
         "response body was truncated at 2097152 bytes"
       ]
+    },
+    {
+      "source": "dns_tls_analyzer",
+      "status": "complete",
+      "warnings": []
+    },
+    {
+      "source": "browser_analyzer",
+      "status": "partial",
+      "warnings": [
+        "browser observation was incomplete"
+      ]
     }
   ],
   "detections": [

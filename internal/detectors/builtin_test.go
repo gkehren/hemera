@@ -3,7 +3,10 @@ package detectors
 import (
 	"testing"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/rules"
+	"github.com/gkehren/hemera/internal/scoring"
+	"github.com/gkehren/hemera/pkg/model"
 )
 
 func TestLoadBuiltInRules(t *testing.T) {
@@ -32,5 +35,36 @@ func TestLoadBuiltInRules(t *testing.T) {
 	ruleSet.Rules[0].Name = "mutated"
 	if second.Rules[0].Name == "mutated" {
 		t.Error("Load returned shared mutable rule state")
+	}
+}
+
+func TestBuiltInRulesRemainLimitedToStaticHTTPObservations(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signal := model.Signal{
+		Type: model.SignalTypeScriptURL, Key: "src",
+		Value:      "https://challenges.cloudflare.com/turnstile/v0/api.js",
+		Confidence: 1,
+	}
+
+	signal.Source = analysis.SourceBrowser
+	browserDetections, err := scoring.Evaluate(ruleSet, []model.Signal{signal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if browserDetections[0].Detected || browserDetections[0].Score != 0 {
+		t.Errorf("browser-only dynamic evidence changed static Turnstile coverage: %#v", browserDetections[0])
+	}
+
+	signal.Source = analysis.SourceHTTP
+	httpDetections, err := scoring.Evaluate(ruleSet, []model.Signal{signal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !httpDetections[0].Detected || httpDetections[0].Score != 75 {
+		t.Errorf("HTTP static evidence detection = %#v", httpDetections[0])
 	}
 }

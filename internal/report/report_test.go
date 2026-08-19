@@ -140,6 +140,12 @@ func TestWriteJSONPreservesCompleteDetectionShape(t *testing.T) {
 		}},
 		Warnings: []string{"response body was truncated at 2097152 bytes"},
 	})
+	result.Analyzers = append(result.Analyzers,
+		scanner.AnalyzerResult{Observation: analysis.Observation{Source: analysis.SourceDNSTLS}, Status: scanner.AnalyzerStatusComplete},
+		scanner.AnalyzerResult{Observation: analysis.Observation{
+			Source: analysis.SourceBrowser, Warnings: []string{"browser observation was incomplete"},
+		}, Status: scanner.AnalyzerStatusPartial},
+	)
 	result.Detections = []scoring.Detection{{
 		RuleID: "test.complete", Name: "Complete synthetic detector",
 		Category: rules.CategoryCAPTCHAChallenge, Vendor: "Example", Product: "Widget",
@@ -199,6 +205,67 @@ func TestWriteJSONPreservesCompleteDetectionShape(t *testing.T) {
 	for _, secret := range []string{"password", "secret", "cookie-secret", "fragment"} {
 		if strings.Contains(output.String(), secret) {
 			t.Errorf("complete JSON disclosed %q: %s", secret, output.String())
+		}
+	}
+}
+
+func TestBuildMinimizesBrowserEvidenceAndCoverage(t *testing.T) {
+	t.Parallel()
+	result := scanner.Result{
+		Target: analysis.Target{URL: "https://example.test/?token=secret"},
+		Analyzers: []scanner.AnalyzerResult{{
+			Observation: analysis.Observation{
+				Source: analysis.SourceBrowser, Warnings: []string{"browser observation was incomplete"},
+			},
+			Status: scanner.AnalyzerStatusPartial,
+		}},
+		Detections: []scoring.Detection{{
+			RuleID: "browser.fixture", Name: "Browser fixture", Detected: true,
+			ConditionMatched: true, MinimumEvidenceMet: true, Score: 100, EvidenceScore: 100,
+			PositiveEvidenceGroups: []scoring.EvidenceGroup{{
+				ID: "browser_dom", EvidenceIDs: []string{"request", "dom", "cookie"},
+				SelectedEvidenceID: "request", RawContribution: 100, Contribution: 100,
+			}},
+			PositiveEvidence: []scoring.ScoredEvidence{
+				{Match: rules.EvidenceMatch{EvidenceID: "request", Group: "browser_dom", Weight: 100, Signal: model.Signal{
+					Type: model.SignalTypeNetworkRequest, Source: analysis.SourceBrowser, Key: "GET",
+					Value: "https://api.example.test/widget?token=secret#fragment",
+					URL:   "https://example.test/?session=secret", Confidence: 1,
+				}}, RawContribution: 100, Contribution: 100},
+				{Match: rules.EvidenceMatch{EvidenceID: "dom", Group: "browser_dom", Weight: 20, Signal: model.Signal{
+					Type: model.SignalTypePageContent, Source: analysis.SourceBrowser, Key: "dom",
+					Value: "<html>synthetic-secret</html>", Confidence: 1,
+				}}, RawContribution: 20},
+				{Match: rules.EvidenceMatch{EvidenceID: "cookie", Group: "browser_dom", Weight: 10, Signal: model.Signal{
+					Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "session",
+					Value: "synthetic-secret", Confidence: 1,
+				}}, RawContribution: 10},
+			},
+		}},
+	}
+	report := Build("dev", result)
+	if len(report.Analyzers) != 1 || report.Analyzers[0].Source != analysis.SourceBrowser ||
+		report.Analyzers[0].Status != scanner.AnalyzerStatusPartial {
+		t.Fatalf("browser coverage = %#v", report.Analyzers)
+	}
+	evidence := report.Detections[0].Evidence.Positive
+	if evidence[0].Value != "https://api.example.test/widget?redacted" ||
+		evidence[0].URL != "https://example.test/?redacted" || evidence[1].Value != "" || evidence[2].Value != "" {
+		t.Fatalf("browser evidence was not minimized: %#v", evidence)
+	}
+	var first, second bytes.Buffer
+	if err := WriteJSON(&first, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(&second, report); err != nil {
+		t.Fatal(err)
+	}
+	if first.String() != second.String() {
+		t.Error("browser report serialization is not deterministic")
+	}
+	for _, secret := range []string{"synthetic-secret", "token=secret", "session=secret", "fragment"} {
+		if strings.Contains(first.String(), secret) {
+			t.Errorf("browser report disclosed %q: %s", secret, first.String())
 		}
 	}
 }

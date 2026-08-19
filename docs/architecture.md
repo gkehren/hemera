@@ -146,9 +146,9 @@ work items, 4096 entries for each traffic or resource collection, and 8192 bytes
 per URL. Generic, deduplicated warnings mark truncation without embedding
 page-controlled data. Results are cloned at the recorder boundary. No unbounded
 serialized DOM is constructed in Chromium or Go, and the bounded internal
-observation is not sent to reporters.
+observation is not sent directly to reporters.
 
-`Session.Navigate` provides the next internal slice. It accepts one absolute
+`Session.Navigate` accepts one absolute
 HTTP(S) target and permits only one navigation at a time. The complete operation,
 including initial DNS validation, is bounded by 15 seconds. Chromium is forced
 through a random per-session proxy listening only on `127.0.0.1`; direct host
@@ -195,8 +195,24 @@ page produces no dynamic resources, cookies, or extra traffic. Injected resolver
 and dialer dependencies make the synthetic hostname validate as a permitted
 public destination while connecting the production proxy to loopback
 `httptest`. This exercises validation and pinning without weakening the global
-destination policy or contacting public DNS or a third party. The package still
-emits no normalized browser signals and has no scanner or report integration.
+destination policy or contacting public DNS or a third party.
+
+The normalized browser adapter starts a fresh session, begins capture before
+navigation, finishes capture after the bounded navigation completes, and closes
+the session deterministically. It emits `network_request`, `network_response`,
+`page_content`, `script_url`, `iframe_url`, and `cookie` signals under
+`browser_analyzer`. Exact duplicates are removed and signals are sorted by
+channel and normalized fields before scanner aggregation. The raw DOM and
+cookie values never enter reporters; page content can only influence rule
+matching, and a selected page-content evidence value is omitted from reports.
+
+The CLI configures HTTP as fatal and DNS/TLS plus browser observation as
+non-fatal. An unsafe initial HTTP target therefore stops the pipeline before
+Chromium starts. Browser startup, navigation, capture, or cleanup failures
+retain safe partial signals where available and otherwise produce a failed
+coverage entry. The scanner validates all three observations, aggregates their
+signals in configured order, and invokes the analyzer-independent scoring engine
+once.
 
 ### Signal model
 
@@ -352,7 +368,7 @@ Before each analyzer runs, the scanner supplies cloned observations from earlier
 analyzers in `analysis.Target.Prior`. This preserves configured ordering and lets
 later analyzers reuse bounded typed metadata without implementation-specific
 dependencies or mutable aliasing. The current CLI configures HTTP first with
-`abort`, then DNS/TLS with `continue`. Browser collection is not yet connected.
+`abort`, then DNS/TLS and browser observation with `continue`.
 
 `internal/report` converts scanner results into a secret-minimized report model.
 The CLI renders that model as human-oriented text by default or as versioned,
@@ -375,7 +391,7 @@ internal/scanner/         scan orchestration
 internal/analysis/        shared observations and typed analyzer metadata
 internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
-internal/browser/         validated Chromium navigation and bounded raw capture
+internal/browser/         Chromium navigation, capture, and signal normalization
 internal/dnstls/          DNS/TLS normalization and bounded CNAME observation
 internal/signals/         normalization
 internal/rules/           rule loading and matching

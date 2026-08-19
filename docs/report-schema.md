@@ -45,11 +45,15 @@ report and remain CLI errors on stderr.
 
 HTTP analyzer warnings are mirrored in `http.warnings` so navigation diagnostics
 remain colocated with the HTTP metadata as well as the generic coverage entry.
-The current CLI emits `http_analyzer` followed by `dns_tls_analyzer`. A failed
-CNAME lookup makes the latter `partial` when reused TLS signals remain, or
-`failed` when no signal was available. DNS/TLS signal values appear only when a
+The current CLI emits `http_analyzer`, `dns_tls_analyzer`, then
+`browser_analyzer`. A failed CNAME lookup makes DNS/TLS `partial` when reused TLS
+signals remain, or `failed` when no signal was available. A browser startup or
+navigation failure is likewise `partial` when normalized signals survived and
+`failed` otherwise. Both analyzers use a continue policy, while HTTP and caller
+cancellation remain fatal. DNS/TLS and browser signal values appear only when a
 detector matched them as evidence; the report does not otherwise add a raw
-network-observation inventory.
+network-observation inventory. `final_url` remains the final HTTP URL rather
+than a browser redirect field.
 
 Each detection contains identity fields, `detected`, the matching gates,
 `evidence_score`, final `score`, `level`, grouped positive/negative/ambiguous
@@ -91,7 +95,9 @@ and have user information, fragments, and query values removed or masked. Empty
 arrays are encoded as `[]`, not `null`, to keep automation deterministic.
 Matched DNS names and bounded TLS properties may be included as explanatory
 evidence. Their producers reject control characters and bound certificate-derived
-values before they reach reporting.
+values before they reach reporting. Browser cookie and page-content values are
+always omitted. Browser request and resource URLs are sanitized again by the
+reporter before selected evidence is serialized.
 
 ## Compatibility
 

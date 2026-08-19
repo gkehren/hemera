@@ -44,9 +44,9 @@ Hemera is in early development. The repository currently contains:
 - the Go module `github.com/gkehren/hemera`, requiring Go 1.26 or later;
 - a CLI in `cmd/hemera` with help, version, and bounded `scan` commands;
 - safe URL/DNS validation and passive HTTP analysis;
-- internal sandboxed Chromium/CDP session startup, bounded capture of the
-  current target, and validated resource-bounded navigation, without browser
-  signal conversion or scanner integration;
+- sandboxed Chromium/CDP session startup, bounded capture, validated
+  resource-bounded navigation, normalized browser signals, and scanner
+  integration;
 - a versioned, synthetic browser fixture corpus with hermetic dynamic, negative,
   security, and resource-limit coverage;
 - the normalized signal model, detector rule matching, and confidence scoring;
@@ -59,9 +59,9 @@ Hemera is in early development. The repository currently contains:
   sandboxed Chromium integration tests on Linux with and without the race
   detector.
 
-Do not document planned behavior as implemented. Browser signal conversion and
-scanner aggregation, broader detector coverage, and release packaging remain
-planned until their roadmap steps are completed and verified.
+Do not document planned behavior as implemented. Broader detector coverage and
+release packaging remain planned until their roadmap steps are completed and
+verified.
 
 ## Architecture boundaries
 
