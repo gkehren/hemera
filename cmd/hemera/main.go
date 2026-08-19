@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/gkehren/hemera/internal/browser"
 	"github.com/gkehren/hemera/internal/detectors"
 	"github.com/gkehren/hemera/internal/dnstls"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
@@ -33,6 +34,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "hemera: configure DNS/TLS analyzer: %v\n", err)
 			return 1
 		}
+		browserAnalyzer, err := browser.NewAnalyzer(browser.DefaultConfig())
+		if err != nil {
+			fmt.Fprintf(stderr, "hemera: configure browser analyzer: %v\n", err)
+			return 1
+		}
 		ruleSet, err := detectors.Load()
 		if err != nil {
 			fmt.Fprintf(stderr, "hemera: load detector rules: %v\n", err)
@@ -42,6 +48,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			Analyzers: []scanner.AnalyzerConfig{
 				{Analyzer: analyzer, FailurePolicy: scanner.FailurePolicyAbort},
 				{Analyzer: dnsTLSAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
+				{Analyzer: browserAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
 			},
 			RuleSet: ruleSet,
 		})

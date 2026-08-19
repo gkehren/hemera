@@ -10,6 +10,8 @@ const (
 	// SourceDNSTLS identifies DNS and TLS signals derived from bounded DNS
 	// observation and the established HTTP connection.
 	SourceDNSTLS = "dns_tls_analyzer"
+	// SourceBrowser identifies observations produced by sandboxed Chromium.
+	SourceBrowser = "browser_analyzer"
 )
 
 // Target identifies the user-requested resource passed to every analyzer. Prior

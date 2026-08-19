@@ -18,6 +18,9 @@
               "group": "static_integration",
               "description": "Documented Turnstile JavaScript API URL",
               "type": "script_url",
+              "source": {
+                "exact": "http_analyzer"
+              },
               "value": {
                 "regex": "^https://challenges\\.cloudflare\\.com/turnstile/v0/api\\.js(?:\\?redacted)?$",
                 "case_insensitive": true
@@ -31,6 +34,9 @@
               "group": "static_integration",
               "description": "Static cf-turnstile widget marker",
               "type": "page_content",
+              "source": {
+                "exact": "http_analyzer"
+              },
               "value": {
                 "regex": "(?:^|[^A-Za-z0-9_-])cf-turnstile(?:[^A-Za-z0-9_-]|$)",
                 "case_insensitive": true
@@ -58,6 +64,9 @@
               "group": "static_integration",
               "description": "Documented standard or Enterprise reCAPTCHA JavaScript API URL",
               "type": "script_url",
+              "source": {
+                "exact": "http_analyzer"
+              },
               "value": {
                 "regex": "^https://www\\.(?:google\\.com|recaptcha\\.net)/recaptcha/(?:api|enterprise)\\.js(?:\\?redacted)?$",
                 "case_insensitive": true
@@ -71,6 +80,9 @@
               "group": "static_integration",
               "description": "Static g-recaptcha widget marker",
               "type": "page_content",
+              "source": {
+                "exact": "http_analyzer"
+              },
               "value": {
                 "regex": "(?:^|[^A-Za-z0-9_-])g-recaptcha(?:[^A-Za-z0-9_-]|$)",
                 "case_insensitive": true
@@ -84,6 +96,9 @@
               "group": "static_integration",
               "description": "Static grecaptcha render or execute call",
               "type": "page_content",
+              "source": {
+                "exact": "http_analyzer"
+              },
               "value": {
                 "regex": "grecaptcha\\s*\\.\\s*(?:execute|render)\\s*\\(",
                 "case_insensitive": true

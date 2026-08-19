@@ -276,6 +276,33 @@ claim that a particular WAF or bot-management product is active. Put correlated
 certificate fields in one `tls` group so issuer, subject, and SAN variants do not
 manufacture independent certainty.
 
+### Browser evidence
+
+The browser analyzer emits normalized signals under `browser_analyzer` in a
+stable channel order:
+
+- `network_request`: the uppercase HTTP method is the key and the cleaned
+  request URL is the value;
+- `network_response`: the key is `status`, the value is the decimal status, and
+  the cleaned response URL is the signal URL;
+- `page_content`: the key is `dom` and the bounded final DOM is the internal
+  value;
+- `script_url` and `iframe_url`: the key is `src` and the cleaned resource URL
+  is the value;
+- `cookie`: the cookie name is the key and the value is always empty.
+
+Exact duplicates are removed and normalized fields are sorted before matching.
+MIME and CDP resource types remain internal capture metadata and are not part of
+this first normalized contract. Reporters never expose `page_content` or cookie
+values. The built-in Turnstile and reCAPTCHA rules remain explicitly scoped to
+`http_analyzer`; browser signatures require their own fixture-backed evidence
+and scoring rationale before becoming supported detectors.
+
+Use distinct groups such as `browser_dom` or `browser_network` only for genuinely
+independent evidence. A script URL present in both static HTML and browser
+traffic is correlated observation of the same integration and must not be
+counted twice merely because two analyzers observed it.
+
 Each selected signal field contains exactly one text operation:
 
 - `exact`;

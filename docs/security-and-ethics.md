@@ -165,8 +165,8 @@ remains in memory and is not persisted or passed to a reporter; like all page
 content, it must still be treated as sensitive and untrusted. Limit warnings are
 generic and contain no page-controlled text.
 
-Internal production code can now navigate an untrusted HTTP(S) target, but the
-capability is not used by `hemera scan`. Chromium receives a per-session
+`hemera scan` uses this capability after the fatal HTTP analyzer and the
+non-fatal DNS/TLS analyzer. Chromium receives a per-session
 loopback proxy and is configured without proxy bypass, direct hostname
 resolution, QUIC, or non-proxied WebRTC UDP. WebSocket transports are rejected.
 The proxy parses the initial target, redirects, and HTTP subresources through
@@ -199,11 +199,21 @@ references, and serves only declared routes for `fixture.test`. Fake query
 values, authorization data, fragments, and cookie values exercise minimization
 without containing live credentials or personal data. Loopback remains
 forbidden under the production policy, and no public DNS or third-party
-destination is contacted. Browser observations are still internal and are not
-converted to signals or reports.
-External protocol handling, normalized evidence minimization, and scanner-level
-aggregation remain future integration work; the current navigation method does
-not authorize challenge bypass, fingerprint spoofing, or active probing.
+destination is contacted.
+
+Browser observations are not reported as a raw inventory. The browser adapter
+emits only normalized requests, responses, final DOM, script and iframe URLs,
+and cookie names. It sorts and deduplicates these signals, never emits cookie
+values, and uses generic warnings for incomplete or unavailable coverage. Page
+content remains bounded and in memory for rule matching, while reporters
+suppress its value even when a rule selects it as evidence. Raw analyzer errors
+are retained only internally.
+
+The browser analyzer uses a continue policy so local Chromium absence or a
+browser-local resource failure cannot erase valid HTTP and DNS/TLS results.
+Caller cancellation remains fatal, and an unsafe initial HTTP target prevents
+the later analyzers from running. This integration does not authorize challenge
+bypass, fingerprint spoofing, or active probing.
 
 ## Explicitly prohibited capabilities
 
