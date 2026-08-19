@@ -105,19 +105,22 @@
       }
     },
     {
-      "id": "cloudflare.waf",
-      "name": "Cloudflare WAF",
-      "description": "Detects Cloudflare WAF block pages, challenge pages, or security error headers.",
-      "category": "waf",
+      "id": "cloudflare.challenge_page",
+      "name": "Cloudflare Challenge Page",
+      "description": "Detects Cloudflare managed challenge pages, interstitial security error pages, and challenge mitigation response headers.",
+      "category": "captcha_challenge",
       "vendor": "Cloudflare",
-      "product": "WAF",
+      "product": "Challenge Page",
       "minimum_evidence": 1,
       "minimum_score": 75,
+      "requires": [
+        "cloudflare.proxy"
+      ],
       "match": {
         "any": [
           {
             "signal": {
-              "id": "cloudflare-waf-mitigated-header",
+              "id": "cloudflare-challenge-mitigated-header",
               "group": "response_headers",
               "description": "Cloudflare challenge mitigation header",
               "type": "response_header",
@@ -134,7 +137,7 @@
           },
           {
             "signal": {
-              "id": "cloudflare-waf-error-header",
+              "id": "cloudflare-challenge-error-header",
               "group": "response_headers",
               "description": "Cloudflare security error code header",
               "type": "response_header",
@@ -147,9 +150,9 @@
           },
           {
             "signal": {
-              "id": "cloudflare-waf-block-page",
+              "id": "cloudflare-challenge-block-page",
               "group": "static_integration",
-              "description": "Cloudflare WAF error or challenge block page marker",
+              "description": "Cloudflare challenge or error block page marker",
               "type": "page_content",
               "value": {
                 "regex": "(?:Attention Required! \\| Cloudflare|Cloudflare Ray ID:.*Cloudflare|Sorry, you have been blocked)",
@@ -160,7 +163,7 @@
           },
           {
             "signal": {
-              "id": "cloudflare-waf-challenge-script",
+              "id": "cloudflare-challenge-script",
               "group": "static_integration",
               "description": "Cloudflare managed challenge platform script",
               "type": "script_url",
@@ -173,7 +176,7 @@
           },
           {
             "signal": {
-              "id": "cloudflare-waf-marker",
+              "id": "cloudflare-challenge-marker",
               "group": "static_integration",
               "description": "Cloudflare error wrapper or details marker",
               "type": "page_content",
@@ -188,12 +191,12 @@
       }
     },
     {
-      "id": "cloudflare.bot_management",
-      "name": "Cloudflare Bot Management",
-      "description": "Detects Cloudflare Bot Management or Bot Fight Mode client-side telemetry scripts and tracking cookies.",
+      "id": "cloudflare.bot_protection",
+      "name": "Cloudflare Bot Protection",
+      "description": "Detects Cloudflare bot protection, Bot Fight Mode, and JavaScript detection telemetry scripts and cookies.",
       "category": "bot_management",
       "vendor": "Cloudflare",
-      "product": "Bot Management",
+      "product": "Bot Protection",
       "minimum_evidence": 1,
       "minimum_score": 75,
       "requires": [
@@ -205,7 +208,7 @@
             "signal": {
               "id": "cloudflare-bot-telemetry-script",
               "group": "static_integration",
-              "description": "Cloudflare Bot Management JavaScript detection telemetry script",
+              "description": "Cloudflare JavaScript detection telemetry script",
               "type": "script_url",
               "value": {
                 "regex": "^https?://[^/]+/cdn-cgi/challenge-platform/(?:scripts/jsd/main\\.js|h/[a-z]/scripts/|invisible\\.js)",
@@ -218,7 +221,7 @@
             "signal": {
               "id": "cloudflare-bot-cookie",
               "group": "cookies",
-              "description": "Cloudflare Bot Management cookie",
+              "description": "Cloudflare bot telemetry cookie",
               "type": "cookie",
               "key": {
                 "exact": "__cf_bm",

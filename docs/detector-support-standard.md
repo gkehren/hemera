@@ -179,79 +179,83 @@ The following detector families currently meet the support standard:
 
 ---
 
-### 2. Cloudflare WAF (`cloudflare.waf`)
+### 2. Cloudflare Challenge Page (`cloudflare.challenge_page`)
 
-- **Category:** `waf`
+- **Category:** `captcha_challenge`
 - **Vendor:** `Cloudflare`
-- **Product:** `WAF`
-- **Rule ID:** `cloudflare.waf`
+- **Product:** `Challenge Page`
+- **Rule ID:** `cloudflare.challenge_page`
 
 #### Evidence rationale
 
 | Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| `cloudflare-waf-mitigated-header` | `response_headers` | `response_header` | `cf-mitigated: challenge` | 75 | Decisive | Cloudflare WAF mitigation header emitted on challenge responses. |
-| `cloudflare-waf-error-header` | `response_headers` | `response_header` | `cf-error-code` | 75 | Decisive | Security error code header emitted on WAF blocks (e.g. 1020, 1015). |
-| `cloudflare-waf-block-page` | `static_integration` | `page_content` | `Attention Required! \| Cloudflare` or `cf-error-details` | 75 | Decisive | Standard Cloudflare WAF block and challenge page HTML structure. |
-| `cloudflare-waf-challenge-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1` | 75 | Decisive | Managed challenge orchestration script URL. |
+| `cloudflare-challenge-mitigated-header` | `response_headers` | `response_header` | `cf-mitigated: challenge` | 75 | Decisive | Cloudflare challenge mitigation header emitted on challenge responses ([Cloudflare docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/)). |
+| `cloudflare-challenge-error-header` | `response_headers` | `response_header` | `cf-error-code` | 75 | Decisive | Security error code header emitted on challenge or block responses. |
+| `cloudflare-challenge-block-page` | `static_integration` | `page_content` | `Attention Required! \| Cloudflare` or `cf-error-details` | 75 | Decisive | Standard Cloudflare challenge or security block page HTML structure. |
+| `cloudflare-challenge-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1` | 75 | Decisive | Managed challenge orchestration script URL. |
+| `cloudflare-challenge-marker` | `static_integration` | `page_content` | `cf-error-details` or `cf-wrapper` | 35 | Supporting | Cloudflare error wrapper or details marker. |
 
 #### Scoring and threshold rationale
 
 - `minimum_score`: 75 (`high`).
 - `minimum_evidence`: 1 group.
+- `requires`: `["cloudflare.proxy"]` &mdash; Challenge pages are served by Cloudflare reverse proxy edge infrastructure.
 - Mitigation headers or block page content reach 75 points (`high`).
 
-#### Vendor vs. product separation
+#### Vendor vs. product separation & anti-overclaim
 
-- Detection of Cloudflare WAF requires explicit WAF mitigation headers or block/challenge page DOM markers. `cloudflare.proxy` alone never triggers `cloudflare.waf`.
+- Detection of Cloudflare Challenge Page indicates that a Cloudflare managed or interstitial challenge page was returned. It does **not** assert whether the challenge was triggered by WAF custom rules, Bot Fight Mode, Rate Limiting, DDoS protection, or Under Attack Mode.
 
 #### Fixture coverage
 
-- **Positive:** `cloudflare-waf-challenge.html` &mdash; 403 status with `cf-mitigated: challenge` and WAF block page DOM (`score: 75`, `level: high`, `detected: true`).
-- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; normal proxied page without WAF challenge (`score: 0`, `detected: false`).
+- **Positive:** `cloudflare-waf-challenge.html` &mdash; 403 status with `cf-mitigated: challenge` and challenge page DOM (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; normal proxied page without challenge (`score: 0`, `detected: false`).
+- **Ambiguous:** `ambiguous-markers.html` with proxy headers &mdash; (`score: 35`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
-- **Known false positives:** Documentation pages quoting Cloudflare block page HTML verbatim without 403 status.
-- **Known false negatives:** Silent WAF rules configured to allow or log traffic without active mitigation or challenge.
+- **Known false positives:** Documentation pages quoting Cloudflare block page HTML verbatim without active challenge headers.
+- **Known false negatives:** Silent protection rules that allow or log traffic without issuing a challenge or block page.
 
 ---
 
-### 3. Cloudflare Bot Management (`cloudflare.bot_management`)
+### 3. Cloudflare Bot Protection (`cloudflare.bot_protection`)
 
 - **Category:** `bot_management`
 - **Vendor:** `Cloudflare`
-- **Product:** `Bot Management`
-- **Rule ID:** `cloudflare.bot_management`
+- **Product:** `Bot Protection`
+- **Rule ID:** `cloudflare.bot_protection`
 
 #### Evidence rationale
 
 | Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| `cloudflare-bot-telemetry-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` or `invisible.js` | 75 | Decisive | JavaScript Detections (JSD) telemetry script injected by Bot Management/Bot Fight Mode. |
-| `cloudflare-bot-cookie` | `cookies` | `cookie` | `__cf_bm` | 40 | Supporting | Bot score tracking cookie set on requests. |
+| `cloudflare-bot-telemetry-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` or `invisible.js` | 75 | Decisive | JavaScript Detections (JSD) telemetry script used by Cloudflare Bot Fight Mode, Super Bot Fight Mode, and Bot Management ([Cloudflare docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/)). |
+| `cloudflare-bot-cookie` | `cookies` | `cookie` | `__cf_bm` | 40 | Supporting | Bot score tracking cookie set on requests ([Cloudflare docs](https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/)). |
 
 #### Scoring and threshold rationale
 
 - `minimum_score`: 75 (`high`).
 - `minimum_evidence`: 1 group.
-- `requires`: `["cloudflare.proxy"]` &mdash; Bot Management operates on Cloudflare proxy infrastructure.
+- `requires`: `["cloudflare.proxy"]` &mdash; Bot Protection operates on Cloudflare proxy infrastructure.
 - The JSD telemetry script provides 75 points (`high`).
 - The `__cf_bm` cookie alone provides 40 points (`low`), resulting in `not_detected` without telemetry script.
 
-#### Vendor vs. product separation
+#### Vendor vs. product separation & anti-overclaim
 
-- Requires both `cloudflare.proxy` presence and specific Bot Management telemetry evidence. A standard Cloudflare proxy setup without Bot Management JS does not detect `cloudflare.bot_management`.
+- Requires both `cloudflare.proxy` presence and specific bot telemetry evidence. It proves that Cloudflare Bot Protection / JavaScript Detections are active, but does **not** overclaim enterprise-tier `Bot Management` entitlement over `Bot Fight Mode`.
 
 #### Fixture coverage
 
 - **Positive:** `cloudflare-bot-management-positive.html` &mdash; proxied page with `__cf_bm` cookie and `/cdn-cgi/challenge-platform/scripts/jsd/main.js` (`score: 75`, `level: high`, `detected: true`).
-- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; proxied page without Bot Management telemetry (`score: 0`, `detected: false`).
+- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; proxied page without Bot Protection telemetry (`score: 0`, `detected: false`).
+- **Ambiguous:** `cloudflare-proxy-positive.html` with cookie only &mdash; (`score: 40`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
-- **Known false positives:** Negligible.
-- **Known false negatives:** API endpoints protected by server-side Bot Management without client-side JavaScript injection.
+- **Known false positives:** Stale `__cf_bm` cookies after bot protection is disabled.
+- **Known false negatives:** API endpoints protected by server-side bot heuristics without client-side JavaScript injection.
 
 ---
 

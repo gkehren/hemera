@@ -27,20 +27,20 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 ## 2. Per-Detector Limitation Profiles
 
-### 2.1 Cloudflare (`cloudflare.proxy`, `cloudflare.waf`, `cloudflare.bot_management`, `cloudflare.turnstile`)
+### 2.1 Cloudflare (`cloudflare.proxy`, `cloudflare.challenge_page`, `cloudflare.bot_protection`, `cloudflare.turnstile`)
 
 #### `cloudflare.proxy` (Category: `cdn_reverse_proxy`)
 - **Plan Tier Invisibility:** Cannot determine whether the domain is on Free, Pro, Business, or Enterprise tiers from public headers alone.
 - **Header Stripping:** Enterprise customers using Cloudflare Workers or custom Transform Rules may strip or rename `Server: cloudflare` and `cf-ray`. In such cases, detection relies on DNS CNAME (`*.cloudflare.net`) or TLS certificates.
-- **No Product Implication:** Detecting `cloudflare.proxy` does *not* imply that WAF, Bot Management, or Turnstile are active.
+- **No Product Implication:** Detecting `cloudflare.proxy` does *not* imply that WAF, Bot Protection, or Turnstile are active.
 
-#### `cloudflare.waf` (Category: `waf`)
-- **Passive-Only Visibility:** WAF rules configured in `Count` / `Log` mode or rules that allow benign traffic without attaching custom headers cannot be detected on public GET requests.
-- **Custom Error Pages:** Sites that replace standard Cloudflare 403 challenge pages with custom origin error templates lacking `cf-mitigated` or Cloudflare error markup will not trigger WAF detection.
+#### `cloudflare.challenge_page` (Category: `captcha_challenge`)
+- **Product-Neutral Challenge Attribution:** `cf-mitigated: challenge` and challenge platform scripts indicate that a Cloudflare Challenge Page was served. They do *not* uniquely prove whether the challenge was triggered by WAF custom rules, Bot Fight Mode, Rate Limiting, DDoS mitigations, or Under Attack Mode.
+- **Passive-Only Visibility:** Sites that allow benign traffic without issuing an active challenge or security error code do not emit challenge mitigation headers.
 
-#### `cloudflare.bot_management` (Category: `bot_management`)
-- **Server-Side-Only Bot Management:** If Bot Management is deployed solely via Cloudflare Ruleset Engine evaluating backend heuristics without client-side JavaScript telemetry (`/cdn-cgi/challenge-platform/...`) or `__cf_bm` cookies, it is invisible to passive analysis.
-- **Cookie Disabling:** If a domain disables telemetry cookies and relies exclusively on API rate-limiting, detection is not possible on benign requests.
+#### `cloudflare.bot_protection` (Category: `bot_management`)
+- **Tier Invisibility (Bot Fight Mode vs. Enterprise Bot Management):** JavaScript Detections (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`) and `__cf_bm` cookies are shared across Bot Fight Mode (free/pro), Super Bot Fight Mode (business), and Bot Management (enterprise). Hemera intentionally asserts `Bot Protection` rather than overclaiming the enterprise-tier product.
+- **Server-Side-Only Bot Heuristics:** If bot protections are deployed solely via backend API rules without client-side JavaScript telemetry or cookies, they are invisible to passive analysis.
 
 #### `cloudflare.turnstile` (Category: `captcha_challenge`)
 - **Self-Hosted Proxy Wrappers:** If a website proxies the Turnstile client library through a first-party path (e.g. `/assets/turnstile.js`) to prevent ad-blocker filtering, passive HTTP analysis will not detect the script URL unless DOM markers (`cf-turnstile`) are present.
@@ -114,8 +114,8 @@ Consequently, Hemera's detectors rely on observable, public signals:
 | Detector Rule | Primary Limitation | Evasion / Masking Vector | Mitigation in Hemera |
 | --- | --- | --- | --- |
 | `cloudflare.proxy` | Plan tier invisibility | Strip `Server` / `cf-ray` | Fallback to DNS CNAME / TLS |
-| `cloudflare.waf` | Invisible in Count/Log mode | Custom origin error pages | Requires decisive headers / block DOM |
-| `cloudflare.bot_management` | Invisible in server-only mode | No JS telemetry / no cookie | Requires SDK script or `__cf_bm` |
+| `cloudflare.challenge_page` | Generic challenge (not WAF-specific) | Custom origin error pages | Matches official challenge headers & DOM |
+| `cloudflare.bot_protection` | Shared tier telemetry (not enterprise-only) | No JS telemetry / no cookie | Matches JSD telemetry script & `__cf_bm` |
 | `cloudflare.turnstile` | Invisible if dynamically loaded | First-party script proxy | DOM marker correlation (`cf-turnstile`) |
 | `google.recaptcha` | Unified rule across v2/v3/Enterprise | Masked via GTM tag | Supports alternate hosts & DOM markers |
 | `aws.cloudfront` | Upstream S3 header passthrough | Strip `Server` header | Exact CloudFront header matching & DNS |
