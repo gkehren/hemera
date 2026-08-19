@@ -37,7 +37,8 @@ The signatures follow the vendors' documented client integrations:
 
 Checked-in synthetic fixtures cover positive, negative, ambiguous, and
 regression cases. They run through the real HTTP analyzer without contacting
-the referenced third parties.
+the referenced third parties. Every supported detector must comply with the
+[detector family support standard](detector-support-standard.md).
 
 ## Document structure
 

@@ -189,9 +189,9 @@ confidence indicators, not calibrated probabilities.
 
 `hemera scan` evaluates the embedded rules once after aggregating HTTP, DNS/TLS,
 and browser signals, then passes the scored results to the selected reporter.
-See the
-[detector rule schema V2](docs/detector-rules.md) for the implemented contract,
-built-in rules, and scoring semantics.
+See the [detector rule schema V2](docs/detector-rules.md) and
+[detector family support standard](docs/detector-support-standard.md) for the
+implemented contract, built-in rules, quality criteria, and scoring semantics.
 
 ## Development
 
@@ -263,6 +263,7 @@ not maintain a separate implementation checklist.
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Security and ethical boundaries](docs/security-and-ethics.md)
+- [Detector family support standard](docs/detector-support-standard.md)
 
 The original product brief is available in
 [Notion](https://app.notion.com/p/3c076e148bdd812e99d6c69ac2dd7ee8).
