@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gkehren/hemera/internal/analysis"
@@ -31,15 +32,18 @@ import (
 const (
 	source = analysis.SourceHTTP
 
-	maxTotalTimeout                = 15 * time.Second
-	maxConnectTimeout              = 5 * time.Second
-	maxTLSHandshakeTimeout         = 5 * time.Second
-	maxResponseHeaderTimeout       = 5 * time.Second
-	maxRedirects                   = 10
-	maxBodyBytes             int64 = 2 << 20
-	maxResponseHeaderBytes         = 1 << 20
-	maxHTMLResources               = 4096
-	maxUserAgentBytes              = 512
+	maxTotalTimeout                  = 15 * time.Second
+	maxConnectTimeout                = 5 * time.Second
+	maxTLSHandshakeTimeout           = 5 * time.Second
+	maxResponseHeaderTimeout         = 5 * time.Second
+	maxRedirects                     = 10
+	maxBodyBytes               int64 = 2 << 20
+	maxResponseHeaderBytes           = 1 << 20
+	maxHTMLResources                 = 4096
+	maxUserAgentBytes                = 512
+	maxCertificateNameBytes          = 2048
+	maxCertificateDNSNameBytes       = 253
+	maxCertificateDNSNames           = 256
 )
 
 var (
@@ -99,6 +103,7 @@ type Result struct {
 	Signals       []model.Signal
 	BodyTruncated bool
 	Warnings      []string
+	TLS           *analysis.TLSMetadata
 }
 
 // Analyzer performs one safe HTTP navigation.
@@ -148,7 +153,7 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 	observation.Metadata.HTTP = &analysis.HTTPMetadata{
 		RequestedURL: result.RequestedURL, FinalURL: result.FinalURL,
 		StatusCode: result.StatusCode, Redirects: redirects,
-		BodyTruncated: result.BodyTruncated,
+		BodyTruncated: result.BodyTruncated, TLS: cloneTLSMetadata(result.TLS),
 	}
 	return observation, nil
 }
@@ -309,6 +314,7 @@ func validateConfig(config Config) error {
 
 func collectResponse(result *Result, resp *http.Response) error {
 	pageURL := SanitizeURL(resp.Request.URL)
+	collectTLSMetadata(result, resp.TLS)
 	if err := appendSignal(result, model.Signal{
 		Type: model.SignalTypeNetworkResponse, Source: source, Key: "status",
 		Value: strconv.Itoa(resp.StatusCode), URL: pageURL, Confidence: 1,
@@ -352,6 +358,103 @@ func collectResponse(result *Result, resp *http.Response) error {
 		}
 	}
 	return nil
+}
+
+func collectTLSMetadata(result *Result, state *tls.ConnectionState) {
+	if state == nil || !state.HandshakeComplete || len(state.PeerCertificates) == 0 {
+		result.TLS = nil
+		return
+	}
+	leaf := state.PeerCertificates[0]
+	dnsNames := make([]string, 0, len(leaf.DNSNames))
+	for _, name := range leaf.DNSNames {
+		if !validCertificateDNSName(name) {
+			appendWarningOnce(result, "malformed TLS certificate DNS names were omitted")
+			continue
+		}
+		dnsNames = append(dnsNames, name)
+	}
+	sort.Strings(dnsNames)
+	dnsNames = compactStrings(dnsNames)
+	if len(dnsNames) > maxCertificateDNSNames {
+		dnsNames = dnsNames[:maxCertificateDNSNames]
+		appendWarningOnce(result, fmt.Sprintf("TLS certificate DNS names were truncated at %d entries", maxCertificateDNSNames))
+	}
+	issuer := leaf.Issuer.String()
+	subject := leaf.Subject.String()
+	protocol := boundedCertificateText(state.NegotiatedProtocol)
+	boundedIssuer := boundedCertificateText(issuer)
+	boundedSubject := boundedCertificateText(subject)
+	if state.NegotiatedProtocol != protocol || issuer != boundedIssuer || subject != boundedSubject {
+		appendWarningOnce(result, "malformed or oversized TLS certificate properties were omitted")
+	}
+	result.TLS = &analysis.TLSMetadata{
+		Version: state.Version, NegotiatedProtocol: protocol,
+		CertificateIssuer:  boundedIssuer,
+		CertificateSubject: boundedSubject,
+		DNSNames:           append([]string{}, dnsNames...),
+	}
+}
+
+func validCertificateDNSName(value string) bool {
+	if value == "" || len(value) > maxCertificateDNSNameBytes || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) || unicode.IsSpace(character) {
+			return false
+		}
+	}
+	name := strings.TrimSuffix(strings.ToLower(value), ".")
+	labels := strings.Split(name, ".")
+	for index, label := range labels {
+		if index == 0 && label == "*" {
+			continue
+		}
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func cloneTLSMetadata(metadata *analysis.TLSMetadata) *analysis.TLSMetadata {
+	if metadata == nil {
+		return nil
+	}
+	cloned := *metadata
+	cloned.DNSNames = append([]string{}, metadata.DNSNames...)
+	return &cloned
+}
+
+func boundedCertificateText(value string) string {
+	if len(value) > maxCertificateNameBytes || !utf8.ValidString(value) {
+		return ""
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return ""
+		}
+	}
+	return value
+}
+
+func compactStrings(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	output := values[:1]
+	for _, value := range values[1:] {
+		if value != output[len(output)-1] {
+			output = append(output, value)
+		}
+	}
+	return output
 }
 
 func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL *url.URL, contentType string, body []byte) error {

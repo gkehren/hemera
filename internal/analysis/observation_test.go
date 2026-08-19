@@ -17,6 +17,7 @@ func TestObservationCloneOwnsSlicesAndMetadata(t *testing.T) {
 		Warnings: []string{"fixture warning"},
 		Metadata: Metadata{HTTP: &HTTPMetadata{
 			RequestedURL: "https://example.test/",
+			TLS:          &TLSMetadata{DNSNames: []string{"example.test"}},
 			Redirects: []HTTPRedirect{{
 				From: "https://example.test/", To: "https://example.test/final", Status: 302,
 			}},
@@ -26,9 +27,11 @@ func TestObservationCloneOwnsSlicesAndMetadata(t *testing.T) {
 	original.Signals[0].Key = "changed"
 	original.Warnings[0] = "changed"
 	original.Metadata.HTTP.Redirects[0].To = "https://changed.test/"
+	original.Metadata.HTTP.TLS.DNSNames[0] = "changed.test"
 
 	if cloned.Signals[0].Key != "src" || cloned.Warnings[0] != "fixture warning" ||
-		cloned.Metadata.HTTP.Redirects[0].To != "https://example.test/final" {
+		cloned.Metadata.HTTP.Redirects[0].To != "https://example.test/final" ||
+		cloned.Metadata.HTTP.TLS.DNSNames[0] != "example.test" {
 		t.Fatalf("Clone() retained analyzer-owned slices: %#v", cloned)
 	}
 	if !slices.Equal(cloned.Metadata.Kinds(), []MetadataKind{MetadataKindHTTP}) || cloned.Metadata.Empty() {

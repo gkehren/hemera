@@ -114,6 +114,15 @@ func TestScanAggregatesAnalyzersInConfiguredOrder(t *testing.T) {
 			if target.URL != "https://example.test/" {
 				t.Errorf("target URL = %q", target.URL)
 			}
+			if source == "static" && len(target.Prior) != 0 {
+				t.Errorf("first analyzer prior observations = %#v, want none", target.Prior)
+			}
+			if source == "dynamic" {
+				if len(target.Prior) != 1 || target.Prior[0].Source != "static" {
+					t.Fatalf("second analyzer prior observations = %#v", target.Prior)
+				}
+				target.Prior[0].Signals[0].Key = "mutated"
+			}
 			callsMu.Lock()
 			calls = append(calls, source)
 			callsMu.Unlock()
@@ -146,7 +155,8 @@ func TestScanAggregatesAnalyzersInConfiguredOrder(t *testing.T) {
 	if result.Target.URL != "https://example.test/" {
 		t.Errorf("result target = %#v", result.Target)
 	}
-	if len(result.Signals) != 2 || result.Signals[0].Source != "static" || result.Signals[1].Source != "dynamic" {
+	if len(result.Signals) != 2 || result.Signals[0].Source != "static" || result.Signals[0].Key != "script" ||
+		result.Signals[1].Source != "dynamic" {
 		t.Errorf("aggregate signals = %#v, want analyzer order", result.Signals)
 	}
 	if len(result.Analyzers) != 2 || result.Analyzers[0].Observation.Warnings[0] != "static warning" ||

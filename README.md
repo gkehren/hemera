@@ -9,9 +9,9 @@ security services.
 > Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
 > collection, detector rule matching, correlation-aware confidence scoring,
 > initial Turnstile and reCAPTCHA detectors, text/JSON reports, deterministic
-> multi-analyzer orchestration, and internal sandboxed Chromium/CDP session
-> startup are implemented. Browser page analysis, DNS and TLS analyzers, and
-> broader detector coverage are not available yet.
+> multi-analyzer orchestration, bounded DNS/TLS supporting signals, and internal
+> sandboxed Chromium/CDP session startup are implemented. Browser page analysis
+> and broader detector coverage are not available yet.
 
 ## What Hemera aims to provide
 
@@ -133,6 +133,27 @@ and a truncated body are successful observations; DNS, connection, TLS,
 timeout, read, and unsafe-redirect failures are reported as scan failures.
 
 Only scan public targets that you are authorized to assess.
+
+## Current DNS/TLS observation
+
+After a successful HTTP navigation, Hemera performs one bounded lookup for the
+final host's canonical CNAME and emits it only when it differs from the requested
+host. For HTTPS targets it also emits the negotiated TLS version and ALPN, plus
+the verified leaf certificate's issuer, subject, and up to 256 sorted DNS SANs.
+TLS data comes from the existing HTTP connection; Hemera does not create a
+second TLS connection or handshake for observation.
+
+The DNS/TLS analyzer has a two-second lookup ceiling and runs with a `continue`
+policy. A CNAME lookup failure therefore leaves reusable TLS evidence available
+and marks that analyzer as partial. The CNAME lookup cannot initiate a connection
+to its answer, while all HTTP resolution and dialing remains protected by the
+same pinned-address network policy. Intermediate CNAME hops, IP addresses, ASN
+data, and non-DNS certificate SANs are not collected.
+
+DNS and TLS properties are supporting evidence. They may strengthen a detector
+when combined with independent product-specific observations, but vendor
+infrastructure alone must not assert that a WAF or bot-management product is
+enabled.
 
 ## Current rule engine
 

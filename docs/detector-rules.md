@@ -235,6 +235,47 @@ evidence remains additive and specifying `group` on either list is rejected.
 Signal types must be valid normalized `SignalType` values. Weights are finite
 numbers greater than zero and at most 100.
 
+### DNS/TLS supporting evidence
+
+The implemented DNS/TLS analyzer emits `dns_record` with key `cname` and
+`tls_property` with keys `version`, `alpn`, `certificate_issuer`,
+`certificate_subject`, or `certificate_dns_name`. Infrastructure properties are
+generally weak, shared evidence. Give them their own correlation groups and
+combine them with independent product-specific observations. For example:
+
+```json
+{
+  "all": [
+    {
+      "signal": {
+        "id": "documented-product-script",
+        "group": "static_integration",
+        "type": "script_url",
+        "value": { "exact": "https://vendor.example/product.js" },
+        "weight": 70
+      }
+    },
+    {
+      "signal": {
+        "id": "supporting-edge-cname",
+        "group": "dns",
+        "type": "dns_record",
+        "key": { "exact": "cname" },
+        "value": { "suffix": ".edge.vendor.example" },
+        "weight": 15
+      }
+    }
+  ]
+}
+```
+
+The CNAME alone contributes only 15 points and the `all` condition prevents it
+from asserting the product without the documented integration. A shared vendor
+CNAME or certificate must never be assigned enough weight to independently
+claim that a particular WAF or bot-management product is active. Put correlated
+certificate fields in one `tls` group so issuer, subject, and SAN variants do not
+manufacture independent certainty.
+
 Each selected signal field contains exactly one text operation:
 
 - `exact`;

@@ -56,8 +56,32 @@ Configuration can only reduce these limits; it cannot raise the safety
 ceilings. Reaching the static resource limit preserves already collected
 signals, stops extraction, and emits one warning.
 
-These controls apply to the HTTP analyzer only. Browser and separate DNS/TLS
-analyzers remain planned and must establish equivalent boundaries when added.
+These connection controls apply to the HTTP analyzer and to all connection state
+reused by DNS/TLS observation. Browser navigation remains planned and must
+establish equivalent boundaries before it is enabled.
+
+### Implemented DNS/TLS boundary
+
+The DNS/TLS analyzer runs only after successful HTTP observation. It reuses the
+verified final connection's TLS state and never creates a second TLS connection,
+so certificate observation cannot bypass address pinning, SNI, certificate
+validation, or the TLS 1.2 minimum. The copied metadata is limited to the TLS
+version, ALPN, leaf issuer and subject, and at most 256 DNS SANs; raw
+certificates, IP SANs, and session material are not retained. Malformed DNS SANs
+are omitted without rewriting their contents into a different hostname.
+
+DNS observation performs one final-host CNAME lookup with a two-second hard
+ceiling. The CLI does not accept a custom resolver, proxy, or nameserver. The
+lookup records only a syntactically valid canonical DNS name and never connects
+to it, so it cannot change or weaken the validated-IP dial path. Initial and
+redirect targets, including private or mixed DNS address answers, are still
+rejected by `internal/networkguard` before the DNS/TLS analyzer can run. A local
+CNAME failure is reported as partial coverage; caller cancellation remains fatal.
+
+DNS/TLS values are deterministic, bounded supporting evidence. Product rules
+must combine weak infrastructure properties with independent product-specific
+signals rather than convert a shared CNAME or certificate into a WAF or bot-
+management assertion.
 
 ### Special-purpose address policy
 

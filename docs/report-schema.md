@@ -40,6 +40,11 @@ report and remain CLI errors on stderr.
 
 HTTP analyzer warnings are mirrored in `http.warnings` so navigation diagnostics
 remain colocated with the HTTP metadata as well as the generic coverage entry.
+The current CLI emits `http_analyzer` followed by `dns_tls_analyzer`. A failed
+CNAME lookup makes the latter `partial` when reused TLS signals remain, or
+`failed` when no signal was available. DNS/TLS signal values appear only when a
+detector matched them as evidence; the report does not otherwise add a raw
+network-observation inventory.
 
 Each detection contains identity fields, `detected`, the matching gates,
 `evidence_score`, final `score`, `level`, grouped positive/negative/ambiguous
@@ -79,6 +84,9 @@ analyzer error details. Analyzer producers must not place attacker-controlled
 content or secrets in warning strings. Resource URLs are restricted to HTTP/HTTPS
 and have user information, fragments, and query values removed or masked. Empty
 arrays are encoded as `[]`, not `null`, to keep automation deterministic.
+Matched DNS names and bounded TLS properties may be included as explanatory
+evidence. Their producers reject control characters and bound certificate-derived
+values before they reach reporting.
 
 ## Compatibility
 

@@ -85,10 +85,29 @@ signals; connection, TLS, timeout, header, and body-read failures remain fatal.
 
 ### DNS / TLS analyzer
 
-This analyzer may collect CNAME records, relevant provider or ASN hints, and TLS
-certificate properties such as issuer and SANs. These are generally supporting
-signals and should not independently prove that a precise bot-management product
-is active.
+`internal/dnstls` runs after the HTTP analyzer and emits normalized
+`dns_record` and `tls_property` signals under the stable `dns_tls_analyzer`
+source. It performs one cancellable CNAME lookup, limited to two seconds, for the
+final HTTP host. A `cname` signal is emitted only when the canonical target
+differs from that host. Go's resolver exposes the final canonical name rather
+than every intermediate alias, so intermediate CNAME hops are not collected.
+
+For HTTPS, the HTTP analyzer copies a bounded scalar snapshot from the verified
+final `resp.TLS` state into typed HTTP metadata. The DNS/TLS analyzer turns that
+snapshot into signals in this fixed order: TLS version, negotiated ALPN when
+present, leaf certificate issuer, leaf certificate subject, and sorted unique
+DNS SANs. DNS signals precede TLS signals. At most 256 DNS SANs are retained;
+SANs with whitespace, control characters, or invalid DNS label syntax are
+omitted rather than rewritten. Other certificate text values containing control
+characters or exceeding 2,048 bytes are also omitted. IP addresses, non-DNS
+SANs, certificate bodies, ASN hints, and provider enrichment are not collected.
+
+This boundary deliberately performs no TLS dial or handshake. It reuses the
+HTTP connection state, so the default scan still makes only the connections
+required for HTTP navigation. A CNAME failure is non-fatal: already derived TLS
+signals remain as a partial observation and scanner cancellation remains fatal.
+DNS and TLS signals are supporting evidence and must not independently prove
+that a precise bot-management or WAF product is active.
 
 ### Browser analyzer
 
@@ -157,10 +176,11 @@ type Observation struct {
 ```
 
 `Metadata` currently has an optional `HTTPMetadata` member for the requested and
-final URLs, status, redirects, and body-truncation state. This information is
-diagnostic and does not become detector evidence unless an analyzer separately
-emits an appropriate normalized signal. Future source-specific metadata must add
-a bounded typed member; opaque `map[string]any` payloads are not part of the
+final URLs, status, redirects, body-truncation state, and a bounded TLS snapshot
+from the verified final connection. This information is diagnostic and does not
+become detector evidence unless the DNS/TLS analyzer separately emits an
+appropriate normalized signal. Future source-specific metadata must add a
+bounded typed member; opaque `map[string]any` payloads are not part of the
 contract.
 
 ### Detection rules
@@ -264,9 +284,11 @@ Successful observations may contain analyzer-local warnings without becoming
 partial. The scanner retains local errors for internal diagnostics, but reporters
 omit their text because it may contain untrusted input.
 
-The current CLI configures only the HTTP analyzer with `abort`. Synthetic scanner
-tests use multiple independent analyzers; DNS/TLS and browser collection are not
-yet connected.
+Before each analyzer runs, the scanner supplies cloned observations from earlier
+analyzers in `analysis.Target.Prior`. This preserves configured ordering and lets
+later analyzers reuse bounded typed metadata without implementation-specific
+dependencies or mutable aliasing. The current CLI configures HTTP first with
+`abort`, then DNS/TLS with `continue`. Browser collection is not yet connected.
 
 `internal/report` converts scanner results into a secret-minimized report model.
 The CLI renders that model as text by default or as stable, versioned JSON with
@@ -287,7 +309,7 @@ internal/analysis/        shared observations and typed analyzer metadata
 internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
 internal/browser/         Chromium/CDP session lifecycle; collection planned
-internal/dns/             DNS and TLS collection
+internal/dnstls/          DNS/TLS normalization and bounded CNAME observation
 internal/signals/         normalization
 internal/rules/           rule loading and matching
 internal/scoring/         confidence calculation

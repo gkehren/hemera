@@ -232,6 +232,22 @@ func TestBuildKeepsPartialEvidenceRawButNotContributing(t *testing.T) {
 	}
 }
 
+func TestSafeValueExposesSanitizedDNSTLSProperties(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		signal model.Signal
+		want   string
+	}{
+		{signal: model.Signal{Type: model.SignalTypeDNSRecord, Value: "edge.example.net"}, want: "edge.example.net"},
+		{signal: model.Signal{Type: model.SignalTypeDNSRecord, Value: "edge.example.net\nspoofed"}, want: ""},
+		{signal: model.Signal{Type: model.SignalTypeTLSProperty, Value: "TLS 1.3\r"}, want: ""},
+	} {
+		if got := safeValue(testCase.signal); got != testCase.want {
+			t.Errorf("safeValue(%#v) = %q, want %q", testCase.signal, got, testCase.want)
+		}
+	}
+}
+
 func TestBuildCopiesScoringContributions(t *testing.T) {
 	t.Parallel()
 	report := Build("dev", scanner.Result{Detections: []scoring.Detection{{

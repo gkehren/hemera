@@ -155,12 +155,12 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		Signals:   make([]model.Signal, 0),
 	}
 	metadataSources := make(map[analysis.MetadataKind]string)
-	target := result.Target
 	for _, configured := range s.analyzers {
 		if err := ctx.Err(); err != nil {
 			return Result{}, fmt.Errorf("scan canceled before analyzer %q: %w", configured.source, err)
 		}
 
+		target := analysis.Target{URL: result.Target.URL, Prior: priorObservations(result.Analyzers)}
 		observation, analyzerErr := configured.analyzer.Observe(ctx, target)
 		if err := ctx.Err(); err != nil {
 			return Result{}, fmt.Errorf("analyzer %q canceled: %w", configured.source, errors.Join(analyzerErr, err))
@@ -208,6 +208,14 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 	}
 	result.Detections = detections
 	return result, nil
+}
+
+func priorObservations(results []AnalyzerResult) []analysis.Observation {
+	prior := make([]analysis.Observation, 0, len(results))
+	for _, result := range results {
+		prior = append(prior, result.Observation.Clone())
+	}
+	return prior
 }
 
 func validateObservation(source string, observation analysis.Observation) error {
