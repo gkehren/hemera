@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "tool_version": "1.2.3",
   "requested_url": "https://example.test/start?redacted",
   "final_url": "https://example.test/final?redacted",
@@ -17,6 +17,15 @@
       "response body was truncated at 2097152 bytes"
     ]
   },
+  "analyzers": [
+    {
+      "source": "http_analyzer",
+      "status": "complete",
+      "warnings": [
+        "response body was truncated at 2097152 bytes"
+      ]
+    }
+  ],
   "detections": [
     {
       "id": "test.complete",

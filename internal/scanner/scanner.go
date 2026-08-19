@@ -5,54 +5,225 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
-	"github.com/gkehren/hemera/internal/httpanalyzer"
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/rules"
 	"github.com/gkehren/hemera/internal/scoring"
+	"github.com/gkehren/hemera/pkg/model"
 )
 
 var (
 	// ErrInvalidConfig identifies missing or invalid scanner dependencies.
 	ErrInvalidConfig = errors.New("invalid scanner configuration")
+	// ErrInvalidObservation identifies an analyzer contract violation.
+	ErrInvalidObservation = errors.New("invalid analyzer observation")
 )
 
-// HTTPAnalyzer is the observation boundary required by Scanner.
-type HTTPAnalyzer interface {
-	Analyze(context.Context, string) (httpanalyzer.Result, error)
+// FailurePolicy defines whether an analyzer-local error aborts the scan or
+// preserves any valid partial observation and continues.
+type FailurePolicy uint8
+
+const (
+	// FailurePolicyAbort makes an analyzer error fatal to the complete scan.
+	FailurePolicyAbort FailurePolicy = iota
+	// FailurePolicyContinue records a partial or failed analyzer outcome and
+	// continues with the remaining analyzers.
+	FailurePolicyContinue
+)
+
+// Analyzer is the observation boundary required by Scanner.
+type Analyzer interface {
+	Source() string
+	Observe(context.Context, analysis.Target) (analysis.Observation, error)
 }
 
-// Result contains raw HTTP observations and scored detector results.
+// AnalyzerConfig binds one analyzer to its local failure policy. Entries run
+// sequentially in slice order.
+type AnalyzerConfig struct {
+	Analyzer      Analyzer
+	FailurePolicy FailurePolicy
+}
+
+// Config contains the ordered analyzer pipeline and validated detector rules.
+type Config struct {
+	Analyzers []AnalyzerConfig
+	RuleSet   rules.RuleSet
+}
+
+// AnalyzerStatus describes the coverage produced by one analyzer run.
+type AnalyzerStatus string
+
+const (
+	// AnalyzerStatusComplete means the analyzer returned without an error.
+	AnalyzerStatusComplete AnalyzerStatus = "complete"
+	// AnalyzerStatusPartial means the analyzer returned useful observations and
+	// a non-fatal local error.
+	AnalyzerStatusPartial AnalyzerStatus = "partial"
+	// AnalyzerStatusFailed means a non-fatal local error produced no signals or
+	// source-specific metadata.
+	AnalyzerStatusFailed AnalyzerStatus = "failed"
+)
+
+// AnalyzerResult records one analyzer's observation and coverage status. Err is
+// retained for diagnostics but reporters decide what is safe to disclose.
+type AnalyzerResult struct {
+	Observation analysis.Observation
+	Status      AnalyzerStatus
+	Err         error
+}
+
+// Result contains ordered analyzer outcomes, their aggregate normalized
+// signals, and scored detector results.
 type Result struct {
-	HTTP       httpanalyzer.Result
+	Target     analysis.Target
+	Analyzers  []AnalyzerResult
+	Signals    []model.Signal
 	Detections []scoring.Detection
 }
 
-// Scanner coordinates one analyzer and a validated detector rule set.
-type Scanner struct {
-	analyzer HTTPAnalyzer
-	ruleSet  rules.RuleSet
+type configuredAnalyzer struct {
+	analyzer Analyzer
+	source   string
+	policy   FailurePolicy
 }
 
-// New validates the scanner dependencies.
-func New(analyzer HTTPAnalyzer, ruleSet rules.RuleSet) (*Scanner, error) {
-	if analyzer == nil {
-		return nil, fmt.Errorf("%w: HTTP analyzer is required", ErrInvalidConfig)
+// Scanner coordinates an ordered analyzer pipeline and validated detector rules.
+type Scanner struct {
+	analyzers []configuredAnalyzer
+	ruleSet   rules.RuleSet
+}
+
+// New validates the scanner dependencies and freezes analyzer order and source
+// identities for subsequent scans.
+func New(config Config) (*Scanner, error) {
+	if len(config.Analyzers) == 0 {
+		return nil, fmt.Errorf("%w: at least one analyzer is required", ErrInvalidConfig)
 	}
-	if err := ruleSet.Validate(); err != nil {
+	if err := config.RuleSet.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: detector rules: %w", ErrInvalidConfig, err)
 	}
-	return &Scanner{analyzer: analyzer, ruleSet: ruleSet}, nil
+
+	configured := make([]configuredAnalyzer, 0, len(config.Analyzers))
+	sources := make(map[string]struct{}, len(config.Analyzers))
+	for index, entry := range config.Analyzers {
+		if analyzerIsNil(entry.Analyzer) {
+			return nil, fmt.Errorf("%w: analyzer %d is required", ErrInvalidConfig, index)
+		}
+		if entry.FailurePolicy != FailurePolicyAbort && entry.FailurePolicy != FailurePolicyContinue {
+			return nil, fmt.Errorf("%w: analyzer %d has unsupported failure policy %d", ErrInvalidConfig, index, entry.FailurePolicy)
+		}
+		rawSource := entry.Analyzer.Source()
+		source := strings.TrimSpace(rawSource)
+		if source == "" {
+			return nil, fmt.Errorf("%w: analyzer %d source is required", ErrInvalidConfig, index)
+		}
+		if source != rawSource {
+			return nil, fmt.Errorf("%w: analyzer %d source must not contain surrounding whitespace", ErrInvalidConfig, index)
+		}
+		if _, exists := sources[source]; exists {
+			return nil, fmt.Errorf("%w: duplicate analyzer source %q", ErrInvalidConfig, source)
+		}
+		sources[source] = struct{}{}
+		configured = append(configured, configuredAnalyzer{
+			analyzer: entry.Analyzer, source: source, policy: entry.FailurePolicy,
+		})
+	}
+
+	return &Scanner{analyzers: configured, ruleSet: config.RuleSet}, nil
 }
 
-// Scan performs one HTTP analysis and evaluates every configured detector.
-func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
-	httpResult, err := s.analyzer.Analyze(ctx, rawURL)
-	if err != nil {
-		return Result{}, err
+func analyzerIsNil(analyzer Analyzer) bool {
+	if analyzer == nil {
+		return true
 	}
-	detections, err := scoring.Evaluate(s.ruleSet, httpResult.Signals)
+	value := reflect.ValueOf(analyzer)
+	return value.Kind() == reflect.Pointer && value.IsNil()
+}
+
+// Scan runs configured analyzers sequentially, validates and aggregates every
+// signal in analyzer order, then evaluates all detector rules once.
+func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, fmt.Errorf("scan canceled: %w", err)
+	}
+
+	result := Result{
+		Target:    analysis.Target{URL: rawURL},
+		Analyzers: make([]AnalyzerResult, 0, len(s.analyzers)),
+		Signals:   make([]model.Signal, 0),
+	}
+	metadataSources := make(map[analysis.MetadataKind]string)
+	target := result.Target
+	for _, configured := range s.analyzers {
+		if err := ctx.Err(); err != nil {
+			return Result{}, fmt.Errorf("scan canceled before analyzer %q: %w", configured.source, err)
+		}
+
+		observation, analyzerErr := configured.analyzer.Observe(ctx, target)
+		if err := ctx.Err(); err != nil {
+			return Result{}, fmt.Errorf("analyzer %q canceled: %w", configured.source, errors.Join(analyzerErr, err))
+		}
+		if err := validateObservation(configured.source, observation); err != nil {
+			return Result{}, err
+		}
+		for _, kind := range observation.Metadata.Kinds() {
+			if previousSource, exists := metadataSources[kind]; exists {
+				return Result{}, fmt.Errorf(
+					"%w: analyzers %q and %q produced duplicate %s metadata",
+					ErrInvalidObservation, previousSource, configured.source, kind,
+				)
+			}
+			metadataSources[kind] = configured.source
+		}
+
+		observation = observation.Clone()
+		status := AnalyzerStatusComplete
+		if analyzerErr != nil {
+			if configured.policy == FailurePolicyAbort {
+				return Result{}, fmt.Errorf("analyzer %q: %w", configured.source, analyzerErr)
+			}
+			status = AnalyzerStatusFailed
+			if len(observation.Signals) > 0 || !observation.Metadata.Empty() {
+				status = AnalyzerStatusPartial
+			}
+		}
+
+		result.Analyzers = append(result.Analyzers, AnalyzerResult{
+			Observation: observation, Status: status, Err: analyzerErr,
+		})
+		result.Signals = append(result.Signals, observation.Signals...)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return Result{}, fmt.Errorf("scan canceled before detector evaluation: %w", err)
+	}
+	detections, err := scoring.Evaluate(s.ruleSet, result.Signals)
 	if err != nil {
 		return Result{}, fmt.Errorf("evaluate detectors: %w", err)
 	}
-	return Result{HTTP: httpResult, Detections: detections}, nil
+	if err := ctx.Err(); err != nil {
+		return Result{}, fmt.Errorf("scan canceled during detector evaluation: %w", err)
+	}
+	result.Detections = detections
+	return result, nil
+}
+
+func validateObservation(source string, observation analysis.Observation) error {
+	if observation.Source != source {
+		return fmt.Errorf("%w: analyzer %q returned source %q", ErrInvalidObservation, source, observation.Source)
+	}
+	for index, signal := range observation.Signals {
+		if err := signal.Validate(); err != nil {
+			return fmt.Errorf("%w: analyzer %q signal %d: %w", ErrInvalidObservation, source, index, err)
+		}
+		if signal.Source != source {
+			return fmt.Errorf(
+				"%w: analyzer %q signal %d returned source %q",
+				ErrInvalidObservation, source, index, signal.Source,
+			)
+		}
+	}
+	return nil
 }

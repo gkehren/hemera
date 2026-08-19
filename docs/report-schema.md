@@ -1,8 +1,8 @@
-# JSON report schema V2
+# JSON report schema V3
 
 `hemera scan --format json <url>` writes one JSON document to stdout. Input and
 scan errors are written to stderr and do not enter the JSON document. The
-top-level `schema_version` is the compatibility boundary; it is currently `2`.
+top-level `schema_version` is the compatibility boundary; it is currently `3`.
 
 ## Top-level fields
 
@@ -11,12 +11,35 @@ top-level `schema_version` is the compatibility boundary; it is currently `2`.
 | `schema_version` | integer | Report contract version. |
 | `tool_version` | string | Hemera binary version. |
 | `requested_url` | string | Initial URL with query values masked. |
-| `final_url` | string | Final URL with query values masked. |
-| `http` | object | Final status, truncation, redirects, and warnings. |
+| `final_url` | string or null | Final observed HTTP URL with query values masked, or `null` when unavailable. |
+| `http` | object or null | Final HTTP status, truncation, redirects, and warnings, or `null` when unavailable. |
+| `analyzers` | array | Ordered analyzer coverage and sanitized warnings. |
 | `detections` | array | One explained result for every embedded rule, in rule order. |
 
-The `http` object contains `status_code`, `body_truncated`, `redirects`, and
-`warnings`. Redirect objects contain `from`, `to`, and `status`.
+When HTTP metadata is available, the `http` object contains `status_code`,
+`body_truncated`, `redirects`, and `warnings`. Redirect objects contain `from`,
+`to`, and `status`. If no HTTP analyzer ran or an analyzer configured to continue
+failed before producing HTTP metadata, both `http` and `final_url` are `null`;
+the report never substitutes status `0` or an empty final URL.
+
+Each `analyzers` entry contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `source` | string | Stable analyzer identity. |
+| `status` | string | `complete`, `partial`, or `failed`. |
+| `warnings` | string array | Producer-sanitized source-local warnings. |
+
+Analyzer entries retain scanner configuration order. `complete` means the
+analyzer returned without an error, even if it emitted warnings. `partial` means
+an explicitly non-fatal local error left usable signals or typed metadata;
+`failed` means that no usable observation was returned. Analyzer error text is
+not serialized because it may contain attacker-controlled URLs or other
+untrusted data. Fatal analyzer failures and caller cancellation produce no JSON
+report and remain CLI errors on stderr.
+
+HTTP analyzer warnings are mirrored in `http.warnings` so navigation diagnostics
+remain colocated with the HTTP metadata as well as the generic coverage entry.
 
 Each detection contains identity fields, `detected`, the matching gates,
 `evidence_score`, final `score`, `level`, grouped positive/negative/ambiguous
@@ -51,22 +74,29 @@ calibrated probabilities.
 
 ## Data minimization
 
-Reporters never include page content or response-header and cookie values.
-Resource URLs are restricted to HTTP/HTTPS and have user information, fragments,
-and query values removed or masked. Empty arrays are encoded as `[]`, not
-`null`, to keep automation deterministic.
+Reporters never include page content, response-header and cookie values, or raw
+analyzer error details. Analyzer producers must not place attacker-controlled
+content or secrets in warning strings. Resource URLs are restricted to HTTP/HTTPS
+and have user information, fragments, and query values removed or masked. Empty
+arrays are encoded as `[]`, not `null`, to keep automation deterministic.
 
 ## Compatibility
 
-Fields documented here use `snake_case`. Report V2 was introduced because
-correlation changes the meaning of positive evidence `contribution`: in V1 every
-matched predicate exposed its weighted value, while V2 exposes zero for a
-non-selected correlated predicate and retains that weighted value in
-`raw_contribution`. V2 also adds positive evidence `group` and
-`positive_evidence_groups`.
+Fields documented here use `snake_case`. Report V3 adds the required `analyzers`
+array so partial multi-analyzer coverage is explicit and deterministic. It also
+allows `final_url` and `http` to be `null` when HTTP observations are unavailable;
+V2 always emitted a string and object because it only supported HTTP scans. V2
+consumers must not interpret V3 as V2. Detection and scoring fields retain their
+V2 semantics.
 
-Consumers must dispatch on `schema_version` instead of interpreting V2 as V1.
-The current CLI emits V2; it does not offer a V1 output mode. Additive V2 fields
-may be introduced only when existing consumers can safely ignore them. Removing
-a field, changing its meaning or type, or changing the interpretation of existing
-values requires a new `schema_version` and migration documentation.
+Report V2 was introduced because correlation changed the meaning of positive
+evidence `contribution`: in V1 every matched predicate exposed its weighted
+value, while V2 exposes zero for a non-selected correlated predicate and retains
+that weighted value in `raw_contribution`. V2 also added positive evidence
+`group` and `positive_evidence_groups`.
+
+Consumers must dispatch on `schema_version`. The current CLI emits V3; it does
+not offer an older output mode. Additive V3 fields may be introduced only when
+existing consumers can safely ignore them. Removing a field, changing its
+meaning or type, or changing the interpretation of existing values requires a
+new `schema_version` and migration documentation.

@@ -114,7 +114,11 @@ information and fragments. They may expose cookie and header names as evidence,
 but never their values, and never expose collected HTML. Internally, HTTP signals
 omit cookie values and redact authorization-, cookie-, token-, secret-,
 authentication-, and API-key-bearing header values. Reports are produced in
-memory and the scanner does not persist results.
+memory and the scanner does not persist results. Multi-analyzer reports expose
+each source's coverage status and producer-sanitized warnings, but omit retained
+analyzer error details because those errors can contain attacker-controlled URLs
+or other untrusted data. Analyzer warnings must never include raw attacker input
+or secrets.
 
 Detector documents are also treated as untrusted local input. JSON decoding
 rejects unknown fields and unsupported versions and bounds document size, rule

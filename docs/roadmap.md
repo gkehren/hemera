@@ -36,7 +36,7 @@ prerequisites.
 
 - [x] Prevent correlated observations from being counted as independent proof
   in confidence scores ([issue #2](https://github.com/gkehren/hemera/issues/2)).
-- [ ] Decouple scanner orchestration from `httpanalyzer.Result` and define
+- [x] Decouple scanner orchestration from `httpanalyzer.Result` and define
   deterministic multi-analyzer aggregation and partial-failure semantics
   ([issue #3](https://github.com/gkehren/hemera/issues/3)).
 - [ ] Define the DNS/TLS observation contract and its place in the shared

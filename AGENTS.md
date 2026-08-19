@@ -48,7 +48,8 @@ Hemera is in early development. The repository currently contains:
   tests, without browser navigation or signal capture;
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
-- human-readable and stable JSON V2 reports;
+- deterministic multi-analyzer orchestration and typed HTTP metadata;
+- human-readable and stable JSON V3 reports;
 - deterministic unit, integration, security, and detector fixture tests;
 - baseline GitHub Actions checks on Linux, macOS, and Windows.
 

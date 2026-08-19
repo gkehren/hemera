@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/rules"
 	"github.com/gkehren/hemera/internal/scanner"
 	"github.com/gkehren/hemera/internal/scoring"
@@ -17,7 +18,7 @@ import (
 
 const (
 	// SchemaVersion identifies the stable JSON report contract.
-	SchemaVersion = 2
+	SchemaVersion = 3
 )
 
 // Report is the stable representation shared by text and JSON renderers.
@@ -25,8 +26,9 @@ type Report struct {
 	SchemaVersion int               `json:"schema_version"`
 	ToolVersion   string            `json:"tool_version"`
 	RequestedURL  string            `json:"requested_url"`
-	FinalURL      string            `json:"final_url"`
-	HTTP          HTTP              `json:"http"`
+	FinalURL      *string           `json:"final_url"`
+	HTTP          *HTTP             `json:"http"`
+	Analyzers     []AnalyzerReport  `json:"analyzers"`
 	Detections    []DetectionReport `json:"detections"`
 }
 
@@ -43,6 +45,14 @@ type Redirect struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Status int    `json:"status"`
+}
+
+// AnalyzerReport describes deterministic observation coverage without exposing
+// analyzer error details that may contain untrusted input.
+type AnalyzerReport struct {
+	Source   string                 `json:"source"`
+	Status   scanner.AnalyzerStatus `json:"status"`
+	Warnings []string               `json:"warnings"`
 }
 
 // DetectionReport is one fully explained detector result.
@@ -106,22 +116,43 @@ type ConflictReport struct {
 
 // Build converts internal scan state into a secret-minimized report.
 func Build(toolVersion string, result scanner.Result) Report {
+	var httpMetadata *HTTP
+	requestedURL := sanitizeURL(result.Target.URL)
+	var finalURL *string
+	analyzers := make([]AnalyzerReport, 0, len(result.Analyzers))
+	for _, analyzerResult := range result.Analyzers {
+		observation := analyzerResult.Observation
+		analyzers = append(analyzers, AnalyzerReport{
+			Source: observation.Source, Status: analyzerResult.Status,
+			Warnings: append([]string{}, observation.Warnings...),
+		})
+		if observation.Metadata.HTTP == nil {
+			continue
+		}
+		metadata := observation.Metadata.HTTP
+		requestedURL = sanitizeURL(metadata.RequestedURL)
+		if sanitizedFinalURL := sanitizeURL(metadata.FinalURL); sanitizedFinalURL != "" {
+			finalURL = &sanitizedFinalURL
+		}
+		httpMetadata = &HTTP{
+			StatusCode: metadata.StatusCode, BodyTruncated: metadata.BodyTruncated,
+			Redirects: make([]Redirect, 0, len(metadata.Redirects)),
+			Warnings:  append([]string{}, observation.Warnings...),
+		}
+		for _, redirect := range metadata.Redirects {
+			httpMetadata.Redirects = append(httpMetadata.Redirects, Redirect{
+				From: sanitizeURL(redirect.From), To: sanitizeURL(redirect.To), Status: redirect.Status,
+			})
+		}
+	}
 	report := Report{
 		SchemaVersion: SchemaVersion,
 		ToolVersion:   toolVersion,
-		RequestedURL:  sanitizeURL(result.HTTP.RequestedURL),
-		FinalURL:      sanitizeURL(result.HTTP.FinalURL),
-		HTTP: HTTP{
-			StatusCode: result.HTTP.StatusCode, BodyTruncated: result.HTTP.BodyTruncated,
-			Redirects: make([]Redirect, 0, len(result.HTTP.Redirects)),
-			Warnings:  append([]string{}, result.HTTP.Warnings...),
-		},
-		Detections: make([]DetectionReport, 0, len(result.Detections)),
-	}
-	for _, redirect := range result.HTTP.Redirects {
-		report.HTTP.Redirects = append(report.HTTP.Redirects, Redirect{
-			From: sanitizeURL(redirect.From), To: sanitizeURL(redirect.To), Status: redirect.Status,
-		})
+		RequestedURL:  requestedURL,
+		FinalURL:      finalURL,
+		HTTP:          httpMetadata,
+		Analyzers:     analyzers,
+		Detections:    make([]DetectionReport, 0, len(result.Detections)),
 	}
 	for _, detection := range result.Detections {
 		report.Detections = append(report.Detections, buildDetection(detection))
@@ -142,15 +173,22 @@ func WriteJSON(writer io.Writer, report Report) error {
 // WriteText renders one human-readable report.
 func WriteText(writer io.Writer, report Report) error {
 	var output strings.Builder
-	fmt.Fprintf(&output, "Hemera scan report\nTarget: %s\nFinal URL: %s\nHTTP status: %d\n",
-		report.RequestedURL, report.FinalURL, report.HTTP.StatusCode)
-	if report.HTTP.BodyTruncated {
-		fmt.Fprintln(&output, "Body: truncated")
-	}
-	if len(report.HTTP.Redirects) > 0 {
-		fmt.Fprintln(&output, "Redirects:")
-		for _, redirect := range report.HTTP.Redirects {
-			fmt.Fprintf(&output, "  %d %s -> %s\n", redirect.Status, redirect.From, redirect.To)
+	fmt.Fprintf(&output, "Hemera scan report\nTarget: %s\n", report.RequestedURL)
+	if report.HTTP == nil {
+		fmt.Fprintln(&output, "HTTP observation: unavailable")
+	} else {
+		if report.FinalURL != nil {
+			fmt.Fprintf(&output, "Final URL: %s\n", *report.FinalURL)
+		}
+		fmt.Fprintf(&output, "HTTP status: %d\n", report.HTTP.StatusCode)
+		if report.HTTP.BodyTruncated {
+			fmt.Fprintln(&output, "Body: truncated")
+		}
+		if len(report.HTTP.Redirects) > 0 {
+			fmt.Fprintln(&output, "Redirects:")
+			for _, redirect := range report.HTTP.Redirects {
+				fmt.Fprintf(&output, "  %d %s -> %s\n", redirect.Status, redirect.From, redirect.To)
+			}
 		}
 	}
 	fmt.Fprintln(&output, "\nDetections:")
@@ -179,16 +217,35 @@ func WriteText(writer io.Writer, report Report) error {
 	if notDetected == 0 {
 		fmt.Fprintln(&output, "  (none)")
 	}
-	if len(report.HTTP.Warnings) > 0 {
+	if report.HTTP != nil && len(report.HTTP.Warnings) > 0 {
 		fmt.Fprintln(&output, "\nWarnings:")
 		for _, warning := range report.HTTP.Warnings {
 			fmt.Fprintf(&output, "  - %s\n", warning)
 		}
 	}
+	writeIncompleteAnalyzers(&output, report.Analyzers)
 	if _, err := io.WriteString(writer, output.String()); err != nil {
 		return fmt.Errorf("write text report: %w", err)
 	}
 	return nil
+}
+
+func writeIncompleteAnalyzers(output *strings.Builder, analyzers []AnalyzerReport) {
+	printedHeader := false
+	for _, analyzer := range analyzers {
+		if analyzer.Status == scanner.AnalyzerStatusComplete &&
+			(analyzer.Source == analysis.SourceHTTP || len(analyzer.Warnings) == 0) {
+			continue
+		}
+		if !printedHeader {
+			fmt.Fprintln(output, "\nAnalyzer coverage:")
+			printedHeader = true
+		}
+		fmt.Fprintf(output, "  %s: %s\n", analyzer.Source, analyzer.Status)
+		for _, warning := range analyzer.Warnings {
+			fmt.Fprintf(output, "    - %s\n", warning)
+		}
+	}
 }
 
 func buildDetection(detection scoring.Detection) DetectionReport {
