@@ -136,7 +136,126 @@ flowchart TD
 
 The following detector families currently meet the support standard:
 
-### 1. Cloudflare Turnstile (`cloudflare.turnstile`)
+### 1. Cloudflare Reverse Proxy (`cloudflare.proxy`)
+
+- **Category:** `cdn_reverse_proxy`
+- **Vendor:** `Cloudflare`
+- **Product:** (Vendor-level infrastructure)
+- **Rule ID:** `cloudflare.proxy`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cloudflare-server-header` | `response_headers` | `response_header` | `Server: cloudflare` | 75 | Decisive | Standard Cloudflare edge proxy server banner. |
+| `cloudflare-ray-header` | `response_headers` | `response_header` | `cf-ray` | 75 | Decisive | Unique Ray ID assigned by Cloudflare edge for request tracking. |
+| `cloudflare-cache-header` | `response_headers` | `response_header` | `cf-cache-status` | 35 | Supporting | Edge caching diagnostic header. |
+| `cloudflare-cname` | `dns` | `dns_record` | `cname` suffix `.cloudflare.net` or `.cdn.cloudflare.net` | 30 | Supporting | Canonical DNS edge routing record. |
+| `cloudflare-cert-issuer` | `tls` | `tls_property` | `certificate_issuer` contains `Cloudflare` | 20 | Supporting | Universal SSL certificate issuer. |
+| `cloudflare-clearance-cookie` | `cookies` | `cookie` | `cf_clearance` | 25 | Supporting | Edge clearance cookie. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- Either decisive header (`Server: cloudflare` or `cf-ray`) independently reaches 75 points.
+- Supporting DNS/TLS and caching signals provide corroboration if headers are stripped.
+- All response headers share the `response_headers` group so their contribution is `max(75, 75, 35) = 75`.
+
+#### Vendor vs. product separation
+
+- Detection of Cloudflare Reverse Proxy indicates edge infrastructure routing only. It does **not** imply that Cloudflare WAF, Cloudflare Bot Management, or Cloudflare Turnstile is active.
+
+#### Fixture coverage
+
+- **Positive:** `cloudflare-proxy-positive.html` &mdash; returns `Server: cloudflare` and `cf-ray` (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Ambiguous / clean:** `ambiguous-markers.html` &mdash; (`score: 0`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Custom reverse proxies mirroring `Server: cloudflare` or proxying through Cloudflare without edge termination.
+- **Known false negatives:** Complete white-labeling stripping `Server` and `cf-ray` headers on custom enterprise plans.
+
+---
+
+### 2. Cloudflare WAF (`cloudflare.waf`)
+
+- **Category:** `waf`
+- **Vendor:** `Cloudflare`
+- **Product:** `WAF`
+- **Rule ID:** `cloudflare.waf`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cloudflare-waf-mitigated-header` | `response_headers` | `response_header` | `cf-mitigated: challenge` | 75 | Decisive | Cloudflare WAF mitigation header emitted on challenge responses. |
+| `cloudflare-waf-error-header` | `response_headers` | `response_header` | `cf-error-code` | 75 | Decisive | Security error code header emitted on WAF blocks (e.g. 1020, 1015). |
+| `cloudflare-waf-block-page` | `static_integration` | `page_content` | `Attention Required! \| Cloudflare` or `cf-error-details` | 75 | Decisive | Standard Cloudflare WAF block and challenge page HTML structure. |
+| `cloudflare-waf-challenge-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1` | 75 | Decisive | Managed challenge orchestration script URL. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- Mitigation headers or block page content reach 75 points (`high`).
+
+#### Vendor vs. product separation
+
+- Detection of Cloudflare WAF requires explicit WAF mitigation headers or block/challenge page DOM markers. `cloudflare.proxy` alone never triggers `cloudflare.waf`.
+
+#### Fixture coverage
+
+- **Positive:** `cloudflare-waf-challenge.html` &mdash; 403 status with `cf-mitigated: challenge` and WAF block page DOM (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; normal proxied page without WAF challenge (`score: 0`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Documentation pages quoting Cloudflare block page HTML verbatim without 403 status.
+- **Known false negatives:** Silent WAF rules configured to allow or log traffic without active mitigation or challenge.
+
+---
+
+### 3. Cloudflare Bot Management (`cloudflare.bot_management`)
+
+- **Category:** `bot_management`
+- **Vendor:** `Cloudflare`
+- **Product:** `Bot Management`
+- **Rule ID:** `cloudflare.bot_management`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cloudflare-bot-telemetry-script` | `static_integration` | `script_url` | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` or `invisible.js` | 75 | Decisive | JavaScript Detections (JSD) telemetry script injected by Bot Management/Bot Fight Mode. |
+| `cloudflare-bot-cookie` | `cookies` | `cookie` | `__cf_bm` | 40 | Supporting | Bot score tracking cookie set on requests. |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 1 group.
+- `requires`: `["cloudflare.proxy"]` &mdash; Bot Management operates on Cloudflare proxy infrastructure.
+- The JSD telemetry script provides 75 points (`high`).
+- The `__cf_bm` cookie alone provides 40 points (`low`), resulting in `not_detected` without telemetry script.
+
+#### Vendor vs. product separation
+
+- Requires both `cloudflare.proxy` presence and specific Bot Management telemetry evidence. A standard Cloudflare proxy setup without Bot Management JS does not detect `cloudflare.bot_management`.
+
+#### Fixture coverage
+
+- **Positive:** `cloudflare-bot-management-positive.html` &mdash; proxied page with `__cf_bm` cookie and `/cdn-cgi/challenge-platform/scripts/jsd/main.js` (`score: 75`, `level: high`, `detected: true`).
+- **Hard negative:** `cloudflare-proxy-positive.html` &mdash; proxied page without Bot Management telemetry (`score: 0`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible.
+- **Known false negatives:** API endpoints protected by server-side Bot Management without client-side JavaScript injection.
+
+---
+
+### 4. Cloudflare Turnstile (`cloudflare.turnstile`)
 
 - **Category:** `captcha_challenge`
 - **Vendor:** `Cloudflare`
@@ -189,7 +308,7 @@ The following detector families currently meet the support standard:
 
 ---
 
-### 2. Google reCAPTCHA (`google.recaptcha`)
+### 5. Google reCAPTCHA (`google.recaptcha`)
 
 - **Category:** `captcha_challenge`
 - **Vendor:** `Google`

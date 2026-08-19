@@ -2,6 +2,235 @@
   "schema_version": 2,
   "rules": [
     {
+      "id": "cloudflare.proxy",
+      "name": "Cloudflare Reverse Proxy",
+      "description": "Detects Cloudflare edge reverse proxy from Server headers, CF-Ray tracking headers, CNAME routing, or edge cookies.",
+      "category": "cdn_reverse_proxy",
+      "vendor": "Cloudflare",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "cloudflare-server-header",
+              "group": "response_headers",
+              "description": "Cloudflare Server response header",
+              "type": "response_header",
+              "key": {
+                "exact": "Server",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "cloudflare",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-ray-header",
+              "group": "response_headers",
+              "description": "Cloudflare CF-Ray tracking header",
+              "type": "response_header",
+              "key": {
+                "exact": "cf-ray",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-cache-header",
+              "group": "response_headers",
+              "description": "Cloudflare CF-Cache-Status header",
+              "type": "response_header",
+              "key": {
+                "exact": "cf-cache-status",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-cname",
+              "group": "dns",
+              "description": "Cloudflare canonical edge CNAME",
+              "type": "dns_record",
+              "key": {
+                "exact": "cname",
+                "case_insensitive": true
+              },
+              "value": {
+                "regex": "\\.(?:cdn\\.)?cloudflare\\.net$",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-cert-issuer",
+              "group": "tls",
+              "description": "Cloudflare issued TLS certificate",
+              "type": "tls_property",
+              "key": {
+                "exact": "certificate_issuer",
+                "case_insensitive": true
+              },
+              "value": {
+                "contains": "Cloudflare",
+                "case_insensitive": true
+              },
+              "weight": 20
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-clearance-cookie",
+              "group": "cookies",
+              "description": "Cloudflare clearance cookie",
+              "type": "cookie",
+              "key": {
+                "exact": "cf_clearance",
+                "case_insensitive": true
+              },
+              "weight": 25
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "cloudflare.waf",
+      "name": "Cloudflare WAF",
+      "description": "Detects Cloudflare WAF block pages, challenge pages, or security error headers.",
+      "category": "waf",
+      "vendor": "Cloudflare",
+      "product": "WAF",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "cloudflare-waf-mitigated-header",
+              "group": "response_headers",
+              "description": "Cloudflare challenge mitigation header",
+              "type": "response_header",
+              "key": {
+                "exact": "cf-mitigated",
+                "case_insensitive": true
+              },
+              "value": {
+                "exact": "challenge",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-waf-error-header",
+              "group": "response_headers",
+              "description": "Cloudflare security error code header",
+              "type": "response_header",
+              "key": {
+                "exact": "cf-error-code",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-waf-block-page",
+              "group": "static_integration",
+              "description": "Cloudflare WAF error or challenge block page marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:Attention Required! \\| Cloudflare|Cloudflare Ray ID:.*Cloudflare|Sorry, you have been blocked)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-waf-challenge-script",
+              "group": "static_integration",
+              "description": "Cloudflare managed challenge platform script",
+              "type": "script_url",
+              "value": {
+                "regex": "/cdn-cgi/challenge-platform/h/[a-z]/orchestrate/chl_page/v1",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-waf-marker",
+              "group": "static_integration",
+              "description": "Cloudflare error wrapper or details marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:cf-error-details|cf-wrapper)",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "cloudflare.bot_management",
+      "name": "Cloudflare Bot Management",
+      "description": "Detects Cloudflare Bot Management or Bot Fight Mode client-side telemetry scripts and tracking cookies.",
+      "category": "bot_management",
+      "vendor": "Cloudflare",
+      "product": "Bot Management",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "requires": [
+        "cloudflare.proxy"
+      ],
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "cloudflare-bot-telemetry-script",
+              "group": "static_integration",
+              "description": "Cloudflare Bot Management JavaScript detection telemetry script",
+              "type": "script_url",
+              "value": {
+                "regex": "^https?://[^/]+/cdn-cgi/challenge-platform/(?:scripts/jsd/main\\.js|h/[a-z]/scripts/|invisible\\.js)",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "cloudflare-bot-cookie",
+              "group": "cookies",
+              "description": "Cloudflare Bot Management cookie",
+              "type": "cookie",
+              "key": {
+                "exact": "__cf_bm",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "cloudflare.turnstile",
       "name": "Cloudflare Turnstile",
       "description": "Detects the documented Turnstile client script; static HTML markers are supporting evidence only.",

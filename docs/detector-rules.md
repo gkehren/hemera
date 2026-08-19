@@ -11,26 +11,32 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Milestone 0 ships two `captcha_challenge` product rules:
+Hemera ships 5 built-in detector rules across Cloudflare and Google:
 
-| Rule ID | Product | Decisive static evidence | Supporting evidence |
-| --- | --- | --- | --- |
-| `cloudflare.turnstile` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
-| `google.recaptcha` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
+| Rule ID | Category | Product | Decisive evidence | Supporting evidence |
+| --- | --- | --- | --- | --- |
+| `cloudflare.proxy` | `cdn_reverse_proxy` | (Infrastructure) | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
+| `cloudflare.waf` | `waf` | Cloudflare WAF | `cf-mitigated: challenge`, `cf-error-code`, WAF block page DOM | Challenge orchestration scripts |
+| `cloudflare.bot_management` | `bot_management` | Cloudflare Bot Management | `/cdn-cgi/challenge-platform/scripts/jsd/main.js` script | `__cf_bm` cookie |
+| `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
+| `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
 
-The decisive script contributes the 75-point detection threshold. Supporting
+Decisive evidence contributes the 75-point detection threshold. Supporting
 markers cannot produce a detection by themselves, which limits false positives
-from documentation, copied markup, or dormant code. The script and markers share
-the `static_integration` evidence group, whose contribution is their maximum
-rather than their sum. A static-only integration therefore remains `high` at 75
-instead of becoming `very_high` through correlated markup. A Turnstile result
-describes only the product integration; it is not evidence that Cloudflare
-proxy, WAF, or Bot Management is active. The reCAPTCHA rule does not yet classify
-v2, v3, invisible, and Enterprise separately.
+from documentation, copied markup, or dormant code. Correlated observations share
+evidence groups (`static_integration`, `response_headers`, `cookies`, `dns`,
+`tls`), whose contribution is their maximum rather than their sum.
 
-The signatures follow the vendors' documented client integrations:
+Cloudflare rules strictly maintain **product-level separation**: detecting
+`cloudflare.proxy` does not imply `cloudflare.waf`, `cloudflare.bot_management`,
+or `cloudflare.turnstile`. `cloudflare.bot_management` requires `cloudflare.proxy`
+as a prerequisite dependency, while `cloudflare.turnstile` operates standalone on
+any origin.
+
+The signatures follow the vendors' documented client integrations and edge specifications:
 
 - [Cloudflare Turnstile client-side rendering](https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/)
+- [Cloudflare JavaScript Detections (Bot Management)](https://developers.cloudflare.com/bots/reference/javascript-detections/)
 - [Google reCAPTCHA v2 display](https://developers.google.com/recaptcha/docs/display)
 - [Google reCAPTCHA v3](https://developers.google.com/recaptcha/docs/v3)
 - [Google reCAPTCHA Enterprise web integration](https://docs.cloud.google.com/recaptcha/docs/instrument-web-pages)

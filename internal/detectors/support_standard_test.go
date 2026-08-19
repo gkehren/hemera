@@ -78,9 +78,16 @@ func TestValidateSupportStandardRejections(t *testing.T) {
 		{
 			name: "max achievable score less than minimum_score",
 			modify: func(rs *rules.RuleSet) {
-				rs.Rules[0].MinimumScore = 95
-				rs.Rules[0].Match.Any[0].Signal.Weight = 40
-				rs.Rules[0].Match.Any[1].Signal.Weight = 40
+				headerName := "Server"
+				rs.Rules[0].MinimumScore = 75
+				rs.Rules[0].Match = rules.Condition{
+					Signal: &rules.Evidence{
+						ID:     "low-weight",
+						Type:   model.SignalTypeResponseHeader,
+						Key:    &rules.TextPattern{Exact: &headerName},
+						Weight: 40,
+					},
+				}
 			},
 		},
 	}
@@ -215,19 +222,20 @@ func TestSupportingEvidenceAloneCannotTriggerDetection(t *testing.T) {
 				return
 			}
 
-			detections, err := scoring.Evaluate(rules.RuleSet{
-				SchemaVersion: rules.CurrentSchemaVersion,
-				Rules:         []rules.Rule{rule},
-			}, supportingSignals)
+			detections, err := scoring.Evaluate(ruleSet, supportingSignals)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if detections[0].Detected {
-				t.Errorf("rule %q was detected from supporting signals alone: score = %v", rule.ID, detections[0].Score)
-			}
-			if detections[0].Score >= rule.MinimumScore {
-				t.Errorf("rule %q score (%v) >= minimum_score (%v) from supporting signals alone", rule.ID, detections[0].Score, rule.MinimumScore)
+			for _, d := range detections {
+				if d.RuleID == rule.ID {
+					if d.Detected {
+						t.Errorf("rule %q was detected from supporting signals alone: score = %v", rule.ID, d.Score)
+					}
+					if d.Score >= rule.MinimumScore {
+						t.Errorf("rule %q score (%v) >= minimum_score (%v) from supporting signals alone", rule.ID, d.Score, rule.MinimumScore)
+					}
+				}
 			}
 		})
 	}
@@ -269,13 +277,26 @@ func TestVendorSignalsDoNotIncurProductDetections(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var proxyDetected bool
 	for _, d := range detections {
-		if d.Detected {
-			t.Errorf("vendor infrastructure signals triggered product detection %q (score = %v)", d.RuleID, d.Score)
+		if d.RuleID == "cloudflare.proxy" {
+			if !d.Detected || d.Score < 75 {
+				t.Errorf("vendor infrastructure signals did not detect cloudflare.proxy: score = %v", d.Score)
+			}
+			proxyDetected = true
+			continue
 		}
-		if d.Score != 0 {
-			t.Errorf("vendor infrastructure signals produced non-zero score for %q (score = %v)", d.RuleID, d.Score)
+		if d.Product != "" {
+			if d.Detected {
+				t.Errorf("vendor infrastructure signals triggered product detection %q (score = %v)", d.RuleID, d.Score)
+			}
+			if d.Score != 0 {
+				t.Errorf("vendor infrastructure signals produced non-zero score for product %q (score = %v)", d.RuleID, d.Score)
+			}
 		}
+	}
+	if !proxyDetected {
+		t.Error("cloudflare.proxy was not evaluated")
 	}
 }
 

@@ -316,11 +316,11 @@ rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
 `internal/detectors` embeds the validated V2 rules shipped with the binary.
-Milestone 0 includes product-specific rules for Cloudflare Turnstile and Google
-reCAPTCHA. They use documented client-script URLs as decisive evidence and
-static HTML markers only as supporting evidence. Related static observations
-share one `static_integration` group so their maximum, not their sum, contributes
-to confidence. Every supported rule adheres to the quality, evidence, and fixture
+Hemera includes general Cloudflare rules (`cloudflare.proxy`, `cloudflare.waf`,
+`cloudflare.bot_management`, `cloudflare.turnstile`) with strict product-level
+separation, alongside Google reCAPTCHA. They use decisive evidence (headers,
+scripts, block page DOM) and supporting markers grouped by correlation.
+Every supported rule adheres to the quality, evidence, and fixture
 requirements in [Detector family support standard](detector-support-standard.md).
 
 ### Confidence engine

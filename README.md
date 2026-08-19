@@ -57,38 +57,29 @@ Detections:
 5. **Automation-friendly.** The CLI, JSON schema, rules, and fixtures should be
    deterministic and suitable for CI and other tools.
 
-## Initial detector coverage
+## Detector coverage
 
-Hemera currently ships two product-specific static HTML detectors:
+Hemera ships built-in detector rules with explicit product-level separation:
 
-- Cloudflare Turnstile;
-- Google reCAPTCHA, including the documented standard and Enterprise client
-  script locations.
+- **Cloudflare:**
+  - `cloudflare.proxy` (Reverse Proxy / CDN edge infrastructure);
+  - `cloudflare.waf` (WAF block pages, security error codes, and managed challenges);
+  - `cloudflare.bot_management` (Bot Management / Bot Fight Mode JavaScript telemetry);
+  - `cloudflare.turnstile` (Turnstile client challenge widget).
+- **Google:**
+  - `google.recaptcha` (Standard and Enterprise reCAPTCHA client integrations).
 
-The official client script is strong evidence. Static widget or inline-call
-markers are supporting evidence and do not reach the detection threshold alone.
-All observations from the same static integration share one evidence group, so
-seeing both a client script and its HTML marker explains the integration without
-inflating its confidence above the strongest observation. Complementary future
-HTTP, DNS/TLS, or browser evidence can use distinct groups and raise the score.
-These rules identify client integration visible in the final HTML; they do not
-execute JavaScript or distinguish reCAPTCHA v2, v3, invisible, and Enterprise as
-separate products. Turnstile evidence does not imply that Cloudflare proxy, WAF,
-or Bot Management is enabled.
+Vendor infrastructure alone does not imply that a specific product is enabled.
+For example, detecting `cloudflare.proxy` via `Server: cloudflare` or `cf-ray`
+never automatically produces a `cloudflare.waf`, `cloudflare.bot_management`,
+or `cloudflare.turnstile` detection.
 
 Later detector families are planned around:
 
-- Cloudflare (CDN/proxy, Turnstile, and sufficiently reliable challenge or bot
-  management signals);
-- Google reCAPTCHA (v2, invisible, v3, and Enterprise where distinguishable);
 - AWS WAF;
 - Akamai protections and Bot Manager;
 - DataDome;
 - hCaptcha and Arkose Labs, subject to signature quality.
-
-Vendor infrastructure alone must not imply that a specific product is enabled.
-For example, detecting Cloudflare must not automatically produce a Cloudflare Bot
-Management detection.
 
 ## Architecture
 
