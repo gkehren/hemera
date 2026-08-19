@@ -23,6 +23,7 @@ func TestSignalTypeValid(t *testing.T) {
 		SignalTypeTLSProperty,
 		SignalTypeRedirect,
 		SignalTypePageContent,
+		SignalTypeResourceHost,
 	}
 
 	for _, signalType := range validTypes {
@@ -186,5 +187,21 @@ func TestSignalJSON(t *testing.T) {
 	}
 	if decoded != signal {
 		t.Errorf("JSON round trip = %#v, want %#v", decoded, signal)
+	}
+}
+
+func TestResourceHostSignalJSONUsesExistingFieldNames(t *testing.T) {
+	t.Parallel()
+	signal := Signal{
+		Type: SignalTypeResourceHost, Source: "http_analyzer", Key: "host",
+		Value: "widgets.example", URL: "https://widgets.example/frame", Confidence: 1,
+	}
+	data, err := json.Marshal(signal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"type":"resource_host","source":"http_analyzer","key":"host","value":"widgets.example","url":"https://widgets.example/frame","confidence":1}`
+	if string(data) != want {
+		t.Errorf("json.Marshal() = %s, want %s", data, want)
 	}
 }
