@@ -80,6 +80,12 @@ signals omit cookie values and redact authorization-, cookie-, token-, secret-,
 authentication-, and API-key-bearing header values. The scanner does not persist
 results.
 
+Detector documents are also treated as untrusted local input. JSON decoding
+rejects unknown fields and unsupported versions and bounds document size, rule
+count, condition depth, evidence count, and pattern length. Regular expressions
+use Go's RE2 engine. Rule matching consumes already normalized signals and has no
+network or browser capability.
+
 ## Reporting security issues
 
 A private vulnerability-reporting channel will be documented before the first

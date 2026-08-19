@@ -108,8 +108,9 @@ The rule engine must depend on this model, not directly on Chromium or
 
 ### Detection rules
 
-Rules should be data-driven, using a documented YAML or JSON schema. They need to
-express:
+Rules are data-driven through the strict, versioned JSON schema implemented in
+`internal/rules` and documented in
+[Detector rule schema V1](detector-rules.md). The schema expresses:
 
 - positive and negative signals;
 - `AND` and `OR` combinations;
@@ -117,11 +118,16 @@ express:
 - ambiguity penalties and product conflicts;
 - dependencies between related vendor and product detections.
 
-A vendor-level result must not automatically imply a product-level result.
+Conditions form bounded `all` and `any` trees over normalized signal fields.
+Text predicates support exact, contains, prefix, suffix, and RE2 regular
+expression operations. Documents and references are validated before matching;
+matching retains positive, missing, negative, and ambiguous evidence in stable
+rule and predicate order. A vendor-level result never automatically implies a
+product-level result.
 
 ### Confidence engine
 
-The initial model can remain deliberately simple:
+The V1 model is deliberately simple and is implemented in `internal/scoring`:
 
 ```text
 score = weighted positive evidence
@@ -139,8 +145,15 @@ The bounded 0–100 result should be labeled consistently:
 | 25–49 | Low | Weak signals; do not present as certain |
 | 0–24 | Not detected | Insufficient evidence |
 
+Each evidence contribution is multiplied by the producing signal's observation
+confidence. Scores are clamped to 0–100. Directional cross-rule conflicts apply
+fixed penalties when the referenced rule is a matching candidate with non-zero
+effective confidence. Dependencies are acyclic and must be detected; a missing
+dependency blocks detection while the pre-dependency evidence score remains
+available for explanation.
+
 Bayesian scoring, calibration on a labeled corpus, or learned weights can be
-considered later; none is required for the first version.
+considered later; none is part of V1.
 
 ### Reporting
 
@@ -150,7 +163,8 @@ An exportable local HTML report is a later goal.
 
 The current `hemera scan <url>` output is a temporary diagnostic integration of
 the HTTP analyzer. It deliberately omits HTML and header/cookie values, and is
-not a stable reporter or JSON schema.
+not a stable reporter or JSON schema. Rule matching and scoring are implemented
+but are not connected to this command until the reporting vertical slice.
 
 ## Proposed repository layout
 

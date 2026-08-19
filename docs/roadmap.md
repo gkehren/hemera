@@ -9,8 +9,8 @@ are intentionally unchecked while the repository remains in its design phase.
 - [x] Define and test the normalized `Signal` model.
 - [x] Implement safe URL validation and redirect validation.
 - [x] Implement the HTTP analyzer.
-- [ ] Define and validate the detector rule schema.
-- [ ] Implement rule matching and confidence scoring V1.
+- [x] Define and validate the detector rule schema.
+- [x] Implement rule matching and confidence scoring V1.
 - [ ] Render CLI and JSON reports.
 - [ ] Add initial Cloudflare Turnstile and reCAPTCHA rules.
 - [ ] Add unit tests and deterministic fixtures.
