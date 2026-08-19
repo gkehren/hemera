@@ -55,7 +55,9 @@ Hemera is in early development. The repository currently contains:
 - human-readable reports and versioned, deterministic, experimental JSON V3
   reports;
 - deterministic unit, integration, security, and detector fixture tests;
-- baseline GitHub Actions checks on Linux, macOS, and Windows.
+- baseline GitHub Actions checks on Linux, macOS, and Windows, plus hermetic
+  sandboxed Chromium integration tests on Linux with and without the race
+  detector.
 
 Do not document planned behavior as implemented. Browser signal conversion and
 scanner aggregation, broader detector coverage, and release packaging remain

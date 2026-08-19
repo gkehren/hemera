@@ -66,6 +66,44 @@ jobs:
       - name: Build CLI
         run: go build ./cmd/hemera
 
+  browser-linux:
+    name: Linux browser integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Locate Google Chrome
+        shell: bash
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            chromium_path="$(command -v google-chrome)"
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            chromium_path="$(command -v google-chrome-stable)"
+          else
+            printf 'Google Chrome is required for browser integration tests.\n' >&2
+            exit 1
+          fi
+
+          "${chromium_path}" --version
+          printf 'HEMERA_CHROMIUM_PATH=%s\n' "${chromium_path}" >> "${GITHUB_ENV}"
+
+      - name: Test browser integration
+        run: go test -v -count=1 -timeout=5m -tags=browser_integration ./internal/browser
+
+      - name: Test browser integration with race detector
+        run: go test -race -v -count=1 -timeout=5m -tags=browser_integration ./internal/browser
+
   portable:
     name: ${{ matrix.os }} test and build
     runs-on: ${{ matrix.os }}

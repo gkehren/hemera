@@ -189,8 +189,11 @@ go test ./...
 ```
 
 GitHub Actions runs formatting, vetting, unit and race tests, vulnerability
-scanning, and a CLI build on Linux. It also runs tests and a CLI build on macOS
-and Windows.
+scanning, and a CLI build on Linux. A dedicated Ubuntu 24.04 job also runs the
+hermetic Chromium integration tests with and without the race detector, using
+the preinstalled sandboxed Google Chrome. The workflow also runs tests and a CLI
+build on macOS and Windows; browser integration CI on those platforms remains
+planned.
 
 The internal browser package uses `chromedp` but does not download a browser. It
 can record bounded, minimized CDP network events and snapshot the current
