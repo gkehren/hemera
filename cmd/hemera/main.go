@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/gkehren/hemera/internal/detectors"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
-	"github.com/gkehren/hemera/pkg/model"
+	"github.com/gkehren/hemera/internal/report"
+	"github.com/gkehren/hemera/internal/scanner"
 )
 
 var version = "dev"
@@ -25,7 +27,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "hemera: configure HTTP analyzer: %v\n", err)
 			return 1
 		}
-		return runScan(context.Background(), args[1:], stdout, stderr, analyzer)
+		ruleSet, err := detectors.Load()
+		if err != nil {
+			fmt.Fprintf(stderr, "hemera: load detector rules: %v\n", err)
+			return 1
+		}
+		engine, err := scanner.New(analyzer, ruleSet)
+		if err != nil {
+			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
+			return 1
+		}
+		return runScan(context.Background(), args[1:], stdout, stderr, engine)
 	}
 
 	flags := flag.NewFlagSet("hemera", flag.ContinueOnError)
@@ -68,27 +80,43 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Hemera observes public web signals to identify protections with explainable evidence.
 
 Usage:
-  hemera scan <url>
+  hemera scan [--format text|json] <url>
   hemera [--help] [--version]
 
 Options:
   -h, --help  Show this help message
-  --version   Print the Hemera version
-
-The scan output is a temporary, unstable diagnostic format.`)
+  --version   Print the Hemera version`)
 }
 
-type scanner interface {
-	Analyze(context.Context, string) (httpanalyzer.Result, error)
+type scanRunner interface {
+	Scan(context.Context, string) (scanner.Result, error)
 }
 
-func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, analyzer scanner) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "hemera: scan requires exactly one URL")
-		fmt.Fprintln(stderr, "usage: hemera scan <url>")
+func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engine scanRunner) int {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			printScanUsage(stdout)
+			return 0
+		}
+	}
+	flags := flag.NewFlagSet("hemera scan", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	format := flags.String("format", "text", "report format: text or json")
+	flags.Usage = func() { printScanUsage(stderr) }
+	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	result, err := analyzer.Analyze(ctx, args[0])
+	if *format != "text" && *format != "json" {
+		fmt.Fprintf(stderr, "hemera: unsupported report format %q\n", *format)
+		printScanUsage(stderr)
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(stderr, "hemera: scan requires exactly one URL")
+		printScanUsage(stderr)
+		return 2
+	}
+	result, err := engine.Scan(ctx, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "hemera: scan failed: %v\n", err)
 		if errors.Is(err, httpanalyzer.ErrInitialTarget) {
@@ -96,43 +124,24 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, analy
 		}
 		return 1
 	}
-	printScanResult(stdout, result)
+	scanReport := report.Build(version, result)
+	if *format == "json" {
+		err = report.WriteJSON(stdout, scanReport)
+	} else {
+		err = report.WriteText(stdout, scanReport)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "hemera: write report: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
-func printScanResult(w io.Writer, result httpanalyzer.Result) {
-	fmt.Fprintln(w, "Hemera HTTP scan diagnostic (unstable format)")
-	fmt.Fprintf(w, "Requested URL: %s\n", result.RequestedURL)
-	fmt.Fprintf(w, "Final URL: %s\n", result.FinalURL)
-	fmt.Fprintf(w, "Status: %d\n", result.StatusCode)
-	fmt.Fprintf(w, "Body truncated: %t\n", result.BodyTruncated)
-	fmt.Fprintln(w, "Redirects:")
-	if len(result.Redirects) == 0 {
-		fmt.Fprintln(w, "  (none)")
-	}
-	for _, redirect := range result.Redirects {
-		fmt.Fprintf(w, "  %d %s -> %s\n", redirect.Status, redirect.From, redirect.To)
-	}
-	fmt.Fprintln(w, "Warnings:")
-	if len(result.Warnings) == 0 {
-		fmt.Fprintln(w, "  (none)")
-	}
-	for _, warning := range result.Warnings {
-		fmt.Fprintf(w, "  - %s\n", warning)
-	}
-	fmt.Fprintln(w, "Signals:")
-	for _, signal := range result.Signals {
-		fmt.Fprintf(w, "  - %s %s", signal.Type, signal.Key)
-		switch signal.Type {
-		case model.SignalTypeScriptURL, model.SignalTypeIframeURL, model.SignalTypeResourceHost,
-			model.SignalTypeRedirect, model.SignalTypeNetworkResponse:
-			fmt.Fprintf(w, ": %s", signal.Value)
-		case model.SignalTypePageContent:
-			fmt.Fprint(w, ": [content omitted]")
-		}
-		if signal.URL != "" {
-			fmt.Fprintf(w, " [%s]", signal.URL)
-		}
-		fmt.Fprintln(w)
-	}
+func printScanUsage(w io.Writer) {
+	fmt.Fprintln(w, `Usage:
+  hemera scan [--format text|json] <url>
+
+Options:
+  --format  Report format: text (default) or json
+  -h, --help  Show this help message`)
 }

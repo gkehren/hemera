@@ -11,9 +11,9 @@ are intentionally unchecked while the repository remains in its design phase.
 - [x] Implement the HTTP analyzer.
 - [x] Define and validate the detector rule schema.
 - [x] Implement rule matching and confidence scoring V1.
-- [ ] Render CLI and JSON reports.
-- [ ] Add initial Cloudflare Turnstile and reCAPTCHA rules.
-- [ ] Add unit tests and deterministic fixtures.
+- [x] Render CLI and JSON reports.
+- [x] Add initial Cloudflare Turnstile and reCAPTCHA rules.
+- [x] Add unit tests and deterministic fixtures.
 
 **Exit criterion:** a local scan can safely collect HTTP signals and explain the
 result of at least two fixture-backed detector families.

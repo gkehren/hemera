@@ -1,0 +1,38 @@
+[
+  {
+    "name": "turnstile documented client",
+    "fixture": "turnstile-positive.html",
+    "detected": ["cloudflare.turnstile"],
+    "scores": {"cloudflare.turnstile": 100, "google.recaptcha": 0}
+  },
+  {
+    "name": "recaptcha documented client",
+    "fixture": "recaptcha-positive.html",
+    "detected": ["google.recaptcha"],
+    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 100}
+  },
+  {
+    "name": "recaptcha enterprise alternate host regression",
+    "fixture": "recaptcha-enterprise-regression.html",
+    "detected": ["google.recaptcha"],
+    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 100}
+  },
+  {
+    "name": "ambiguous static markers",
+    "fixture": "ambiguous-markers.html",
+    "detected": [],
+    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 65}
+  },
+  {
+    "name": "unrelated protection page",
+    "fixture": "negative.html",
+    "detected": [],
+    "scores": {"cloudflare.turnstile": 0, "google.recaptcha": 0}
+  },
+  {
+    "name": "documentation text regression",
+    "fixture": "documentation-regression.html",
+    "detected": [],
+    "scores": {"cloudflare.turnstile": 30, "google.recaptcha": 30}
+  }
+]

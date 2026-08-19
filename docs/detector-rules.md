@@ -4,9 +4,36 @@ Hemera detector rules are strict, versioned JSON documents. The implementation
 lives in `internal/rules`; matching consumes only normalized `pkg/model.Signal`
 values and has no access to HTTP, DNS, TLS, Chromium, or reporters.
 
-The V1 engine is implemented, but no built-in vendor detector is shipped yet and
-`hemera scan` does not run rules. Detector files, CLI integration, and stable
-report JSON belong to later roadmap steps.
+The V1 engine is implemented and `hemera scan` evaluates the built-in rules
+embedded by `internal/detectors`. The resulting scores and evidence are exposed
+through the text and JSON reporters.
+
+## Built-in detectors
+
+Milestone 0 ships two `captcha_challenge` product rules:
+
+| Rule ID | Product | Decisive static evidence | Supporting evidence |
+| --- | --- | --- | --- |
+| `cloudflare.turnstile` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
+| `google.recaptcha` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
+
+The decisive script contributes the 75-point detection threshold. Supporting
+markers cannot produce a detection by themselves, which limits false positives
+from documentation, copied markup, or dormant code. A Turnstile result describes
+only the product integration; it is not evidence that Cloudflare proxy, WAF, or
+Bot Management is active. The reCAPTCHA rule does not yet classify v2, v3,
+invisible, and Enterprise separately.
+
+The signatures follow the vendors' documented client integrations:
+
+- [Cloudflare Turnstile client-side rendering](https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/)
+- [Google reCAPTCHA v2 display](https://developers.google.com/recaptcha/docs/display)
+- [Google reCAPTCHA v3](https://developers.google.com/recaptcha/docs/v3)
+- [Google reCAPTCHA Enterprise web integration](https://docs.cloud.google.com/recaptcha/docs/instrument-web-pages)
+
+Checked-in synthetic fixtures cover positive, negative, ambiguous, and
+regression cases. They run through the real HTTP analyzer without contacting
+the referenced third parties.
 
 ## Document structure
 

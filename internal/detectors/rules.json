@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "cloudflare.turnstile",
+      "name": "Cloudflare Turnstile",
+      "description": "Detects the documented Turnstile client script; static HTML markers are supporting evidence only.",
+      "category": "captcha_challenge",
+      "vendor": "Cloudflare",
+      "product": "Turnstile",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "turnstile-client-script",
+              "description": "Documented Turnstile JavaScript API URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://challenges\\.cloudflare\\.com/turnstile/v0/api\\.js(?:\\?redacted)?$",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "turnstile-html-marker",
+              "description": "Static cf-turnstile widget marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:^|[^A-Za-z0-9_-])cf-turnstile(?:[^A-Za-z0-9_-]|$)",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "google.recaptcha",
+      "name": "Google reCAPTCHA",
+      "description": "Detects documented reCAPTCHA standard or Enterprise client scripts; static widget and API-call markers are supporting evidence only.",
+      "category": "captcha_challenge",
+      "vendor": "Google",
+      "product": "reCAPTCHA",
+      "minimum_evidence": 1,
+      "minimum_score": 75,
+      "match": {
+        "any": [
+          {
+            "signal": {
+              "id": "recaptcha-client-script",
+              "description": "Documented standard or Enterprise reCAPTCHA JavaScript API URL",
+              "type": "script_url",
+              "value": {
+                "regex": "^https://www\\.(?:google\\.com|recaptcha\\.net)/recaptcha/(?:api|enterprise)\\.js(?:\\?redacted)?$",
+                "case_insensitive": true
+              },
+              "weight": 75
+            }
+          },
+          {
+            "signal": {
+              "id": "recaptcha-html-marker",
+              "description": "Static g-recaptcha widget marker",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:^|[^A-Za-z0-9_-])g-recaptcha(?:[^A-Za-z0-9_-]|$)",
+                "case_insensitive": true
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "recaptcha-inline-call",
+              "description": "Static grecaptcha render or execute call",
+              "type": "page_content",
+              "value": {
+                "regex": "grecaptcha\\s*\\.\\s*(?:execute|render)\\s*\\(",
+                "case_insensitive": true
+              },
+              "weight": 35
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

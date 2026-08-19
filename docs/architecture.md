@@ -18,7 +18,7 @@ flowchart TD
     Browser --> Signals
     Signals --> Rules[Detection rule engine]
     Rules --> Score[Confidence engine]
-    Score --> Report[CLI / JSON / HTML reporters]
+    Score --> Report[CLI text / JSON reporters]
 ```
 
 ## Components
@@ -125,6 +125,11 @@ matching retains positive, missing, negative, and ambiguous evidence in stable
 rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
+`internal/detectors` embeds the validated V1 rules shipped with the binary.
+Milestone 0 includes product-specific rules for Cloudflare Turnstile and Google
+reCAPTCHA. They use documented client-script URLs as decisive evidence and
+static HTML markers only as supporting evidence.
+
 ### Confidence engine
 
 The V1 model is deliberately simple and is implemented in `internal/scoring`:
@@ -155,29 +160,32 @@ available for explanation.
 Bayesian scoring, calibration on a labeled corpus, or learned weights can be
 considered later; none is part of V1.
 
-### Reporting
+### Scan orchestration and reporting
 
-The CLI report should favor quick interpretation while retaining evidence. JSON
-is the automation contract and should be versioned before it is declared stable.
-An exportable local HTML report is a later goal.
+`internal/scanner` is the thin application boundary that runs the HTTP analyzer
+and sends normalized signals to the rule and scoring packages. It owns neither
+network policy nor presentation.
 
-The current `hemera scan <url>` output is a temporary diagnostic integration of
-the HTTP analyzer. It deliberately omits HTML and header/cookie values, and is
-not a stable reporter or JSON schema. Rule matching and scoring are implemented
-but are not connected to this command until the reporting vertical slice.
+`internal/report` converts scanner results into a secret-minimized report model.
+The CLI renders that model as text by default or as stable, versioned JSON with
+`--format json`. Both formats explain detected and non-detected rules. They omit
+HTML and header/cookie values and sanitize every emitted URL. The JSON contract
+is documented in [JSON report schema V1](report-schema.md). An exportable local
+HTML report remains a later goal.
 
 ## Proposed repository layout
 
 ```text
 cmd/hemera/               CLI entry point
 internal/scanner/         scan orchestration
+internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
 internal/browser/         Chromium/CDP collection
 internal/dns/             DNS and TLS collection
 internal/signals/         normalization
 internal/rules/           rule loading and matching
 internal/scoring/         confidence calculation
-internal/report/          output renderers
+internal/report/          safe text and JSON renderers
 pkg/model/                intentionally public models, if needed
 detectors/                data-driven signatures
 testdata/                 fixtures, captures, and expected results
