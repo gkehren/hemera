@@ -93,6 +93,22 @@ func DefaultConfig() Config {
 	}
 }
 
+// DeepConfig returns a browser configuration with maximal safe resource, timeout,
+// and concurrency ceilings for deep web protection inspection.
+func DeepConfig() Config {
+	return Config{
+		StartupTimeout:        maxStartupTimeout,
+		NavigationTimeout:     maxNavigationTimeout,
+		PostLoadTimeout:       maxPostLoadTimeout,
+		NetworkIdleTime:       maxNetworkIdleTime,
+		ConnectTimeout:        maxBrowserConnectTimeout,
+		MaxRequests:           maxBrowserRequests,
+		MaxRedirects:          maxBrowserRedirects,
+		MaxTransferBytes:      maxBrowserBytes,
+		MaxConcurrentRequests: maxBrowserConcurrency,
+	}
+}
+
 // Version contains the minimal browser identity returned by Browser.getVersion.
 type Version struct {
 	Product         string

@@ -302,6 +302,46 @@ func TestRunPreservesHTTPOnlyInvalidTargetBehavior(t *testing.T) {
 	}
 }
 
+func TestRunScanSupportsDeepModeAndRejectsInvalidMode(t *testing.T) {
+	t.Parallel()
+	result := scanResultWithHTTP(httpanalyzer.Result{
+		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,
+	})
+	for _, flag := range []string{"--deep", "--mode=deep", "--mode=default"} {
+		var stdout, stderr bytes.Buffer
+		if code := runScan(context.Background(), []string{flag, "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
+			t.Fatalf("runScan(%q) code = %d, want 0; stderr = %q", flag, code, stderr.String())
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runScan(context.Background(), []string{"--mode=invalid", "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 2 {
+		t.Fatalf("runScan(invalid mode) code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), `unsupported scan mode "invalid"`) {
+		t.Errorf("stderr = %q, want unsupported scan mode error", stderr.String())
+	}
+}
+
+func TestNewScannerEngineDefaultAndDeep(t *testing.T) {
+	t.Parallel()
+	defaultEngine, err := newScannerEngine(false)
+	if err != nil {
+		t.Fatalf("newScannerEngine(false) error = %v", err)
+	}
+	if defaultEngine == nil {
+		t.Fatal("newScannerEngine(false) returned nil")
+	}
+
+	deepEngine, err := newScannerEngine(true)
+	if err != nil {
+		t.Fatalf("newScannerEngine(true) error = %v", err)
+	}
+	if deepEngine == nil {
+		t.Fatal("newScannerEngine(true) returned nil")
+	}
+}
+
 func scanResultWithHTTP(result httpanalyzer.Result) scanner.Result {
 	redirects := make([]analysis.HTTPRedirect, 0, len(result.Redirects))
 	for _, redirect := range result.Redirects {

@@ -24,39 +24,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "scan" {
-		analyzer, err := httpanalyzer.New(httpanalyzer.DefaultConfig())
-		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure HTTP analyzer: %v\n", err)
-			return 1
-		}
-		dnsTLSAnalyzer, err := dnstls.New(dnstls.DefaultConfig())
-		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure DNS/TLS analyzer: %v\n", err)
-			return 1
-		}
-		browserAnalyzer, err := browser.NewAnalyzer(browser.DefaultConfig())
-		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure browser analyzer: %v\n", err)
-			return 1
-		}
-		ruleSet, err := detectors.Load()
-		if err != nil {
-			fmt.Fprintf(stderr, "hemera: load detector rules: %v\n", err)
-			return 1
-		}
-		engine, err := scanner.New(scanner.Config{
-			Analyzers: []scanner.AnalyzerConfig{
-				{Analyzer: analyzer, FailurePolicy: scanner.FailurePolicyAbort},
-				{Analyzer: dnsTLSAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
-				{Analyzer: browserAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
-			},
-			RuleSet: ruleSet,
-		})
-		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
-			return 1
-		}
-		return runScan(context.Background(), args[1:], stdout, stderr, engine)
+		return runScan(context.Background(), args[1:], stdout, stderr, nil)
 	}
 
 	flags := flag.NewFlagSet("hemera", flag.ContinueOnError)
@@ -101,7 +69,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Hemera observes public web signals to identify protections with explainable evidence.
 
 Usage:
-  hemera scan [--format text|json] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
   hemera [--help] [--version]
 
 Options:
@@ -123,6 +91,8 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	flags := flag.NewFlagSet("hemera scan", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "text", "report format: text or json")
+	deep := flags.Bool("deep", false, "run deep scan with maximal observation budgets and timeouts")
+	mode := flags.String("mode", "", "scan mode: default or deep")
 	flags.Usage = func() { printScanUsage(stderr) }
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -132,11 +102,27 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 		printScanUsage(stderr)
 		return 2
 	}
+	if *mode != "" && *mode != "default" && *mode != "deep" {
+		fmt.Fprintf(stderr, "hemera: unsupported scan mode %q\n", *mode)
+		printScanUsage(stderr)
+		return 2
+	}
 	if flags.NArg() != 1 {
 		fmt.Fprintln(stderr, "hemera: scan requires exactly one URL")
 		printScanUsage(stderr)
 		return 2
 	}
+
+	if engine == nil {
+		isDeep := *deep || *mode == "deep"
+		var err error
+		engine, err = newScannerEngine(isDeep)
+		if err != nil {
+			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
+			return 1
+		}
+	}
+
 	result, err := engine.Scan(ctx, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "hemera: scan failed: %v\n", err)
@@ -158,11 +144,46 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	return 0
 }
 
+func newScannerEngine(deep bool) (*scanner.Scanner, error) {
+	httpConfig := httpanalyzer.DefaultConfig()
+	dnsConfig := dnstls.DefaultConfig()
+	browserConfig := browser.DefaultConfig()
+	if deep {
+		browserConfig = browser.DeepConfig()
+	}
+	analyzer, err := httpanalyzer.New(httpConfig)
+	if err != nil {
+		return nil, fmt.Errorf("configure HTTP analyzer: %w", err)
+	}
+	dnsTLSAnalyzer, err := dnstls.New(dnsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("configure DNS/TLS analyzer: %w", err)
+	}
+	browserAnalyzer, err := browser.NewAnalyzer(browserConfig)
+	if err != nil {
+		return nil, fmt.Errorf("configure browser analyzer: %w", err)
+	}
+	ruleSet, err := detectors.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load detector rules: %w", err)
+	}
+	return scanner.New(scanner.Config{
+		Analyzers: []scanner.AnalyzerConfig{
+			{Analyzer: analyzer, FailurePolicy: scanner.FailurePolicyAbort},
+			{Analyzer: dnsTLSAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
+			{Analyzer: browserAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
+		},
+		RuleSet: ruleSet,
+	})
+}
+
 func printScanUsage(w io.Writer) {
 	fmt.Fprintln(w, `Usage:
-  hemera scan [--format text|json] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
 
 Options:
-  --format  Report format: text (default) or json
+  --deep      Enable deep scan with maximal observation budgets and timeouts
+  --format    Report format: text (default) or json
+  --mode      Scan mode: default or deep
   -h, --help  Show this help message`)
 }

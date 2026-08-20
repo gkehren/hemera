@@ -107,7 +107,7 @@ Hemera mandates that Chromium's system sandbox remains active:
 
 ```text
 Usage:
-  hemera scan [--format text|json] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
   hemera [--help] [--version]
 
 Options:
@@ -119,10 +119,12 @@ Options:
 
 ```text
 Usage:
-  hemera scan [--format text|json] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
 
 Options:
+  --deep      Enable deep scan with maximal observation budgets and timeouts
   --format    Report format: text (default) or json
+  --mode      Scan mode: default or deep
   -h, --help  Show this help message
 ```
 
