@@ -647,6 +647,73 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 		}
 	}
 
+	testedCapabilitiesByRule := map[string]channelReqs{
+		"cloudflare.proxy": {
+			HTTP:          true,
+			DNS:           true,
+			TLS:           true,
+			BrowserCookie: true,
+		},
+		"cloudflare.challenge_page": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserDOM:    true,
+		},
+		"cloudflare.bot_protection": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserCookie: true,
+		},
+		"cloudflare.turnstile": {
+			HTTP: true,
+		},
+		"google.recaptcha": {
+			HTTP: true,
+		},
+		"aws.cloudfront": {
+			HTTP: true,
+			DNS:  true,
+			TLS:  true,
+		},
+		"aws.waf": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserDOM:    true,
+			BrowserCookie: true,
+		},
+		"datadome.bot_protection": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserIframe: true,
+			BrowserCookie: true,
+			BrowserDOM:    true,
+		},
+		"akamai.edge": {
+			HTTP: true,
+			DNS:  true,
+			TLS:  true,
+		},
+		"akamai.bot_manager": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserCookie: true,
+			BrowserDOM:    true,
+		},
+		"hcaptcha.challenge": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserIframe: true,
+			BrowserCookie: true,
+			BrowserDOM:    true,
+		},
+		"arkoselabs.matchkey": {
+			HTTP:          true,
+			BrowserScript: true,
+			BrowserIframe: true,
+			BrowserDOM:    true,
+		},
+	}
+
 	for _, rule := range ruleSet.Rules {
 		rule := rule
 		t.Run(rule.ID, func(t *testing.T) {
@@ -659,24 +726,31 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 				t.Fatalf("rule %q does not claim any observation channels", rule.ID)
 			}
 
-			// Verify DNS-enabled rules have explicit DNS support.
-			if reqs.DNS {
-				switch rule.ID {
-				case "cloudflare.proxy", "aws.cloudfront", "akamai.edge":
-					// expected
-				default:
-					t.Errorf("unexpected DNS capability claimed by rule %q", rule.ID)
-				}
+			tested, hasTested := testedCapabilitiesByRule[rule.ID]
+			if !hasTested {
+				t.Fatalf("rule %q has no registered tested capabilities in capability matrix", rule.ID)
 			}
 
-			// Verify TLS-enabled rules have explicit TLS support.
-			if reqs.TLS {
-				switch rule.ID {
-				case "cloudflare.proxy", "aws.cloudfront", "akamai.edge":
-					// expected
-				default:
-					t.Errorf("unexpected TLS capability claimed by rule %q", rule.ID)
-				}
+			if reqs.HTTP && !tested.HTTP {
+				t.Errorf("rule %q claims HTTP channel but is not registered as tested", rule.ID)
+			}
+			if reqs.DNS && !tested.DNS {
+				t.Errorf("rule %q claims DNS channel but is not registered as tested", rule.ID)
+			}
+			if reqs.TLS && !tested.TLS {
+				t.Errorf("rule %q claims TLS channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserScript && !tested.BrowserScript {
+				t.Errorf("rule %q claims BrowserScript channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserIframe && !tested.BrowserIframe {
+				t.Errorf("rule %q claims BrowserIframe channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserCookie && !tested.BrowserCookie {
+				t.Errorf("rule %q claims BrowserCookie channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserDOM && !tested.BrowserDOM {
+				t.Errorf("rule %q claims BrowserDOM channel but is not registered as tested", rule.ID)
 			}
 		})
 	}

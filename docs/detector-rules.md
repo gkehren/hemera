@@ -21,7 +21,7 @@ Hemera ships 12 built-in detector rules across Cloudflare, Google, AWS, DataDome
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
 | `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
-| `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, `x-amzn-errortype`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
+| `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
 | `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js` (unversioned/versioned), `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
 | `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, `x-akamai-session-info`, Akamai TLS |
 | `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
