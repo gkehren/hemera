@@ -4,390 +4,469 @@
   "description": "Structured evidence provenance, authoritative source documentation, and scoring rationales for Hemera built-in detector rules.",
   "rules": {
     "cloudflare.proxy": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Server header (Server: cloudflare) or cf-ray header provides decisive proof of Cloudflare reverse proxy routing (75 points / high). Supporting headers (cf-cache-status), CNAME records, TLS certificates, and cf_clearance cookies provide supporting corroboration (20-35 points) and require multiple groups to detect.",
       "evidence": {
         "cloudflare-server-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://developers.cloudflare.com/fundamentals/reference/http-headers/",
           "rationale": "Server: cloudflare header emitted on all Cloudflare-proxied HTTP responses."
         },
         "cloudflare-ray-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://developers.cloudflare.com/fundamentals/reference/http-request-headers/",
           "rationale": "cf-ray header assigned uniquely to each HTTP request by Cloudflare edge nodes."
         },
         "cloudflare-cache-header": {
-          "role": "supporting",
+          "weight": 35,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/cache/concepts/cache-responses/",
           "rationale": "cf-cache-status header indicates cache state on Cloudflare edge responses."
         },
         "cloudflare-cname": {
-          "role": "supporting",
+          "weight": 30,
           "group": "dns",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/dns/manage-dns-records/reference/dns-records/",
           "rationale": "Canonical Cloudflare CDN CNAME domain routing (cdn.cloudflare.net)."
         },
         "cloudflare-cert-issuer": {
-          "role": "supporting",
+          "weight": 20,
           "group": "tls",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/ssl/reference/certificate-authorities/",
           "rationale": "TLS certificate issued by Cloudflare managed Certificate Authority."
         },
         "cloudflare-clearance-cookie": {
-          "role": "supporting",
+          "weight": 25,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/",
           "rationale": "cf_clearance cookie set upon passing interactive or JavaScript challenge."
         }
       }
     },
     "cloudflare.challenge_page": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "cf-mitigated: challenge response header or challenge platform script (/cdn-cgi/challenge-platform/) decisively identifies Cloudflare active challenge interstitials (75 points). cf-error-code header and challenge container DOM markers provide supporting corroboration.",
       "evidence": {
         "cloudflare-challenge-mitigated-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://developers.cloudflare.com/waf/reference/cloudflare-challenges/",
           "rationale": "cf-mitigated: challenge response header emitted when Cloudflare serves an interactive challenge interstitial."
         },
         "cloudflare-challenge-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://developers.cloudflare.com/waf/reference/cloudflare-challenges/",
           "rationale": "Dedicated Cloudflare challenge platform script /cdn-cgi/challenge-platform/scripts/."
         },
         "cloudflare-challenge-error-header": {
-          "role": "supporting",
+          "weight": 35,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/support/troubleshooting/cloudflare-errors/troubleshooting-cloudflare-5xx-errors/",
           "rationale": "cf-error-code response header accompanying challenge and security mitigation pages."
         },
         "cloudflare-challenge-block-marker": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/waf/reference/cloudflare-challenges/",
           "rationale": "Cloudflare challenge wrapper and container DOM markers (cf-challenge, cf-wrapper)."
         }
       }
     },
     "cloudflare.bot_protection": {
-      "scoring_rationale": "Cloudflare Bot Management JavaScript telemetry script (/cdn-cgi/bm/cv/) decisively identifies client-side bot protection (75 points). __cf_bm cookie provides supporting session evidence (40 points) and cannot trigger detection alone.",
+      "minimum_score": 75,
+      "minimum_evidence": 1,
+      "scoring_rationale": "Cloudflare Bot Management JavaScript telemetry script (/cdn-cgi/challenge-platform/scripts/jsd/) decisively identifies client-side bot protection (75 points). __cf_bm cookie provides supporting session evidence (40 points) and cannot trigger detection alone.",
       "evidence": {
         "cloudflare-bot-telemetry-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
-          "source": "https://developers.cloudflare.com/bots/reference/bot-management-cookies/",
-          "rationale": "Cloudflare Bot Management JavaScript telemetry tag /cdn-cgi/bm/cv/."
+          "role": "decisive",
+          "source": "https://developers.cloudflare.com/bots/reference/javascript-detections/",
+          "rationale": "Cloudflare JavaScript Detections (JSD) telemetry script under /cdn-cgi/challenge-platform/scripts/jsd/ for Bot Management signal collection."
         },
         "cloudflare-bot-cookie": {
-          "role": "supporting",
+          "weight": 40,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/bots/reference/bot-management-cookies/",
           "rationale": "__cf_bm cookie for Cloudflare Bot Management session tracking and rate calculations."
         }
       }
     },
     "cloudflare.turnstile": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Turnstile client API script (challenges.cloudflare.com/turnstile/v0/api.js) decisively identifies Cloudflare Turnstile integration (75 points). cf-turnstile HTML marker provides supporting structural evidence (30 points).",
       "evidence": {
         "turnstile-client-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/",
           "rationale": "Official Turnstile client script challenges.cloudflare.com/turnstile/v0/api.js."
         },
         "turnstile-html-marker": {
-          "role": "supporting",
+          "weight": 30,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/",
           "rationale": "Explicit Turnstile container element with cf-turnstile class name."
         }
       }
     },
     "google.recaptcha": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Google reCAPTCHA client script (recaptcha/api.js or enterprise.js) decisively identifies reCAPTCHA integration (75 points). g-recaptcha container marker (30 points) and grecaptcha.render invocation (35 points) provide supporting evidence.",
       "evidence": {
         "recaptcha-client-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://developers.google.com/recaptcha/docs/display",
           "rationale": "Official Google reCAPTCHA and reCAPTCHA Enterprise client loader scripts (recaptcha/api.js, enterprise.js)."
         },
         "recaptcha-html-marker": {
-          "role": "supporting",
+          "weight": 30,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developers.google.com/recaptcha/docs/display",
           "rationale": "reCAPTCHA widget container class g-recaptcha."
         },
         "recaptcha-inline-call": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developers.google.com/recaptcha/docs/invisible",
           "rationale": "Client-side invocation grecaptcha.render or grecaptcha.execute."
         }
       }
     },
     "aws.cloudfront": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "x-amz-cf-id, x-amz-cf-pop, or Server: CloudFront response header decisively identifies Amazon CloudFront edge routing (75 points). x-cache diagnostic header, cloudfront.net CNAME, and Amazon CA TLS certificate provide supporting corroboration (20-35 points).",
       "evidence": {
         "aws-cf-id-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UnderstandingHeaders.html",
           "rationale": "x-amz-cf-id header containing unique CloudFront transaction request ID."
         },
         "aws-cf-pop-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UnderstandingHeaders.html",
           "rationale": "x-amz-cf-pop header identifying CloudFront edge point of presence."
         },
         "aws-cf-server-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UnderstandingHeaders.html",
           "rationale": "Server: CloudFront header emitted on Amazon CloudFront edge responses."
         },
         "aws-cf-cache-header": {
-          "role": "supporting",
+          "weight": 35,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UnderstandingHeaders.html",
           "rationale": "x-cache header indicating CloudFront cache hit or miss status."
         },
         "aws-cf-cname": {
-          "role": "supporting",
+          "weight": 30,
           "group": "dns",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/CNAMEs.html",
           "rationale": "Canonical CloudFront distribution CNAME domain (*.cloudfront.net)."
         },
         "aws-cf-cert-issuer": {
-          "role": "supporting",
+          "weight": 20,
           "group": "tls",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html",
           "rationale": "TLS certificate issued by Amazon Certificate Authority."
         }
       }
     },
     "aws.waf": {
-      "scoring_rationale": "AWS WAF JavaScript SDK (/aws-waf-sdk/), x-amzn-waf-action header, x-amzn-errortype: Waf* header, or AWS WAF challenge interstitial DOM decisively identifies AWS WAF (75 points). aws-waf-token cookie (40 points) and aws-waf-container marker (30 points) provide supporting evidence.",
+      "minimum_score": 75,
+      "minimum_evidence": 1,
+      "scoring_rationale": "AWS WAF JavaScript SDK (/aws-waf-sdk/), x-amzn-waf-action header, or AWS WAF challenge interstitial DOM decisively identifies AWS WAF (75 points). aws-waf-token cookie (40 points), x-amzn-errortype header (35 points), and aws-waf-container marker (30 points) provide supporting evidence.",
       "evidence": {
         "aws-waf-sdk-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-js-challenge-api.html",
           "rationale": "Official AWS WAF JavaScript SDK integration script /aws-waf-sdk/."
         },
         "aws-waf-action-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
           "rationale": "x-amzn-waf-action header emitted on challenge and CAPTCHA mitigation responses."
         },
         "aws-waf-errortype-header": {
-          "role": "decisive",
+          "weight": 35,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
-          "rationale": "x-amzn-errortype: Waf* diagnostic header emitted on AWS WAF block actions."
+          "rationale": "x-amzn-errortype header containing WAF indicator; supporting diagnostic signal."
         },
         "aws-waf-block-page": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
           "rationale": "Standard AWS WAF CAPTCHA/challenge container title and DOM structure."
         },
         "aws-waf-token-cookie": {
-          "role": "supporting",
+          "weight": 40,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-tokens.html",
           "rationale": "aws-waf-token cookie storing client verification token."
         },
         "aws-waf-marker": {
-          "role": "supporting",
+          "weight": 30,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
           "rationale": "AWS WAF integration element container aws-waf-container or AwsWafIntegration invocation."
         }
       }
     },
     "datadome.bot_protection": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "DataDome client JS tag (js.datadome.co/tags.js or versioned vX.Y.Z/tags.js), x-datadome response header, or CAPTCHA delivery interstitial (*.captcha-delivery.com/captcha/) decisively identifies DataDome (75 points). datadome cookie (40 points) and datadomeOptions marker (35 points) provide supporting corroboration.",
       "evidence": {
         "datadome-js-tag": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.datadome.co/docs/javascript-tag",
           "rationale": "Official DataDome client integration script js.datadome.co/tags.js or versioned tags.js path."
         },
         "datadome-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.datadome.co/docs/common-http-headers",
           "rationale": "x-datadome response header emitted by DataDome server-side / reverse-proxy module."
         },
         "datadome-response-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://docs.datadome.co/docs/common-http-headers",
           "rationale": "x-datadome-response diagnostic header on protected routes."
         },
         "datadome-interstitial-url": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.datadome.co/docs/customizing-interstitial-pages",
           "rationale": "DataDome CAPTCHA and interstitial verification iframe URL (*.captcha-delivery.com/captcha/)."
         },
         "datadome-interstitial-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.datadome.co/docs/customizing-interstitial-pages",
           "rationale": "DataDome challenge script host ct.captcha-delivery.com/c.js."
         },
         "datadome-cookie": {
-          "role": "supporting",
+          "weight": 40,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://docs.datadome.co/docs/datadome-cookie",
           "rationale": "datadome cookie containing client behavioral tracking identifier."
         },
         "datadome-marker": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://docs.datadome.co/docs/javascript-tag",
           "rationale": "DataDome client configuration object datadomeOptions or datadome_client marker."
         }
       }
     },
     "akamai.edge": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Server: AkamaiGHost, x-akamai-transformed header, or Akamai canonical CNAME domain (edgekey.net, akamaiedge.net, edgesuite.net) decisively identifies Akamai Edge infrastructure routing (75 points). x-akamai-request-id (35 points), x-check-cacheable (25 points), X-Akamai-Session-Info (25 points), and Akamai TLS certificates (20 points) provide supporting evidence.",
       "evidence": {
         "akamai-ghost-server-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://techdocs.akamai.com/edge-diagnostics/docs/ghost-ip",
           "rationale": "Server: AkamaiGHost header emitted on Akamai Global Host edge server responses."
         },
         "akamai-transformed-header": {
-          "role": "decisive",
+          "weight": 75,
           "group": "response_headers",
+          "role": "decisive",
           "source": "https://techdocs.akamai.com/property-manager/docs/header-management",
           "rationale": "x-akamai-transformed diagnostic header emitted by Akamai Edge servers."
         },
         "akamai-cname": {
-          "role": "decisive",
+          "weight": 75,
           "group": "dns",
+          "role": "decisive",
           "source": "https://techdocs.akamai.com/edge-dns/docs/overview",
           "rationale": "Canonical Akamai Edge CNAME domain (edgekey.net, akamaiedge.net, edgesuite.net)."
         },
         "akamai-request-id-header": {
-          "role": "supporting",
+          "weight": 35,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/edge-diagnostics/docs/ghost-ip",
           "rationale": "x-akamai-request-id diagnostic header on edge responses."
         },
         "akamai-cacheable-header": {
-          "role": "supporting",
+          "weight": 25,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/property-manager/docs/header-management",
           "rationale": "x-check-cacheable diagnostic header emitted by Akamai caching layer."
         },
         "akamai-session-info-header": {
-          "role": "supporting",
+          "weight": 25,
           "group": "response_headers",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/property-manager/docs/variables",
           "rationale": "X-Akamai-Session-Info debugging header configured via Property Manager variables."
         },
         "akamai-cert-issuer": {
-          "role": "supporting",
+          "weight": 20,
           "group": "tls",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/cps/docs/overview",
           "rationale": "TLS certificate issued by Akamai managed certificate authority."
         }
       }
     },
     "akamai.bot_manager": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Akamai Bot Manager sensor script (/akam/13/ or /akam/11/) decisively identifies client-side Bot Manager integration (75 points). bm_sz cookie (40 points), _abck cookie (40 points), and telemetry marker (35 points) provide supporting evidence.",
       "evidence": {
         "akamai-bm-sensor-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://techdocs.akamai.com/bot-manager/docs/web-integrations",
           "rationale": "Akamai Bot Manager telemetry sensor script with /akam/13/ or /akam/11/ path structure."
         },
         "akamai-bm-cookie": {
-          "role": "supporting",
+          "weight": 40,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/bot-manager/docs/cookies",
           "rationale": "bm_sz or bm_sv cookie tracking client behavioral telemetry."
         },
         "akamai-bm-abck-cookie": {
-          "role": "supporting",
+          "weight": 40,
           "group": "cookies",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/bot-manager/docs/cookies",
           "rationale": "_abck cookie maintaining Akamai Bot Manager state and challenge resolution."
         },
         "akamai-bm-marker": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://techdocs.akamai.com/bot-manager/docs/web-integrations",
           "rationale": "Akamai Bot Manager sensor initialization markers and configuration attributes."
         }
       }
     },
     "hcaptcha.challenge": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Official hCaptcha client script (js.hcaptcha.com/1/api.js or assets.hcaptcha.com/c/) or challenge iframe (newassets.hcaptcha.com/captcha/) decisively identifies hCaptcha integration (75 points). h-captcha container marker (30 points) and hcaptcha.render invocation (35 points) provide supporting evidence.",
       "evidence": {
         "hcaptcha-client-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.hcaptcha.com/configuration",
           "rationale": "Official hCaptcha client script js.hcaptcha.com/1/api.js or assets.hcaptcha.com/c/."
         },
         "hcaptcha-challenge-iframe": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://docs.hcaptcha.com/configuration",
           "rationale": "Official hCaptcha interactive challenge iframe newassets.hcaptcha.com/captcha/."
         },
         "hcaptcha-html-marker": {
-          "role": "supporting",
+          "weight": 30,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://docs.hcaptcha.com/configuration",
           "rationale": "hCaptcha widget container class h-captcha."
         },
         "hcaptcha-inline-call": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://docs.hcaptcha.com/configuration",
           "rationale": "Client-side invocation hcaptcha.render or hcaptcha.execute."
         }
       }
     },
     "arkoselabs.matchkey": {
+      "minimum_score": 75,
+      "minimum_evidence": 1,
       "scoring_rationale": "Official Arkose Labs client script (client-api.arkoselabs.com/v2/api.js) or challenge iframe (client-api.arkoselabs.com/fc/) decisively identifies Arkose Labs Matchkey integration (75 points). arkose-enforcement marker (30 points) and setupArkoseEnforcement invocation (35 points) provide supporting evidence.",
       "evidence": {
         "arkose-client-script": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://developer.arkoselabs.com/docs/client-side-integration",
           "rationale": "Official Arkose Labs client script client-api.arkoselabs.com/v2/api.js."
         },
         "arkose-challenge-iframe": {
-          "role": "decisive",
+          "weight": 75,
           "group": "static_integration",
+          "role": "decisive",
           "source": "https://developer.arkoselabs.com/docs/client-side-integration",
           "rationale": "Arkose Labs challenge frame client-api.arkoselabs.com/fc/."
         },
         "arkose-html-marker": {
-          "role": "supporting",
+          "weight": 30,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developer.arkoselabs.com/docs/client-side-integration",
           "rationale": "Arkose Labs widget container class arkose-enforcement."
         },
         "arkose-inline-call": {
-          "role": "supporting",
+          "weight": 35,
           "group": "static_integration",
+          "role": "supporting",
           "source": "https://developer.arkoselabs.com/docs/client-side-integration",
           "rationale": "Client-side invocation setupArkoseEnforcement or arkoseCallback."
         }
