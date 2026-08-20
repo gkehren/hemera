@@ -170,6 +170,31 @@ func (p *safeProxy) startHandler() bool {
 	return true
 }
 
+func (p *safeProxy) isClosing() bool {
+	p.handlerMu.Lock()
+	defer p.handlerMu.Unlock()
+	return p.closing
+}
+
+func (p *safeProxy) shouldRecordInfraError(request *http.Request, budget *navigationBudget, err error) bool {
+	if err == nil {
+		return false
+	}
+	if budget == nil || budget.stopped() {
+		return false
+	}
+	if p.isClosing() {
+		return false
+	}
+	if request != nil && request.Context().Err() != nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
+}
+
 func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Request, budget *navigationBudget) {
 	parsed, err := parseBrowserURL(request.URL.String())
 	if err != nil {
@@ -189,7 +214,7 @@ func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 	response, err := p.transport.RoundTrip(upstream)
 	if err != nil {
-		if !budget.stopped() {
+		if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 		http.Error(writer, "browser destination failed", http.StatusBadGateway)
@@ -207,7 +232,7 @@ func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Reques
 	if err := copyWithBudget(writer, response.Body, budget); err != nil {
 		if isPolicyError(err) {
 			budget.failPolicy(err)
-		} else if !budget.stopped() {
+		} else if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 	}
@@ -228,7 +253,7 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	if err != nil {
 		if isPolicyError(err) {
 			budget.failPolicy(err)
-		} else if !budget.stopped() {
+		} else if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 		http.Error(writer, "browser destination failed", http.StatusBadGateway)
@@ -244,7 +269,7 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	client, buffered, err := hijacker.Hijack()
 	if err != nil {
 		upstream.Close()
-		if !budget.stopped() {
+		if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 		return
@@ -252,13 +277,13 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	defer client.Close()
 	defer upstream.Close()
 	if _, err := buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		if !budget.stopped() {
+		if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 		return
 	}
 	if err := buffered.Flush(); err != nil {
-		if !budget.stopped() {
+		if p.shouldRecordInfraError(request, budget, err) {
 			budget.failInfrastructure(err)
 		}
 		return
@@ -269,10 +294,10 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	go func() { results <- copyWithBudget(client, upstream, budget) }()
 	select {
 	case err := <-results:
-		if err != nil && !budget.stopped() {
+		if err != nil {
 			if isPolicyError(err) {
 				budget.failPolicy(err)
-			} else {
+			} else if p.shouldRecordInfraError(request, budget, err) {
 				budget.failInfrastructure(err)
 			}
 		}

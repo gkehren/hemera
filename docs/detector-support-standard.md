@@ -470,11 +470,11 @@ The following detector families currently meet the support standard:
 
 | Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| `datadome-js-tag` | `static_integration` | `script_url` | `^https://js\.datadome\.co/tags\.js` | 75 | Decisive | Documented DataDome client-side JavaScript tag URL ([DataDome docs](https://docs.datadome.co/docs/javascript-tag)). |
+| `datadome-js-tag` | `static_integration` | `script_url` | `^https://js\.datadome\.co/(?:v[0-9]+\.[0-9]+\.[0-9]+/)?tags\.js(?:\?redacted)?$` | 75 | Decisive | Documented DataDome client-side JavaScript tag URL, supporting both unversioned and semver-versioned `vX.Y.Z/tags.js` paths ([DataDome docs](https://docs.datadome.co/docs/javascript-tag)). |
 | `datadome-header` | `response_headers` | `response_header` | `x-datadome` | 75 | Decisive | DataDome protection status response header (`x-datadome: protected` or `x-datadome: bypass`). |
 | `datadome-response-header` | `response_headers` | `response_header` | `x-datadome-response` | 75 | Decisive | DataDome mitigation response header emitted on challenge responses. |
-| `datadome-interstitial-url` | `static_integration` | `iframe_url` | `^https://geo\.captcha-delivery\.com/captcha/` | 75 | Decisive | DataDome interstitial CAPTCHA and challenge delivery iframe URL. |
-| `datadome-interstitial-script` | `static_integration` | `script_url` | `^https://geo\.captcha-delivery\.com/captcha/` | 75 | Decisive | DataDome interstitial challenge JavaScript payload. |
+| `datadome-interstitial-url` | `static_integration` | `iframe_url` | `^https://(?:[a-z0-9-]+\.)+captcha-delivery\.com/` | 75 | Decisive | DataDome interstitial response page iframe URL across official subdomains (`*.captcha-delivery.com`) for CAPTCHA, Device Check, and Block pages ([DataDome changelog](https://docs.datadome.co/changelog/change-needed-for-users-of-csp-directive-frame-src)). |
+| `datadome-interstitial-script` | `static_integration` | `script_url` | `^https://ct\.captcha-delivery\.com/` | 75 | Decisive | DataDome response page script URL on documented script host `ct.captcha-delivery.com` ([DataDome docs](https://docs.datadome.co/docs/javascript-tag)). |
 | `datadome-cookie` | `cookies` | `cookie` | `datadome` | 40 | Supporting | DataDome tracking cookie. |
 | `datadome-marker` | `static_integration` | `page_content` | `window\.datadomeOptions` or `datadome\.init` | 35 | Supporting | Client-side tag initialization configuration. |
 
@@ -482,7 +482,7 @@ The following detector families currently meet the support standard:
 
 - `minimum_score`: 75 (`high`).
 - `minimum_evidence`: 1 group.
-- The official JavaScript tag, `x-datadome` header, or challenge iframe reaches 75 points (`high`).
+- The official JavaScript tag (unversioned or semver-versioned), `x-datadome` header, or challenge iframe reaches 75 points (`high`).
 - The `datadome` cookie alone provides 40 points (`low`), resulting in `not_detected` without decisive evidence.
 
 #### Vendor vs. product separation
@@ -491,14 +491,19 @@ The following detector families currently meet the support standard:
 
 #### Fixture coverage
 
-- **Positive:** `datadome-positive.html` &mdash; contains `js.datadome.co/tags.js` and `x-datadome: protected` (`score: 100`, `level: very_high`, `detected: true`).
+- **Positive:** `datadome-positive.html` &mdash; contains unversioned `js.datadome.co/tags.js` and `x-datadome: protected` (`score: 100`, `level: very_high`, `detected: true`).
+- **Positive:** `datadome-versioned-positive.html` &mdash; contains versioned `js.datadome.co/v5.1.13/tags.js` (`score: 75`, `level: high`, `detected: true`).
+- **Positive:** `datadome-interstitial-positive.html` &mdash; contains challenge delivery iframe on alternate host `ct.captcha-delivery.com` (`score: 75`, `level: high`, `detected: true`).
 - **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
+- **Hard negative:** `adversarial-lookalike-domains.html` &mdash; lookalike domains such as `captcha-delivery.com.attacker.example`, apex `captcha-delivery.com`, and invalid semver versions `v5.1/tags.js` / `v5.1.13.7/tags.js` (`score: 0`, `detected: false`).
 - **Ambiguous / supporting:** `datadome cookie ambiguity` &mdash; `datadome` cookie alone (`score: 40`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
 - **Known false positives:** Negligible.
-- **Known false negatives:** API-only protections using server-side SDKs without client-side JavaScript tags or response headers.
+- **Known false negatives:**
+  - First-Party JS Tag integrations (`https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) and first-party reverse-proxy aliases are known false negatives for script-URL matching. Detection may still succeed when another decisive signal is present (such as `x-datadome` response headers or challenge interstitials); the `datadome` cookie remains supporting evidence only and cannot trigger detection alone.
+  - API-only protections using server-side SDKs without client-side JavaScript tags or response headers.
 
 ---
 
@@ -518,6 +523,7 @@ The following detector families currently meet the support standard:
 | `akamai-cname` | `dns` | `dns_record` | `cname` suffix `.edgekey.net`, `.edgesuite.net`, `.akamaiedge.net` | 75 | Decisive | Canonical Akamai edge hostname routing domains. |
 | `akamai-request-id-header` | `response_headers` | `response_header` | `x-akamai-request-id` | 35 | Supporting | Edge request tracing identifier. |
 | `akamai-cacheable-header` | `response_headers` | `response_header` | `x-check-cacheable` | 25 | Supporting | Akamai diagnostic caching header. |
+| `akamai-session-info-header` | `response_headers` | `response_header` | `x-akamai-session-info` | 25 | Supporting | Akamai Property Manager user-defined variable and debugging response header ([Akamai TechDocs](https://techdocs.akamai.com/property-mgr/docs/user-defined-vars)). |
 | `akamai-cert-issuer` | `tls` | `tls_property` | `certificate_issuer` contains `Akamai` | 20 | Supporting | Akamai Edge TLS certificate authority. |
 
 #### Scoring and threshold rationale
@@ -528,11 +534,13 @@ The following detector families currently meet the support standard:
 
 #### Vendor vs. product separation
 
-- Detection of Akamai Edge indicates edge reverse proxy routing only. It does **not** imply that Akamai Bot Manager or App & API Protector is active.
+- Detection of Akamai Edge indicates edge reverse proxy routing only. It does **not** imply that Akamai Bot Manager is active. Generic Property Manager variable headers (`x-akamai-session-info`) and generic Edge Diagnostics Reference Error strings (`Reference #18...` / Global Request Number) are infrastructure diagnostics and do not trigger product-level security detections.
 
 #### Fixture coverage
 
 - **Positive:** `akamai-edge-positive.html` &mdash; returns `Server: AkamaiGHost` and `x-akamai-transformed` (`score: 75`, `level: high`, `detected: true`).
+- **Positive:** `akamai edge with session info` &mdash; returns `Server: AkamaiGHost` and `x-akamai-session-info` (`score: 75`, `level: high`, `detected: true`).
+- **Positive:** `akamai edge reference error` &mdash; returns `Server: AkamaiGHost` and Reference Error block page (`score: 75`, `level: high`, `detected: true`).
 - **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
 - **Ambiguous / supporting:** `ambiguous-markers.html` &mdash; contains `x-check-cacheable: YES` (`score: 25`, `level: low`, `detected: false`).
 
@@ -583,47 +591,7 @@ The following detector families currently meet the support standard:
 
 ---
 
-### 11. Akamai App & API Protector (`akamai.app_and_api_protector`)
-
-- **Category:** `waf`
-- **Vendor:** `Akamai`
-- **Product:** `App & API Protector`
-- **Rule ID:** `akamai.app_and_api_protector`
-
-#### Evidence rationale
-
-| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
-| --- | --- | --- | --- | --- | --- | --- |
-| `akamai-waf-session-header` | `response_headers` | `response_header` | `x-akamai-session-info` | 75 | Decisive | Akamai WAF mitigation session info header emitted on security actions. |
-| `akamai-waf-block-page` | `static_integration` | `page_content` | `Access Denied.*Reference&#32;&#35;[0-9a-fA-F.]` | 75 | Decisive | Standard Akamai WAF reference error block page HTML content. |
-| `akamai-waf-action-header` | `response_headers` | `response_header` | `x-akamai-waf-action` | 35 | Supporting | Akamai WAF action diagnostic header. |
-| `akamai-waf-marker` | `static_integration` | `page_content` | `Reference&#32;&#35;[0-9a-fA-F.]+` | 35 | Supporting | Akamai reference error number marker. |
-
-#### Scoring and threshold rationale
-
-- `minimum_score`: 75 (`high`).
-- `minimum_evidence`: 1 group.
-- `requires`: `["akamai.edge"]` &mdash; App & API Protector runs on Akamai edge infrastructure.
-- The reference error block page or `x-akamai-session-info` header independently reaches 75 points (`high`).
-
-#### Vendor vs. product separation
-
-- Detection requires explicit WAF block page DOM or session mitigation headers. Standard Akamai Edge traffic never triggers `akamai.app_and_api_protector`.
-
-#### Fixture coverage
-
-- **Positive:** `akamai-waf-positive.html` &mdash; 403 status with `x-akamai-session-info` and reference error block page (`score: 100`, `level: very_high`, `detected: true`).
-- **Hard negative:** `akamai-edge-positive.html` &mdash; normal proxied page (`score: 0`, `detected: false`).
-- **Ambiguous / supporting:** `akamai waf ambiguity` &mdash; `x-akamai-waf-action: monitor` alone (`score: 35`, `level: low`, `detected: false`).
-
-#### Known false positives and false negatives
-
-- **Known false positives:** Documentation pages quoting Akamai reference error formats.
-- **Known false negatives:** Silent WAF policies in monitor/alert-only mode without mitigation headers or block pages.
-
----
-
-### 12. hCaptcha (`hcaptcha.challenge`)
+### 11. hCaptcha (`hcaptcha.challenge`)
 
 - **Category:** `captcha_challenge`
 - **Vendor:** `hCaptcha`
@@ -663,7 +631,7 @@ The following detector families currently meet the support standard:
 
 ---
 
-### 13. Arkose MatchKey (`arkoselabs.matchkey`)
+### 12. Arkose MatchKey (`arkoselabs.matchkey`)
 
 - **Category:** `captcha_challenge`
 - **Vendor:** `Arkose Labs`
