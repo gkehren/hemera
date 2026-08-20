@@ -549,7 +549,7 @@
               "description": "DataDome JavaScript tag URL",
               "type": "script_url",
               "value": {
-                "regex": "^https://js\\.datadome\\.co/tags\\.js",
+                "regex": "^https://js\\.datadome\\.co/(?:v[0-9]+(?:\\.[0-9]+)+/)?tags\\.js(?:\\?redacted)?$",
                 "case_insensitive": true
               },
               "weight": 75
@@ -588,7 +588,7 @@
               "description": "DataDome CAPTCHA delivery interstitial iframe URL",
               "type": "iframe_url",
               "value": {
-                "regex": "^https://geo\\.captcha-delivery\\.com/captcha/",
+                "regex": "^https://(?:[a-z0-9-]+\\.)*captcha-delivery\\.com/captcha/",
                 "case_insensitive": true
               },
               "weight": 75
@@ -601,7 +601,7 @@
               "description": "DataDome CAPTCHA delivery script URL",
               "type": "script_url",
               "value": {
-                "regex": "^https://geo\\.captcha-delivery\\.com/captcha/",
+                "regex": "^https://(?:[a-z0-9-]+\\.)*captcha-delivery\\.com/captcha/",
                 "case_insensitive": true
               },
               "weight": 75
@@ -721,6 +721,19 @@
           },
           {
             "signal": {
+              "id": "akamai-session-info-header",
+              "group": "response_headers",
+              "description": "Akamai Property Manager session info variable header",
+              "type": "response_header",
+              "key": {
+                "exact": "x-akamai-session-info",
+                "case_insensitive": true
+              },
+              "weight": 25
+            }
+          },
+          {
+            "signal": {
               "id": "akamai-cert-issuer",
               "group": "tls",
               "description": "Akamai issued TLS certificate",
@@ -822,19 +835,6 @@
       ],
       "match": {
         "any": [
-          {
-            "signal": {
-              "id": "akamai-waf-session-header",
-              "group": "response_headers",
-              "description": "Akamai WAF session info response header",
-              "type": "response_header",
-              "key": {
-                "exact": "x-akamai-session-info",
-                "case_insensitive": true
-              },
-              "weight": 75
-            }
-          },
           {
             "signal": {
               "id": "akamai-waf-block-page",
