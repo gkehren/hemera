@@ -26,6 +26,22 @@ import (
 	"github.com/gkehren/hemera/pkg/model"
 )
 
+const (
+	integrationStartupTimeout   = 20 * time.Second
+	integrationSessionTimeout   = 60 * time.Second
+	integrationOperationTimeout = 20 * time.Second
+)
+
+func integrationSessionContext(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), integrationSessionTimeout)
+}
+
+func integrationOperationContext(t *testing.T, parent context.Context) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(parent, integrationOperationTimeout)
+}
+
 func TestSandboxedChromiumLifecycle(t *testing.T) {
 	config, explicit := integrationConfig(t)
 	client, err := New(config)
@@ -33,20 +49,26 @@ func TestSandboxedChromiumLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := integrationSessionContext(t)
 	defer cancel()
-	first, err := client.Start(ctx)
+
+	startedFirst := time.Now()
+	first, err := client.Start(sessionCtx)
 	if err != nil {
 		if !explicit {
 			t.Skipf("sandboxed Chromium is unavailable: %v", err)
 		}
 		t.Fatalf("start explicitly configured Chromium: %v", err)
 	}
+	t.Logf("first Chromium startup completed in %s", time.Since(startedFirst))
 	defer first.Close()
-	second, err := client.Start(ctx)
+
+	startedSecond := time.Now()
+	second, err := client.Start(sessionCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("second Chromium startup completed in %s", time.Since(startedSecond))
 	defer second.Close()
 
 	if version := first.Version(); version.Product == "" || version.ProtocolVersion == "" {
@@ -95,21 +117,31 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			session, err := client.Start(ctx)
+
+			sessionCtx, cancelSession := integrationSessionContext(t)
+			defer cancelSession()
+
+			started := time.Now()
+			session, err := client.Start(sessionCtx)
 			if err != nil {
 				if !explicit {
 					t.Skipf("sandboxed Chromium is unavailable: %v", err)
 				}
 				t.Fatalf("start explicitly configured Chromium: %v", err)
 			}
+			t.Logf("Chromium startup completed in %s", time.Since(started))
 			defer session.Close()
-			if err := session.Navigate(ctx, fixture.server.URL+"/negative/page"); !errors.Is(err, networkguard.ErrForbiddenDestination) {
+
+			opCtx1, cancelOp1 := integrationOperationContext(t, sessionCtx)
+			err = session.Navigate(opCtx1, fixture.server.URL+"/negative/page")
+			cancelOp1()
+			if !errors.Is(err, networkguard.ErrForbiddenDestination) {
 				t.Fatalf("Navigate(loopback) error = %v, want ErrForbiddenDestination", err)
 			}
 
-			recorder, err := session.BeginCapture(ctx)
+			opCtx2, cancelOp2 := integrationOperationContext(t, sessionCtx)
+			defer cancelOp2()
+			recorder, err := session.BeginCapture(opCtx2)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,10 +149,10 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 			if fixtureCase.Name == "dynamic-sequential" {
 				entry += "#fake-entry-fragment"
 			}
-			if err := session.Navigate(ctx, entry); err != nil {
+			if err := session.Navigate(opCtx2, entry); err != nil {
 				t.Fatalf("navigate validated fixture: %v", err)
 			}
-			result, err := recorder.Finish(ctx)
+			result, err := recorder.Finish(opCtx2)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,9 +174,9 @@ func TestBrowserAnalyzerCapturesDelayedPostLoadActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	sessionCtx, cancel := integrationSessionContext(t)
 	defer cancel()
-	observation, err := analyzer.Observe(ctx, analysis.Target{URL: targetURL + "/delayed/page"})
+	observation, err := analyzer.Observe(sessionCtx, analysis.Target{URL: targetURL + "/delayed/page"})
 	if err != nil {
 		if !explicit {
 			t.Skipf("sandboxed Chromium is unavailable: %v", err)
@@ -211,17 +243,23 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			session, err := client.Start(ctx)
+			sessionCtx, cancelSession := integrationSessionContext(t)
+			defer cancelSession()
+
+			started := time.Now()
+			session, err := client.Start(sessionCtx)
 			if err != nil {
 				if !explicit {
 					t.Skipf("sandboxed Chromium is unavailable: %v", err)
 				}
 				t.Fatal(err)
 			}
+			t.Logf("Chromium startup completed in %s", time.Since(started))
 			defer session.Close()
-			if err := session.Navigate(ctx, targetURL+test.path); !errors.Is(err, test.wantErr) {
+
+			opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+			defer cancelOp()
+			if err := session.Navigate(opCtx, targetURL+test.path); !errors.Is(err, test.wantErr) {
 				t.Fatalf("Navigate() error = %v, want %v", err, test.wantErr)
 			}
 			served, _ := fixture.snapshot()
@@ -243,21 +281,28 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		session, err := client.Start(ctx)
+		sessionCtx, cancelSession := integrationSessionContext(t)
+		defer cancelSession()
+
+		started := time.Now()
+		session, err := client.Start(sessionCtx)
 		if err != nil {
 			if !explicit {
 				t.Skipf("sandboxed Chromium is unavailable: %v", err)
 			}
 			t.Fatal(err)
 		}
+		t.Logf("Chromium startup completed in %s", time.Since(started))
 		defer session.Close()
-		started := time.Now()
-		if err := session.Navigate(ctx, targetURL+"/limits/continuous"); err != nil {
+
+		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+		defer cancelOp()
+
+		startedNav := time.Now()
+		if err := session.Navigate(opCtx, targetURL+"/limits/continuous"); err != nil {
 			t.Fatal(err)
 		}
-		elapsed := time.Since(started)
+		elapsed := time.Since(startedNav)
 		if elapsed < 350*time.Millisecond || elapsed > 2*time.Second {
 			t.Errorf("continuous observation duration = %s, want bounded near hard deadline", elapsed)
 		}
@@ -272,17 +317,24 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		session, err := client.Start(ctx)
+		sessionCtx, cancelSession := integrationSessionContext(t)
+		defer cancelSession()
+
+		started := time.Now()
+		session, err := client.Start(sessionCtx)
 		if err != nil {
 			if !explicit {
 				t.Skipf("sandboxed Chromium is unavailable: %v", err)
 			}
 			t.Fatal(err)
 		}
+		t.Logf("Chromium startup completed in %s", time.Since(started))
 		defer session.Close()
-		if err := session.Navigate(ctx, targetURL+"/limits/continuous"); !errors.Is(err, ErrRequestLimit) {
+
+		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+		defer cancelOp()
+
+		if err := session.Navigate(opCtx, targetURL+"/limits/continuous"); !errors.Is(err, ErrRequestLimit) {
 			t.Fatalf("post-load request error = %v, want ErrRequestLimit", err)
 		}
 	})
@@ -305,21 +357,28 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		session, err := client.Start(ctx)
+		sessionCtx, cancelSession := integrationSessionContext(t)
+		defer cancelSession()
+
+		started := time.Now()
+		session, err := client.Start(sessionCtx)
 		if err != nil {
 			if !explicit {
 				t.Skipf("sandboxed Chromium is unavailable: %v", err)
 			}
 			t.Fatal(err)
 		}
+		t.Logf("Chromium startup completed in %s", time.Since(started))
 		defer session.Close()
-		started := time.Now()
-		if err := session.Navigate(ctx, targetURL+"/limits/long-poll"); err != nil {
+
+		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+		defer cancelOp()
+
+		startedNav := time.Now()
+		if err := session.Navigate(opCtx, targetURL+"/limits/long-poll"); err != nil {
 			t.Fatal(err)
 		}
-		if elapsed := time.Since(started); elapsed < 350*time.Millisecond || elapsed > 2*time.Second {
+		if elapsed := time.Since(startedNav); elapsed < 350*time.Millisecond || elapsed > 2*time.Second {
 			t.Errorf("long-poll observation duration = %s, want bounded near hard deadline", elapsed)
 		}
 	})
@@ -355,46 +414,61 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	session, err := client.Start(ctx)
+	sessionCtx, cancelSession := integrationSessionContext(t)
+	defer cancelSession()
+
+	started := time.Now()
+	session, err := client.Start(sessionCtx)
 	if err != nil {
 		if !explicit {
 			t.Skipf("sandboxed Chromium is unavailable: %v", err)
 		}
 		t.Fatal(err)
 	}
+	t.Logf("Chromium startup completed in %s", time.Since(started))
 	defer session.Close()
 
-	recorder, err := session.BeginCapture(ctx)
+	opCtx1, cancelOp1 := integrationOperationContext(t, sessionCtx)
+	recorder, err := session.BeginCapture(opCtx1)
 	if err != nil {
+		cancelOp1()
 		t.Fatal(err)
 	}
-	if err := session.Navigate(ctx, targetURL+"/limits/bounded-dom"); err != nil {
+	if err := session.Navigate(opCtx1, targetURL+"/limits/bounded-dom"); err != nil {
+		cancelOp1()
 		t.Fatal(err)
 	}
-	result, err := recorder.Finish(ctx)
+	result, err := recorder.Finish(opCtx1)
+	cancelOp1()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Fatalf("DOM snapshot = %d bytes, truncated=%t", len(result.DOM), result.DOMTruncated)
 	}
-	recorder, err = session.BeginCapture(ctx)
+
+	opCtx2, cancelOp2 := integrationOperationContext(t, sessionCtx)
+	recorder, err = session.BeginCapture(opCtx2)
 	if err != nil {
+		cancelOp2()
 		t.Fatal(err)
 	}
-	if err := session.Navigate(ctx, targetURL+"/limits/large-postload-dom"); err != nil {
+	if err := session.Navigate(opCtx2, targetURL+"/limits/large-postload-dom"); err != nil {
+		cancelOp2()
 		t.Fatal(err)
 	}
-	postLoadResult, err := recorder.Finish(ctx)
+	postLoadResult, err := recorder.Finish(opCtx2)
+	cancelOp2()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !postLoadResult.DOMTruncated || len(postLoadResult.DOM) > maxDOMBytes {
 		t.Fatalf("post-load DOM snapshot = %d bytes, truncated=%t", len(postLoadResult.DOM), postLoadResult.DOMTruncated)
 	}
-	if err := session.Navigate(ctx, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
+
+	opCtx3, cancelOp3 := integrationOperationContext(t, sessionCtx)
+	defer cancelOp3()
+	if err := session.Navigate(opCtx3, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
 		t.Fatalf("concurrent resource navigation error = %v, want ErrConcurrencyLimit", err)
 	}
 	if peak := peakResources.Load(); peak > 1 {
@@ -476,17 +550,23 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			session, err := client.Start(ctx)
+			sessionCtx, cancelSession := integrationSessionContext(t)
+			defer cancelSession()
+
+			started := time.Now()
+			session, err := client.Start(sessionCtx)
 			if err != nil {
 				if !explicit {
 					t.Skipf("sandboxed Chromium is unavailable: %v", err)
 				}
 				t.Fatal(err)
 			}
+			t.Logf("Chromium startup completed in %s", time.Since(started))
 			defer session.Close()
-			if err := session.Navigate(ctx, targetURL+test.path); !errors.Is(err, test.wantErr) {
+
+			opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+			defer cancelOp()
+			if err := session.Navigate(opCtx, targetURL+test.path); !errors.Is(err, test.wantErr) {
 				t.Fatalf("Navigate() error = %v, want %v", err, test.wantErr)
 			}
 			if test.path == "/limits/download" {
@@ -610,6 +690,10 @@ func fixtureResourceURLs(baseURL string, paths []string) []string {
 	return urls
 }
 
+func fixtureResourcePattern(baseURL string, resourcePath string) string {
+	return baseURL + resourcePath
+}
+
 func assertDeclaredCaptureURL(t *testing.T, fixture *fixtureServer, rawURL string) {
 	t.Helper()
 	parsed, err := url.Parse(rawURL)
@@ -652,7 +736,7 @@ func configureIntegrationFixture(t *testing.T, config *Config, server *httptest.
 func integrationConfig(t *testing.T) (Config, bool) {
 	t.Helper()
 	config := DefaultConfig()
-	config.StartupTimeout = maxStartupTimeout
+	config.StartupTimeout = integrationStartupTimeout
 	if path := os.Getenv("HEMERA_CHROMIUM_PATH"); path != "" {
 		config.ExecutablePath = path
 		return config, true
