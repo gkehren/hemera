@@ -294,6 +294,13 @@ func TestVendorSignalsDoNotIncurProductDetections(t *testing.T) {
 		{
 			Type:       model.SignalTypeResponseHeader,
 			Source:     analysis.SourceHTTP,
+			Key:        "x-akamai-session-info",
+			Value:      "name=ORIGIN_ROUTING; value=primary",
+			Confidence: 1.0,
+		},
+		{
+			Type:       model.SignalTypeResponseHeader,
+			Source:     analysis.SourceHTTP,
 			Key:        "Server",
 			Value:      "gws",
 			Confidence: 1.0,

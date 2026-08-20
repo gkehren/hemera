@@ -73,7 +73,7 @@ Consequently, Hemera's detectors rely on observable, public signals:
 ### 2.4 DataDome (`datadome.bot_protection`)
 
 #### `datadome.bot_protection` (Category: `bot_management`)
-- **Server-Side API Enforcer Mode:** DataDome modules running on NGINX/HAProxy or cloud middleware that only inspect backend requests and do not inject the client-side JavaScript tag (`js.datadome.co/tags.js`) or `x-datadome` headers cannot be detected on benign requests.
+- **Server-Side API Enforcer Mode:** DataDome modules running on NGINX/HAProxy or cloud middleware that only inspect backend requests and do not inject the client-side JavaScript tag (`js.datadome.co/tags.js` or `js.datadome.co/vX.Y.Z/tags.js`), `x-datadome` headers, or CAPTCHA delivery iframes cannot be detected on benign requests.
 - **Cookie Ambiguity Protection:** A standalone `datadome` cookie alone only awards a score of 40 (Low confidence), deliberately below the 75 threshold, to prevent false positives from stale cookies.
 
 ---
@@ -83,13 +83,14 @@ Consequently, Hemera's detectors rely on observable, public signals:
 #### `akamai.edge` (Category: `cdn_reverse_proxy`)
 - **Header Sanitization:** Enterprise edge configurations that strip `Server: AkamaiGHost` and `x-akamai-transformed` rely on DNS CNAME (`*.edgekey.net`, `*.akamaiedge.net`, `*.edgesuite.net`) or TLS certificate issuer verification.
 - **Prerequisite Role:** `akamai.edge` serves as an infrastructure prerequisite (`requires: ["akamai.edge"]`) for Akamai Bot Manager and App & API Protector.
+- **Debugging & Variable Headers:** `x-akamai-session-info` is an Akamai Property Manager variable exposure mechanism and serves as supporting Edge infrastructure evidence without implying WAF activation.
 
 #### `akamai.bot_manager` (Category: `bot_management`)
 - **API-Only Endpoint Protections:** Backend API protections running without Akamai client sensor scripts (`/_sec/verify.js`, `/akam/13/`) or `_abck` cookies cannot be detected passively.
 - **Dynamic Sensor Obfuscation:** Custom sensor paths generated per-customer require correlation with `_abck` telemetry cookies.
 
 #### `akamai.app_and_api_protector` (Category: `waf`)
-- **Alert-Only Mode:** Rules configured in `Alert` mode without `x-akamai-session-info` headers or standard Reference Error block pages (`Reference #18...`) do not emit signals on benign traffic.
+- **Alert-Only Mode:** Rules configured in `Alert` mode without standard Reference Error block pages (`Reference #18...`) or WAF action headers do not emit signals on benign traffic.
 - **Custom Origin Error Masking:** Block pages that do not preserve Akamai Reference numbers or GHost error structures will not trigger WAF detection.
 
 ---
@@ -121,9 +122,9 @@ Consequently, Hemera's detectors rely on observable, public signals:
 | `google.recaptcha` | Unified rule across v2/v3/Enterprise | Masked via GTM tag | Supports alternate hosts & DOM markers |
 | `aws.cloudfront` | Upstream S3 header passthrough | Strip `Server` header | Exact CloudFront header matching & DNS |
 | `aws.waf` | Invisible in silent ALB/API mode | No client SDK embedded | Matches SDK, action headers, block pages |
-| `datadome.bot_protection` | Invisible in server-only API mode | Masked JS tag | Requires JS tag, header, or cookie |
+| `datadome.bot_protection` | Invisible in server-only API mode | Masked JS tag | Requires JS tag (unversioned/versioned), header, or cookie |
 | `akamai.edge` | Stripped `Server: AkamaiGHost` | Custom edge rules | Fallback to DNS CNAME / TLS |
 | `akamai.bot_manager` | Invisible on API-only endpoints | Obfuscated sensor path | Correlation with `_abck` cookie |
-| `akamai.app_and_api_protector` | Invisible in Alert-only mode | Custom error template | Requires Reference # or session info |
+| `akamai.app_and_api_protector` | Invisible in Alert-only mode | Custom error template | Requires Reference # block page or WAF action header |
 | `hcaptcha.challenge` | Invisible if dynamically rendered | First-party reverse proxy | DOM container matching (`h-captcha`) |
 | `arkoselabs.matchkey` | Invisible on custom subdomains | Custom CNAME wrapper | DOM wrapper and callback matching |

@@ -18,7 +18,7 @@ versioned regression corpus comprising:
 
 ### Measured Accuracy Metrics (Corpus Baseline)
 
-The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 27-scenario corpus across all 13 built-in rules:
+The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 30-scenario corpus across all 13 built-in rules:
 
 $$\text{False Positive Rate (FPR)} = \frac{\text{FP}}{\text{FP} + \text{TN}} = 0.0\%$$
 
@@ -51,7 +51,7 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 | False Positive Vector | Affected Products | Mechanism | Hemera Structural Defense |
 | --- | --- | --- | --- |
 | **Documentation / Discussion Quotes** | All rules | Security blogs, forum threads, or documentation pages mentioning header names (`cf-ray`, `x-amz-cf-id`), script URLs, or DOM classes (`g-recaptcha`, `h-captcha`). | Page content markers receive supporting-only weights (30–35), which remain below the `minimum_score: 75` threshold. Decisive script URLs and response headers are required for detection. |
-| **Phishing / Lookalike Domains** | Turnstile, reCAPTCHA, DataDome, hCaptcha, Arkose | Malicious or deceptive pages loading lookalike URLs (e.g. `https://not-challenges.cloudflare.com/api.js`, `https://google.com.attacker.example/recaptcha/api.js`). | Strict regex anchoring (`^https://`) with exact subdomain and domain boundaries prevents lookalike prefix/suffix hijacking. |
+| **Phishing / Lookalike Domains** | Turnstile, reCAPTCHA, DataDome, hCaptcha, Arkose | Malicious or deceptive pages loading lookalike URLs (e.g. `https://not-challenges.cloudflare.com/api.js`, `https://google.com.attacker.example/recaptcha/api.js`, `https://captcha-delivery.com.attacker.example/`). | Strict regex anchoring (`^https://`) with exact subdomain and domain boundaries prevents lookalike prefix/suffix hijacking. |
 | **Direct Origin S3 Headers** | `aws.cloudfront` | S3 direct origin buckets emit `x-amz-request-id` and `x-amz-id-2` headers without CloudFront routing. | `aws.cloudfront` matches CloudFront-specific headers (`x-amz-cf-id`, `x-amz-cf-pop`, `Server: CloudFront`) rather than generic S3 bucket headers. |
 | **Commented-Out or Inactive Markup** | All rules | Dead code, commented-out script tags (`<!-- <script src="..."></script> -->`), or JSON-LD schema descriptions. | `httpanalyzer` extracts script and iframe sources from valid DOM node attributes (`<script src>`, `<iframe src>`), ignoring HTML comments and schema text. |
 | **Vendor Infrastructure Generalization** | `cloudflare.challenge_page`, `aws.waf`, `akamai.bot_manager`, etc. | Assuming that because a site uses Cloudflare, CloudFront, or Akamai CDN, it also has WAF or Bot Management active. | Strict **product-level separation**: vendor infrastructure rules (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) match routing headers, while product rules require explicit product evidence (SDKs, action headers, sensor scripts, block pages). |
@@ -73,7 +73,7 @@ $$\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = 100.0\%$$
 
 ## 4. Regression Corpus Fixture Inventory
 
-The regression suite in `internal/scanner/testdata/cases.json` contains 27 synthetic test cases:
+The regression suite in `internal/scanner/testdata/cases.json` contains 30 synthetic test cases:
 
 1. `turnstile documented client` &mdash; `turnstile-positive.html`
 2. `recaptcha documented client` &mdash; `recaptcha-positive.html`
@@ -93,12 +93,15 @@ The regression suite in `internal/scanner/testdata/cases.json` contains 27 synth
 16. `aws waf sdk integration` &mdash; `aws-waf-positive.html`
 17. `datadome bot protection` &mdash; `datadome-positive.html`
 18. `datadome cookie ambiguity` &mdash; `negative.html` with DataDome cookie
-19. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
-20. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
-21. `akamai waf block page` &mdash; `akamai-waf-positive.html`
-22. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
-23. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
-24. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
-25. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
-26. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
-27. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)
+19. `datadome versioned tag` &mdash; `datadome-versioned-positive.html`
+20. `datadome alternate captcha delivery host` &mdash; `datadome-interstitial-positive.html`
+21. `akamai edge proxy` &mdash; `akamai-edge-positive.html`
+22. `akamai bot manager sensor` &mdash; `akamai-bot-manager-positive.html`
+23. `akamai waf block page` &mdash; `akamai-waf-positive.html`
+24. `akamai waf ambiguity` &mdash; `negative.html` with `x-akamai-waf-action: monitor`
+25. `akamai edge with session info` &mdash; `negative.html` with `Server: AkamaiGHost` and `x-akamai-session-info`
+26. `tech blog discussion` &mdash; `tech-blog-discussion.html` (adversarial discussion quotes)
+27. `direct origin custom headers` &mdash; `direct-origin-custom-headers.html` (direct S3 & Apache)
+28. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
+29. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
+30. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)
