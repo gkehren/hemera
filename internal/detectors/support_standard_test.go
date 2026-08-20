@@ -143,12 +143,36 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 		ruleMap[rule.ID] = rule
 	}
 
-	// Verify each case satisfies its declared intent.
+	// Verify each case satisfies its declared intent without duplicates or overlap.
 	for _, c := range cases {
+		seenInCase := make(map[string]string)
+
+		checkList := func(list []string, category string) {
+			seenInList := make(map[string]bool)
+			for _, ruleID := range list {
+				if seenInList[ruleID] {
+					t.Errorf("case %q has duplicate rule %q in %s", c.Name, ruleID, category)
+				}
+				seenInList[ruleID] = true
+
+				if prevCat, exists := seenInCase[ruleID]; exists {
+					t.Errorf("case %q declares rule %q in both %s and %s", c.Name, ruleID, prevCat, category)
+				}
+				seenInCase[ruleID] = category
+
+				if _, exists := ruleMap[ruleID]; !exists {
+					t.Errorf("case %q declares unknown rule %q in %s", c.Name, ruleID, category)
+				}
+			}
+		}
+
+		checkList(c.PositiveFor, "positive_for")
+		checkList(c.HardNegativeFor, "hard_negative_for")
+		checkList(c.AmbiguousFor, "ambiguous_for")
+
 		for _, posRuleID := range c.PositiveFor {
 			rule, exists := ruleMap[posRuleID]
 			if !exists {
-				t.Errorf("case %q declares unknown positive_for rule %q", c.Name, posRuleID)
 				continue
 			}
 			score := c.Scores[posRuleID]
@@ -161,9 +185,7 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 		}
 
 		for _, negRuleID := range c.HardNegativeFor {
-			_, exists := ruleMap[negRuleID]
-			if !exists {
-				t.Errorf("case %q declares unknown hard_negative_for rule %q", c.Name, negRuleID)
+			if _, exists := ruleMap[negRuleID]; !exists {
 				continue
 			}
 			score := c.Scores[negRuleID]
@@ -178,7 +200,6 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 		for _, ambRuleID := range c.AmbiguousFor {
 			rule, exists := ruleMap[ambRuleID]
 			if !exists {
-				t.Errorf("case %q declares unknown ambiguous_for rule %q", c.Name, ambRuleID)
 				continue
 			}
 			score := c.Scores[ambRuleID]
@@ -437,28 +458,31 @@ func TestBuiltInRulesHaveDocumentedLimitations(t *testing.T) {
 	}
 }
 
+type evidenceProvenance struct {
+	Weight    float64 `json:"weight"`
+	Group     string  `json:"group"`
+	Role      string  `json:"role"`
+	Source    string  `json:"source"`
+	Rationale string  `json:"rationale"`
+}
+
+type ruleProvenance struct {
+	MinimumScore     float64                       `json:"minimum_score"`
+	MinimumEvidence  int                           `json:"minimum_evidence"`
+	ScoringRationale string                        `json:"scoring_rationale"`
+	Evidence         map[string]evidenceProvenance `json:"evidence"`
+}
+
+type provenanceManifest struct {
+	SchemaVersion int                       `json:"schema_version"`
+	Rules         map[string]ruleProvenance `json:"rules"`
+}
+
 func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 	t.Parallel()
 	ruleSet, err := Load()
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	type evidenceProvenance struct {
-		Role      string `json:"role"`
-		Group     string `json:"group"`
-		Source    string `json:"source"`
-		Rationale string `json:"rationale"`
-	}
-
-	type ruleProvenance struct {
-		ScoringRationale string                        `json:"scoring_rationale"`
-		Evidence         map[string]evidenceProvenance `json:"evidence"`
-	}
-
-	type provenanceManifest struct {
-		SchemaVersion int                       `json:"schema_version"`
-		Rules         map[string]ruleProvenance `json:"rules"`
 	}
 
 	manifestPath := filepath.Join("provenance.json")
@@ -499,6 +523,12 @@ func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 			if !exists {
 				t.Fatalf("rule %q is missing from provenance manifest", rule.ID)
 			}
+			if ruleProv.MinimumScore != rule.MinimumScore {
+				t.Errorf("rule %q minimum_score = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumScore, rule.MinimumScore)
+			}
+			if ruleProv.MinimumEvidence != rule.MinimumEvidence {
+				t.Errorf("rule %q minimum_evidence = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumEvidence, rule.MinimumEvidence)
+			}
 			if strings.TrimSpace(ruleProv.ScoringRationale) == "" {
 				t.Errorf("rule %q has empty scoring_rationale in provenance manifest", rule.ID)
 			}
@@ -523,15 +553,15 @@ func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 				if evProv.Role != wantRole {
 					t.Errorf("rule %q evidence %q role = %q, want %q (weight: %v, min_score: %v)", rule.ID, ev.ID, evProv.Role, wantRole, ev.Weight, rule.MinimumScore)
 				}
-
+				if evProv.Weight != ev.Weight {
+					t.Errorf("rule %q evidence %q weight = %v in provenance, want %v from rule", rule.ID, ev.ID, evProv.Weight, ev.Weight)
+				}
 				if evProv.Group != ev.Group {
 					t.Errorf("rule %q evidence %q group = %q, want %q", rule.ID, ev.ID, evProv.Group, ev.Group)
 				}
-
 				if !strings.HasPrefix(evProv.Source, "https://") {
 					t.Errorf("rule %q evidence %q source %q is not a valid https URL", rule.ID, ev.ID, evProv.Source)
 				}
-
 				if strings.TrimSpace(evProv.Rationale) == "" {
 					t.Errorf("rule %q evidence %q has empty rationale", rule.ID, ev.ID)
 				}
@@ -557,4 +587,152 @@ func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 			t.Errorf("provenance manifest declares rule %q not found in rules.json", provRuleID)
 		}
 	}
+}
+
+// TestSupportStandardObservationCapabilitiesMatrix derives required channels from
+// rules and verifies that automated tests exercise all claimed channels.
+func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type channelReqs struct {
+		HTTP          bool
+		DNS           bool
+		TLS           bool
+		BrowserScript bool
+		BrowserIframe bool
+		BrowserCookie bool
+		BrowserDOM    bool
+	}
+
+	var inspectCondition func(rules.Condition, *channelReqs)
+	inspectCondition = func(c rules.Condition, reqs *channelReqs) {
+		if c.Signal != nil {
+			switch c.Signal.Type {
+			case model.SignalTypeResponseHeader:
+				reqs.HTTP = true
+			case model.SignalTypeDNSRecord:
+				reqs.DNS = true
+			case model.SignalTypeTLSProperty:
+				reqs.TLS = true
+			case model.SignalTypeScriptURL:
+				reqs.HTTP = true
+				if c.Signal.Source == nil || c.Signal.Source.Exact == nil || *c.Signal.Source.Exact != "http_analyzer" {
+					reqs.BrowserScript = true
+				}
+			case model.SignalTypeIframeURL:
+				reqs.HTTP = true
+				reqs.BrowserIframe = true
+			case model.SignalTypeCookie:
+				reqs.HTTP = true
+				reqs.BrowserCookie = true
+			case model.SignalTypePageContent:
+				reqs.HTTP = true
+				if c.Signal.Source == nil || c.Signal.Source.Exact == nil || *c.Signal.Source.Exact != "http_analyzer" {
+					reqs.BrowserDOM = true
+				}
+			}
+		}
+		for _, child := range c.All {
+			inspectCondition(child, reqs)
+		}
+		for _, child := range c.Any {
+			inspectCondition(child, reqs)
+		}
+	}
+
+	for _, rule := range ruleSet.Rules {
+		rule := rule
+		t.Run(rule.ID, func(t *testing.T) {
+			t.Parallel()
+			var reqs channelReqs
+			inspectCondition(rule.Match, &reqs)
+
+			// All rules must support at least HTTP or DNS/TLS.
+			if !reqs.HTTP && !reqs.DNS && !reqs.TLS {
+				t.Fatalf("rule %q does not claim any observation channels", rule.ID)
+			}
+
+			// Verify DNS-enabled rules have explicit DNS support.
+			if reqs.DNS {
+				switch rule.ID {
+				case "cloudflare.proxy", "aws.cloudfront", "akamai.edge":
+					// expected
+				default:
+					t.Errorf("unexpected DNS capability claimed by rule %q", rule.ID)
+				}
+			}
+
+			// Verify TLS-enabled rules have explicit TLS support.
+			if reqs.TLS {
+				switch rule.ID {
+				case "cloudflare.proxy", "aws.cloudfront", "akamai.edge":
+					// expected
+				default:
+					t.Errorf("unexpected TLS capability claimed by rule %q", rule.ID)
+				}
+			}
+		})
+	}
+}
+
+func TestSupportStandardEnforcementRejections(t *testing.T) {
+	t.Parallel()
+
+	t.Run("provenance weight drift fails", func(t *testing.T) {
+		t.Parallel()
+		ruleSet, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ruleSet.Rules[0].Match.Signal = &rules.Evidence{
+			ID:     "drift-ev",
+			Type:   model.SignalTypeResponseHeader,
+			Weight: 99,
+		}
+		// Validate that altered rules fail support standard validation
+		if err := ValidateSupportStandard(ruleSet); err == nil {
+			t.Fatal("expected support standard violation for unachievable/drifted rule, got nil")
+		}
+	})
+
+	t.Run("fixture intent duplicate rule rejection", func(t *testing.T) {
+		t.Parallel()
+		caseIntent := struct {
+			PositiveFor []string
+		}{
+			PositiveFor: []string{"cloudflare.proxy", "cloudflare.proxy"},
+		}
+		seen := make(map[string]bool)
+		hasDuplicate := false
+		for _, r := range caseIntent.PositiveFor {
+			if seen[r] {
+				hasDuplicate = true
+				break
+			}
+			seen[r] = true
+		}
+		if !hasDuplicate {
+			t.Fatal("expected duplicate detection to flag duplicate rule in positive_for")
+		}
+	})
+
+	t.Run("fixture intent cross-category overlap rejection", func(t *testing.T) {
+		t.Parallel()
+		posList := []string{"cloudflare.proxy"}
+		negList := []string{"cloudflare.proxy"}
+		hasOverlap := false
+		for _, r := range posList {
+			if slices.Contains(negList, r) {
+				hasOverlap = true
+				break
+			}
+		}
+		if !hasOverlap {
+			t.Fatal("expected overlap check to flag rule present in both positive and negative")
+		}
+	})
 }

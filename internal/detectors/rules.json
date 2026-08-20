@@ -486,7 +486,7 @@
                 "contains": "WAF",
                 "case_insensitive": true
               },
-              "weight": 75
+              "weight": 35
             }
           },
           {

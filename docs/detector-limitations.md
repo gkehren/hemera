@@ -31,7 +31,7 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 #### `cloudflare.proxy` (Category: `cdn_reverse_proxy`)
 - **Plan Tier Invisibility:** Cannot determine whether the domain is on Free, Pro, Business, or Enterprise tiers from public headers alone.
-- **Header Stripping:** Enterprise customers using Cloudflare Workers or custom Transform Rules may strip or rename `Server: cloudflare` and `cf-ray`. In such cases, detection relies on DNS CNAME (`*.cloudflare.net`) or TLS certificates.
+- **Header Stripping:** Enterprise customers using Cloudflare Workers or custom Transform Rules may strip or rename `Server: cloudflare` and `cf-ray`. In such cases, DNS CNAME (`*.cloudflare.net`, 30 points) and TLS certificate metadata (20 points) provide supporting corroboration (50 points total), remaining below the `minimum_score: 75` threshold unless paired with decisive headers.
 - **No Product Implication:** Detecting `cloudflare.proxy` does *not* imply that WAF, Bot Protection, or Turnstile are active.
 
 #### `cloudflare.challenge_page` (Category: `captcha_challenge`)
@@ -62,7 +62,7 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 #### `aws.cloudfront` (Category: `cdn_reverse_proxy`)
 - **Upstream S3 Passthrough:** Direct Amazon S3 origin buckets emit `x-amz-request-id` and `x-amz-id-2`. Hemera specifically requires CloudFront headers (`x-amz-cf-id`, `x-amz-cf-pop`, `Server: CloudFront`) to avoid false positives.
-- **Custom Header Masking:** CloudFront distributions configured with custom response header policies that remove `Server` and `x-amz-cf-id` rely on DNS CNAME (`*.cloudfront.net`) fallback.
+- **Custom Header Masking:** CloudFront distributions configured with custom response header policies that remove `Server` and `x-amz-cf-id` rely on DNS CNAME (`*.cloudfront.net`, 30 points) and TLS certificate metadata (20 points), which provide supporting corroboration (50 points total) below the 75 threshold.
 
 #### `aws.waf` (Category: `waf`)
 - **ALB / API Gateway Backend WAFs:** AWS WAF deployed on Application Load Balancers or API Gateways that inspect traffic silently in `Count` or `Allow` mode emit no public headers on benign requests.

@@ -189,7 +189,8 @@ func TestDetectorCorpusAccuracyAndRegressionMetrics(t *testing.T) {
 		totalFN int
 	)
 
-	t.Log("=== DETECTOR REGRESSION ACCURACY BENCHMARK ===")
+	t.Log("=== SYNTHETIC DETECTOR REGRESSION BENCHMARK ===")
+	t.Log("// Note: These metrics measure the versioned synthetic regression corpus baseline only and are not estimates of real-world precision/recall.")
 	t.Log(fmt.Sprintf("%-30s | %4s | %4s | %4s | %4s | %8s | %8s | %7s | %7s",
 		"Rule ID", "TP", "FP", "TN", "FN", "Prec", "Recall", "FPR", "FNR"))
 	t.Log(strings.Repeat("-", 100))
@@ -206,13 +207,13 @@ func TestDetectorCorpusAccuracyAndRegressionMetrics(t *testing.T) {
 			m.Precision()*100, m.Recall()*100, m.FPR()*100, m.FNR()*100))
 
 		if m.FP > 0 {
-			t.Errorf("rule %q has %d false positives (FPR = %.2f%%)", rule.ID, m.FP, m.FPR()*100)
+			t.Errorf("rule %q has %d false positives in synthetic regression corpus (FPR = %.2f%%)", rule.ID, m.FP, m.FPR()*100)
 		}
 		if m.FN > 0 {
-			t.Errorf("rule %q has %d false negatives (FNR = %.2f%%)", rule.ID, m.FN, m.FNR()*100)
+			t.Errorf("rule %q has %d false negatives in synthetic regression corpus (FNR = %.2f%%)", rule.ID, m.FN, m.FNR()*100)
 		}
 		if m.TP == 0 {
-			t.Errorf("rule %q has no true positive coverage in regression corpus", rule.ID)
+			t.Errorf("rule %q has no true positive coverage in synthetic regression corpus", rule.ID)
 		}
 	}
 
@@ -226,13 +227,13 @@ func TestDetectorCorpusAccuracyAndRegressionMetrics(t *testing.T) {
 	}
 
 	t.Log(strings.Repeat("-", 100))
-	t.Log(fmt.Sprintf("OVERALL CORPUS METRICS: Total Cases=%d, TP=%d, FP=%d, TN=%d, FN=%d, Overall FPR=%.2f%%, Overall FNR=%.2f%%",
+	t.Log(fmt.Sprintf("OVERALL SYNTHETIC CORPUS METRICS: Total Cases=%d, TP=%d, FP=%d, TN=%d, FN=%d, Overall FPR=%.2f%%, Overall FNR=%.2f%%",
 		len(cases), totalTP, totalFP, totalTN, totalFN, overallFPR*100, overallFNR*100))
 
 	if totalFP > 0 {
-		t.Fatalf("Corpus accuracy failure: %d total false positives detected", totalFP)
+		t.Fatalf("Synthetic corpus regression failure: %d total false positives detected", totalFP)
 	}
 	if totalFN > 0 {
-		t.Fatalf("Corpus accuracy failure: %d total false negatives detected", totalFN)
+		t.Fatalf("Synthetic corpus regression failure: %d total false negatives detected", totalFN)
 	}
 }
