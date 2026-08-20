@@ -492,3 +492,84 @@ func (b *fakeNavigationBackend) navigate(ctx context.Context, rawURL string) err
 
 var _ networkguard.Resolver = navigationResolver(nil)
 var _ navigationBackendSession = (*fakeNavigationBackend)(nil)
+
+func TestNavigationBudgetErrorPrioritization(t *testing.T) {
+	t.Parallel()
+
+	t.Run("infra canceled then policy transfer limit -> policy wins", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		budget.failInfrastructure(context.Canceled)
+		budget.failPolicy(ErrTransferLimit)
+		if got := budget.failure(); !errors.Is(got, ErrTransferLimit) {
+			t.Fatalf("failure() = %v, want ErrTransferLimit", got)
+		}
+	})
+
+	t.Run("policy redirect limit then infra canceled -> policy wins", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		budget.failPolicy(ErrRedirectLimit)
+		budget.failInfrastructure(context.Canceled)
+		if got := budget.failure(); !errors.Is(got, ErrRedirectLimit) {
+			t.Fatalf("failure() = %v, want ErrRedirectLimit", got)
+		}
+	})
+
+	t.Run("policy invalid URL then net abort -> policy wins", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		budget.failPolicy(networkguard.ErrInvalidURL)
+		budget.failInfrastructure(errors.New("net::ERR_ABORTED"))
+		if got := budget.failure(); !errors.Is(got, networkguard.ErrInvalidURL) {
+			t.Fatalf("failure() = %v, want ErrInvalidURL", got)
+		}
+	})
+
+	t.Run("infra only -> infra preserved", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		infraErr := errors.New("underlying socket closed")
+		budget.failInfrastructure(infraErr)
+		if got := budget.failure(); !errors.Is(got, infraErr) {
+			t.Fatalf("failure() = %v, want %v", got, infraErr)
+		}
+	})
+
+	t.Run("authorize credential URL immediately sets policy error and stops", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		err := budget.authorize("http://user:pass@example.com/", false)
+		if !errors.Is(err, networkguard.ErrInvalidURL) {
+			t.Fatalf("authorize() error = %v, want ErrInvalidURL", err)
+		}
+		budget.fail(err)
+		if !budget.stopped() {
+			t.Fatal("budget should be stopped after policy failure")
+		}
+		if got := budget.failure(); !errors.Is(got, networkguard.ErrInvalidURL) {
+			t.Fatalf("failure() = %v, want ErrInvalidURL", got)
+		}
+	})
+
+	t.Run("authorize redirect loop immediately sets ErrRedirectLimit", func(t *testing.T) {
+		t.Parallel()
+		config := DefaultConfig()
+		config.MaxRedirects = 1
+		budget := newNavigationBudget(config)
+		if err := budget.authorize("http://example.com/start", false); err != nil {
+			t.Fatal(err)
+		}
+		if err := budget.authorize("http://example.com/r1", true); err != nil {
+			t.Fatal(err)
+		}
+		err := budget.authorize("http://example.com/r2", true)
+		if !errors.Is(err, ErrRedirectLimit) {
+			t.Fatalf("authorize() error = %v, want ErrRedirectLimit", err)
+		}
+		budget.fail(err)
+		if got := budget.failure(); !errors.Is(got, ErrRedirectLimit) {
+			t.Fatalf("failure() = %v, want ErrRedirectLimit", got)
+		}
+	})
+}

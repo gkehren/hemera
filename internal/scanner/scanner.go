@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/gkehren/hemera/internal/analysis"
@@ -66,8 +67,9 @@ const (
 	AnalyzerStatusFailed AnalyzerStatus = "failed"
 )
 
-// DetectionStatus distinguishes a negative result from a result that could not
-// be evaluated because a source required by every rule branch was incomplete.
+// DetectionStatus distinguishes a conclusive positive or negative result from a
+// result that could not be conclusively evaluated because observation coverage was
+// insufficient to determine whether the detection criteria could be satisfied.
 type DetectionStatus string
 
 const (
@@ -227,35 +229,193 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		return Result{}, fmt.Errorf("scan canceled during detector evaluation: %w", err)
 	}
 	result.Detections = detections
-	result.Coverage = buildDetectionCoverage(s.ruleSet, detections, result.Analyzers)
+	coverage, err := buildDetectionCoverage(s.ruleSet, detections, result.Analyzers, result.Signals)
+	if err != nil {
+		return Result{}, fmt.Errorf("evaluate coverage: %w", err)
+	}
+	result.Coverage = coverage
 	return result, nil
 }
 
-func buildDetectionCoverage(ruleSet rules.RuleSet, detections []scoring.Detection, analyzers []AnalyzerResult) []DetectionCoverage {
-	statusBySource := make(map[string]AnalyzerStatus, len(analyzers))
+func buildDetectionCoverage(
+	ruleSet rules.RuleSet,
+	detections []scoring.Detection,
+	analyzers []AnalyzerResult,
+	signals []model.Signal,
+) ([]DetectionCoverage, error) {
+	completeSources := make(map[string]bool, len(analyzers))
 	for _, analyzer := range analyzers {
-		statusBySource[analyzer.Observation.Source] = analyzer.Status
+		completeSources[analyzer.Observation.Source] = (analyzer.Status == AnalyzerStatusComplete)
 	}
-	coverage := make([]DetectionCoverage, 0, len(ruleSet.Rules))
-	for index, rule := range ruleSet.Rules {
-		required := rules.RequiredSources(rule, ruleSet)
-		incomplete := make([]string, 0, len(required))
-		for _, source := range required {
-			if status, ok := statusBySource[source]; !ok || status != AnalyzerStatusComplete {
-				incomplete = append(incomplete, source)
+
+	detectionsByID := make(map[string]scoring.Detection, len(detections))
+	for _, det := range detections {
+		detectionsByID[det.RuleID] = det
+	}
+
+	ruleByID := make(map[string]rules.Rule, len(ruleSet.Rules))
+	for _, rule := range ruleSet.Rules {
+		ruleByID[rule.ID] = rule
+	}
+
+	conditionResults := make(map[string]rules.ConditionCoverageResult, len(ruleSet.Rules))
+	for _, rule := range ruleSet.Rules {
+		cRes, err := rules.EvaluateConditionCoverage(rule.Match, signals, completeSources)
+		if err != nil {
+			return nil, fmt.Errorf("evaluate coverage for rule %q: %w", rule.ID, err)
+		}
+		conditionResults[rule.ID] = cRes
+	}
+
+	type ruleCoverageState struct {
+		status            DetectionStatus
+		incompleteSources []string
+		requiredSources   []string
+	}
+
+	evaluated := make(map[string]ruleCoverageState, len(ruleSet.Rules))
+	visiting := make(map[string]bool, len(ruleSet.Rules))
+
+	var evalRule func(string) ruleCoverageState
+	evalRule = func(id string) ruleCoverageState {
+		if state, ok := evaluated[id]; ok {
+			return state
+		}
+		if visiting[id] {
+			return ruleCoverageState{status: DetectionStatusNotDetected}
+		}
+		visiting[id] = true
+		defer func() { delete(visiting, id) }()
+
+		rule := ruleByID[id]
+		det := detectionsByID[id]
+		cRes := conditionResults[id]
+
+		if det.Detected {
+			state := ruleCoverageState{
+				status:            DetectionStatusDetected,
+				incompleteSources: nil,
+				requiredSources:   cRes.RequiredSources,
+			}
+			evaluated[id] = state
+			return state
+		}
+
+		observedPenalties := 0.0
+		for _, ne := range det.NegativeEvidence {
+			if ne.RawContribution < 0 {
+				observedPenalties += -ne.RawContribution
+			} else {
+				observedPenalties += ne.RawContribution
 			}
 		}
-		status := DetectionStatusNotDetected
-		if index < len(detections) && detections[index].Detected {
-			status = DetectionStatusDetected
-		} else if len(incomplete) > 0 {
-			status = DetectionStatusInsufficientCoverage
+		for _, ae := range det.AmbiguousEvidence {
+			if ae.RawContribution < 0 {
+				observedPenalties += -ae.RawContribution
+			} else {
+				observedPenalties += ae.RawContribution
+			}
 		}
+		for _, ac := range det.AppliedConflicts {
+			observedPenalties += ac.Penalty
+		}
+
+		ruleCovState, ruleIncomplete := rules.EvaluateRuleCoverage(rule, cRes, det.Detected, observedPenalties)
+
+		depUnknown := false
+		depNotDetected := false
+		var depIncomplete []string
+		var allRequired []string
+		allRequired = append(allRequired, cRes.RequiredSources...)
+
+		for _, depID := range rule.Requires {
+			depState := evalRule(depID)
+			allRequired = append(allRequired, depState.requiredSources...)
+			if depState.status == DetectionStatusInsufficientCoverage {
+				depUnknown = true
+				depIncomplete = append(depIncomplete, depState.incompleteSources...)
+			} else if depState.status == DetectionStatusNotDetected {
+				depNotDetected = true
+			}
+		}
+
+		if ruleCovState == rules.CoverageStateNotMatched {
+			state := ruleCoverageState{
+				status:            DetectionStatusNotDetected,
+				incompleteSources: nil,
+				requiredSources:   deduplicateSorted(allRequired),
+			}
+			evaluated[id] = state
+			return state
+		}
+
+		if depNotDetected {
+			state := ruleCoverageState{
+				status:            DetectionStatusNotDetected,
+				incompleteSources: nil,
+				requiredSources:   deduplicateSorted(allRequired),
+			}
+			evaluated[id] = state
+			return state
+		}
+
+		if depUnknown {
+			var combinedIncomplete []string
+			combinedIncomplete = append(combinedIncomplete, ruleIncomplete...)
+			combinedIncomplete = append(combinedIncomplete, depIncomplete...)
+			state := ruleCoverageState{
+				status:            DetectionStatusInsufficientCoverage,
+				incompleteSources: deduplicateSorted(combinedIncomplete),
+				requiredSources:   deduplicateSorted(allRequired),
+			}
+			evaluated[id] = state
+			return state
+		}
+
+		if ruleCovState == rules.CoverageStateUnknown {
+			state := ruleCoverageState{
+				status:            DetectionStatusInsufficientCoverage,
+				incompleteSources: deduplicateSorted(ruleIncomplete),
+				requiredSources:   deduplicateSorted(allRequired),
+			}
+			evaluated[id] = state
+			return state
+		}
+
+		state := ruleCoverageState{
+			status:            DetectionStatusNotDetected,
+			incompleteSources: nil,
+			requiredSources:   deduplicateSorted(allRequired),
+		}
+		evaluated[id] = state
+		return state
+	}
+
+	coverage := make([]DetectionCoverage, 0, len(ruleSet.Rules))
+	for _, rule := range ruleSet.Rules {
+		state := evalRule(rule.ID)
 		coverage = append(coverage, DetectionCoverage{
-			RuleID: rule.ID, Status: status, RequiredSources: required, IncompleteSources: incomplete,
+			RuleID:            rule.ID,
+			Status:            state.status,
+			RequiredSources:   state.requiredSources,
+			IncompleteSources: state.incompleteSources,
 		})
 	}
-	return coverage
+	return coverage, nil
+}
+
+func deduplicateSorted(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	sort.Strings(items)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if len(result) == 0 || result[len(result)-1] != item {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func priorObservations(results []AnalyzerResult) []analysis.Observation {

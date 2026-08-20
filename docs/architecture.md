@@ -242,10 +242,11 @@ Chromium starts. Browser startup, navigation, capture, or cleanup failures
 retain safe partial signals where available and otherwise produce a failed
 coverage entry. The scanner validates all three observations, aggregates their
 signals in configured order, and invokes the analyzer-independent scoring engine
-once. For a negative rule result, the scanner derives mandatory signal sources
-from exact `source` predicates and dependencies. A partial, failed, or absent
-mandatory source produces `insufficient_coverage` in report V4 instead of a
-definitive `not_detected`; rules never import or name a Go analyzer type.
+once. For a negative rule result, the scanner evaluates tri-state condition
+coverage and scoring upper bounds across capable sources and dependencies. When
+an incomplete source could have allowed a rule to reach detection gates, report
+V5 emits `insufficient_coverage` instead of a definitive `not_detected`; rules
+never import or name a Go analyzer type.
 
 ### Signal model
 
@@ -407,13 +408,13 @@ dependencies or mutable aliasing. The current CLI configures HTTP first with
 The CLI renders that model as human-oriented text by default or as versioned,
 deterministic JSON with `--format json`. Both formats explain detected and
 non-detected rules, including raw positive evidence, its correlation group, the
-selected maximum contribution, and later penalties. JSON V4 also records each
+selected maximum contribution, and later penalties. JSON V5 also records each
 analyzer's source, coverage status, and producer-sanitized warnings. They omit
 HTML, header/cookie values, and analyzer error details and sanitize every emitted
 URL. The JSON schema is experimental until the first stable release; breaking
 pre-release changes still require a documented schema-version increment. The
 contract and text-output expectations are documented in
-[JSON report schema V4](report-schema.md). An exportable local HTML report
+[JSON report schema V5](report-schema.md). An exportable local HTML report
 remains a later goal.
 
 ## Proposed repository layout
