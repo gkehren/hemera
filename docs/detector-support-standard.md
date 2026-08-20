@@ -502,7 +502,7 @@ The following detector families currently meet the support standard:
 
 - **Known false positives:** Negligible.
 - **Known false negatives:**
-  - First-Party JS Tag integrations (`https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) and first-party reverse-proxy aliases are known false negatives unless accompanied by DataDome response headers (`x-datadome`) or tracking cookies (`datadome`).
+  - First-Party JS Tag integrations (`https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) and first-party reverse-proxy aliases are known false negatives for script-URL matching. Detection may still succeed when another decisive signal is present (such as `x-datadome` response headers or challenge interstitials); the `datadome` cookie remains supporting evidence only and cannot trigger detection alone.
   - API-only protections using server-side SDKs without client-side JavaScript tags or response headers.
 
 ---

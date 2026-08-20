@@ -74,7 +74,7 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 #### `datadome.bot_protection` (Category: `bot_management`)
 - **Server-Side API Enforcer Mode:** DataDome modules running on NGINX/HAProxy or cloud middleware that only inspect backend requests and do not inject the client-side JavaScript tag (`js.datadome.co/tags.js` or `js.datadome.co/vX.Y.Z/tags.js`), `x-datadome` headers, or CAPTCHA delivery iframes cannot be detected on benign requests.
-- **First-Party JS Tag & Reverse Proxy Aliases:** Deployments serving the JavaScript tag under custom first-party domains (e.g. `https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) or via reverse-proxy aliases are known false negatives for static script matching unless accompanied by `x-datadome` response headers or `datadome` cookies.
+- **First-Party JS Tag & Reverse Proxy Aliases:** Deployments serving the JavaScript tag under custom first-party domains (e.g. `https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) or via reverse-proxy aliases are known false negatives for script-URL matching. Detection may still succeed when another decisive DataDome signal is present (such as `x-datadome` response headers or challenge interstitials); the `datadome` cookie remains supporting evidence only (score 40) and cannot trigger detection by itself.
 - **Cookie Ambiguity Protection:** A standalone `datadome` cookie alone only awards a score of 40 (Low confidence), deliberately below the 75 threshold, to prevent false positives from stale cookies.
 
 ---
