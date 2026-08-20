@@ -12,10 +12,13 @@ path/query pair, an expected status and content type, and either a relative
 Routes may declare an `expected_authorization` value to prove that synthetic
 credentials reached the fixture while remaining absent from captured metadata.
 The `cases` array defines each capture scenario's entry and final route,
-expected final marker, DOM markers, ordered traffic, scripts, iframes, cookie
-names, and values that must never occur in minimized metadata. Integration tests
-do not wait on the marker; the production post-load network-idle/deadline phase
-must make it visible before final capture.
+expected final marker, DOM markers, exact unique traffic set, semantic
+`traffic_dependencies`, scripts, iframes, cookie names, and values that must
+never occur in minimized metadata. Dependencies form an acyclic partial order.
+Missing, extra, duplicate, and dependency-violating requests fail, but routes
+without a dependency may arrive in either order. Integration tests do not wait
+on the marker; explicit fixture network handshakes keep production's post-load
+network-idle/deadline phase active until delayed work is complete.
 
 The `limits` assets are adversarial synthetic inputs for redirects, compression,
 post-load DOM growth, continuous requests, long polling, recursive frames,
@@ -27,7 +30,8 @@ To add a fixture:
 1. Add a small asset beneath this directory using only relative, same-origin
    references. Absolute and protocol-relative HTTP(S) references are rejected.
 2. Declare its route in `cases.json`; never add an absolute HTTP(S) reference.
-3. Add or update a case with exact expected traffic and observations.
+3. Add or update a case with the exact expected traffic set, only the ordering
+   dependencies required by browser semantics, and the expected observations.
 4. Run `go test ./internal/browser`. This validates the complete manifest and
    corpus without requiring Chromium.
 5. When Chromium is installed, also run

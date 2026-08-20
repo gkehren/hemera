@@ -86,6 +86,9 @@ Browser -----┘
 - [x] Harden bounded post-load observation, Chromium security invariants,
   child-target behavior, cookie provenance, and coverage-aware reporting
   ([issue #7](https://github.com/gkehren/hemera/issues/7)).
+- [x] Eliminate browser integration ordering and post-load fixture races, add
+  bounded CDP diagnostics, and verify repeated standard and race runs
+  ([issue #15](https://github.com/gkehren/hemera/issues/15)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while

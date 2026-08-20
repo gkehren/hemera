@@ -135,6 +135,14 @@ invariants fail startup.
 enables the CDP Network and Page domains and records requests, responses, and
 redirect responses in CDP order. Finalization stops the listener, reads target
 metadata, and runs a Hemera-owned serializer in an isolated JavaScript world.
+Finalization identifies the main document by both frame and loader ID before
+and after evaluation. If Chromium reports a narrowly classified
+execution-context invalidation and the document identity actually changed,
+capture reacquires the current frame and retries once. Unclassified CDP
+failures and JavaScript serializer exceptions remain fatal. Exception
+diagnostics retain only bounded, control-character-sanitized text, description,
+source location, and at most three stack frames; page and stack URLs are
+omitted.
 The serializer walks at most 100,000 DOM nodes and attributes, appends at most
 2 MiB while walking instead of materializing an unbounded outer HTML string,
 and collects bounded `script[src]` and `iframe[src]` URLs in document order. It
@@ -205,17 +213,19 @@ without writing a file.
 
 The tagged integration test loads a versioned, entirely synthetic corpus from
 `internal/browser/testdata`. Its test-only manifest declares the sole synthetic
-host, every route and resource, capture completion selectors, ordered traffic,
-DOM markers, scripts, iframes, cookie names, and forbidden metadata. A loader
+host, every route and resource, capture completion selectors, an exact traffic
+set with semantic partial-order dependencies, DOM markers, scripts, iframes,
+cookie names, and forbidden metadata. A loader
 rejects path traversal, duplicate or missing routes, oversized assets, absolute
 or protocol-relative HTTP(S) references, and undeclared redirect destinations
 without starting Chromium. The server accepts only declared GET requests for
 `fixture.test`.
 
 Each capture scenario receives a fresh browser session and profile. Dynamic
-scenarios rely only on production post-load quiet/deadline semantics before
-capture finalization; tests do not call a completion-selector wait. A delayed
-fixture schedules fetch, cookie, script, and DOM work after `load`. Negative and
+scenarios use explicit request/response completion handshakes while relying on
+production post-load quiet/deadline semantics before capture finalization;
+tests do not call a completion-selector wait. A delayed fixture schedules
+fetch, cookie, script, and DOM work after `load`. Negative and
 adversarial cases cover quiet pages, continuous traffic, request/concurrency/byte
 limits, private and rebinding destinations, redirect loops, credential
 redirects, malformed and oversized URLs, compressed bodies, recursive iframes,
