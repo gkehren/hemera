@@ -139,14 +139,18 @@ Finalization identifies the main document by both frame and loader ID before
 and after evaluation. If Chromium reports a narrowly classified
 execution-context invalidation and the document identity actually changed,
 capture reacquires the current frame and retries once. Unclassified CDP
-failures and JavaScript serializer exceptions remain fatal. Exception
-diagnostics retain only bounded, control-character-sanitized text, description,
-source location, and at most three stack frames; page and stack URLs are
-omitted.
+failures and JavaScript serializer exceptions remain fatal, with no retry.
+Exception diagnostics retain only bounded, control-character-sanitized text,
+description, source location, and at most three stack frames; page and stack URLs
+are omitted.
 The serializer walks at most 100,000 DOM nodes and attributes, appends at most
 2 MiB while walking instead of materializing an unbounded outer HTML string,
-and collects bounded `script[src]` and `iframe[src]` URLs in document order. It
-does not invoke JavaScript supplied by the page. Finalization also reads only
+and collects bounded `script[src]` and `iframe[src]` URLs in document order.
+Bounded DOM serialization uses a fixed reusable UTF-8 scratch buffer rather than
+allocating proportional temporary buffers for each DOM fragment. Serialization
+is governed by three independent bounds: traversal work items (100,000 max),
+output bytes (2 MiB max), and temporary encoding memory (fixed 64 KiB scratch).
+It does not invoke JavaScript supplied by the page. Finalization also reads only
 cookie names and domains from the isolated profile. Values are overwritten
 before the minimized cookie object is constructed. Malformed domains are
 omitted; cookies are sorted and deduplicated by name and domain so first- and

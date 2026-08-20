@@ -664,3 +664,60 @@ func (s *fakeCaptureSource) Close() error {
 	s.closeCalls.Add(1)
 	return s.err
 }
+
+func TestBoundedDOMSerializerTemplateFormat(t *testing.T) {
+	t.Parallel()
+	script := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
+	for _, want := range []string{
+		"const encodeScratch = new Uint8Array(Math.min(maxBytes, 65536));",
+		"const urlScratch = new Uint8Array(maxURLBytes + 1);",
+		"let currentChunk = \"\";",
+		"if (currentChunk.length >= 16384)",
+		"chunks.join(\"\")",
+		"encodeInto(candidate, buffer)",
+		"encodeInto(value, urlScratch)",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("boundedDOMSerializer missing %q", want)
+		}
+	}
+}
+
+func TestBoundedDOMSnapshotUTF8MultibyteHandling(t *testing.T) {
+	t.Parallel()
+	collector := newCaptureCollector()
+	multibyteDOM := "<html><body>" + strings.Repeat("é€漢😀", 1000) + "</body></html>"
+	result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+		DOM: multibyteDOM,
+	}, nil)
+
+	if !strings.Contains(result.DOM, "é€漢😀") {
+		t.Error("multibyte characters were not retained")
+	}
+	if len([]byte(result.DOM)) > maxDOMBytes {
+		t.Errorf("DOM byte size %d exceeds %d", len([]byte(result.DOM)), maxDOMBytes)
+	}
+}
+
+func TestBoundedDOMSnapshotManyTinyNodesAndLargeAttributes(t *testing.T) {
+	t.Parallel()
+	collector := newCaptureCollector()
+	var dom strings.Builder
+	dom.WriteString("<html><body>")
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&dom, `<div class="node-%d" data-custom="%s">item</div>`, i, strings.Repeat("a", 100))
+	}
+	dom.WriteString("</body></html>")
+
+	result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+		DOM:          dom.String(),
+		DOMTruncated: true,
+	}, nil)
+
+	if !result.DOMTruncated {
+		t.Error("expected DOMTruncated to be preserved")
+	}
+	if len(result.DOM) > maxDOMBytes {
+		t.Errorf("DOM length = %d, want at most %d", len(result.DOM), maxDOMBytes)
+	}
+}
