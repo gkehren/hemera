@@ -11,7 +11,7 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs:
+Hemera ships 12 built-in detector rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs:
 
 | Rule ID | Category | Product | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
@@ -22,10 +22,9 @@ Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
 | `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
 | `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, `x-amzn-errortype`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
-| `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js`, `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
-| `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, Akamai TLS |
+| `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js` (unversioned/versioned), `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
+| `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, `x-akamai-session-info`, Akamai TLS |
 | `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
-| `akamai.app_and_api_protector` | `waf` | Akamai App & API Protector | Reference error block page DOM, `x-akamai-session-info` | `x-akamai-waf-action`, `Reference #` marker |
 | `hcaptcha.challenge` | `captcha_challenge` | hCaptcha | Official `js.hcaptcha.com/1/api.js` script or challenge iframe | `h-captcha` container marker, `hcaptcha.render()` call |
 | `arkoselabs.matchkey` | `captcha_challenge` | Arkose MatchKey | Official `client-api.arkoselabs.com/v2/api.js` script or challenge frame | `arkose-enforcement` container, `setupArkose()` call |
 
@@ -39,7 +38,7 @@ All vendor rules strictly maintain **product-level separation**: detecting
 infrastructure (`cloudflare.proxy`, `aws.cloudfront`, `akamai.edge`) never implies
 that a corresponding WAF, Bot Management, or CAPTCHA product is active.
 Product rules requiring edge infrastructure declare formal prerequisites via `requires`
-(e.g., `cloudflare.challenge_page`, `cloudflare.bot_protection`, `akamai.bot_manager`, `akamai.app_and_api_protector`),
+(e.g., `cloudflare.challenge_page`, `cloudflare.bot_protection`, `akamai.bot_manager`),
 while standalone products (`cloudflare.turnstile`, `google.recaptcha`, `aws.waf`, `datadome.bot_protection`, `hcaptcha.challenge`, `arkoselabs.matchkey`)
 operate on any origin.
 

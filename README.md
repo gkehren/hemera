@@ -75,8 +75,7 @@ Hemera ships built-in detector rules with explicit product-level separation acro
   - `datadome.bot_protection` (DataDome bot management client tag, headers, and challenge interstitials).
 - **Akamai:**
   - `akamai.edge` (Akamai Edge reverse proxy infrastructure);
-  - `akamai.bot_manager` (Akamai Bot Manager JavaScript sensors and telemetry cookies);
-  - `akamai.app_and_api_protector` (App & API Protector / Kona Site Defender WAF reference error block pages).
+  - `akamai.bot_manager` (Akamai Bot Manager JavaScript sensors and telemetry cookies).
 - **hCaptcha:**
   - `hcaptcha.challenge` (hCaptcha client API script and challenge widget).
 - **Arkose Labs:**
@@ -84,7 +83,7 @@ Hemera ships built-in detector rules with explicit product-level separation acro
 
 Vendor infrastructure alone does not imply that a specific product is enabled.
 For example, detecting `aws.cloudfront` or `akamai.edge` never automatically
-produces an `aws.waf`, `akamai.bot_manager`, or `akamai.app_and_api_protector` detection.
+produces an `aws.waf` or `akamai.bot_manager` detection.
 
 ## Architecture
 
