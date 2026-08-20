@@ -78,7 +78,9 @@ flowchart TD
 
 - **Vendor documentation provenance:** Every signal pattern must trace to
   official vendor documentation, public integration guides, or verified
-  technical specifications.
+  technical specifications. All built-in evidence items are cataloged in
+  `internal/detectors/provenance.json` and validated by CI
+  (`TestBuiltInRulesProvenanceAndRationale`).
 - **Decisive vs. supporting evidence:**
   - **Decisive evidence:** A signal unique and specific enough to prove the
     product's presence (e.g., an official vendor API script URL from a dedicated
@@ -170,7 +172,7 @@ The following detector families currently meet the support standard:
 
 - **Positive:** `cloudflare-proxy-positive.html` &mdash; returns `Server: cloudflare` and `cf-ray` (`score: 75`, `level: high`, `detected: true`).
 - **Hard negative:** `negative.html` &mdash; clean page (`score: 0`, `detected: false`).
-- **Ambiguous / clean:** `ambiguous-markers.html` &mdash; (`score: 0`, `detected: false`).
+- **Ambiguous / supporting:** `ambiguous-markers.html` with `cf-cache-status: HIT` &mdash; (`score: 35`, `level: low`, `detected: false`).
 
 #### Known false positives and false negatives
 
@@ -430,7 +432,6 @@ The following detector families currently meet the support standard:
 | --- | --- | --- | --- | --- | --- | --- |
 | `aws-waf-sdk-script` | `static_integration` | `script_url` | `^https://[a-f0-9]+\.(awswaf\|waf\.aws\.amazon)\.com/` | 75 | Decisive | Documented AWS WAF JavaScript SDK client integration URL ([AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/waf-javascript-sdk.html)). |
 | `aws-waf-action-header` | `response_headers` | `response_header` | `x-amzn-waf-action` | 75 | Decisive | AWS WAF rule action header emitted on challenge or block responses. |
-| `aws-waf-errortype-header` | `response_headers` | `response_header` | `x-amzn-errortype` contains `WAF` | 75 | Decisive | AWS WAF error type header on blocked requests. |
 | `aws-waf-block-page` | `static_integration` | `page_content` | `405 Method Not Allowed.*AWS WAF` or `<title>403 Forbidden</title>.*AWS WAF` | 75 | Decisive | Standard AWS WAF default block page HTML content. |
 | `aws-waf-token-cookie` | `cookies` | `cookie` | `aws-waf-token` | 40 | Supporting | AWS WAF client token cookie. |
 | `aws-waf-marker` | `static_integration` | `page_content` | `aws-waf-` or `AwsWafIntegration` | 30 | Supporting | Client-side SDK configuration marker. |
