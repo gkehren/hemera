@@ -297,7 +297,7 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			browserCtx = cdp.WithExecutor(listenerCtx, chromedpContext.Browser)
 		}
 	}
-	pausedRequests := make(chan *fetch.EventRequestPaused, config.MaxRequests+1)
+	pausedCommands := make(chan pausedCommand, config.MaxRequests+1)
 	requestTracker := newBrowserRequestTracker(config.MaxConcurrentRequests)
 	activity := make(chan struct{}, 1)
 	notifyActivity := func() {
@@ -313,11 +313,22 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 		defer close(workerDone)
 		for {
 			select {
-			case event := <-pausedRequests:
-				handlePausedRequest(commandCtx, budget, requestTracker, event)
+			case cmd := <-pausedCommands:
+				if cmd.fail {
+					if failErr := fetch.FailRequest(cmd.requestID, network.ErrorReasonAborted).Do(commandCtx); failErr != nil {
+						budget.failInfrastructure(fmt.Errorf("fail rejected browser request: %w", failErr))
+					}
+				} else {
+					if err := fetch.ContinueRequest(cmd.requestID).Do(commandCtx); err != nil {
+						requestTracker.release(cmd.networkID)
+						budget.failInfrastructure(fmt.Errorf("continue validated browser request: %w", err))
+					}
+				}
 			case targetID := <-blockedTargets:
 				closeErr := target.CloseTarget(targetID).Do(browserCtx)
-				budget.fail(errors.Join(ErrUnsupportedTarget, closeErr))
+				if closeErr != nil {
+					budget.failInfrastructure(fmt.Errorf("close blocked child target: %w", closeErr))
+				}
 			case <-stopWorker:
 				return
 			}
@@ -328,14 +339,44 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 		case *network.EventDataReceived:
 			notifyActivity()
 			if err := budget.consumeDecoded(event.DataLength); err != nil {
-				budget.fail(err)
+				budget.failPolicy(err)
 			}
 		case *fetch.EventRequestPaused:
 			notifyActivity()
+			if event == nil || event.Request == nil {
+				budget.failInfrastructure(errors.New("CDP paused request is missing metadata"))
+				return
+			}
+			if err := budget.authorize(event.Request.URL, event.RedirectedRequestID != ""); err != nil {
+				budget.failPolicy(err)
+				select {
+				case pausedCommands <- pausedCommand{requestID: event.RequestID, fail: true}:
+				default:
+				}
+				return
+			}
+			requestID := event.NetworkID
+			if requestID == "" {
+				budget.failPolicy(ErrUnsupportedTarget)
+				select {
+				case pausedCommands <- pausedCommand{requestID: event.RequestID, fail: true}:
+				default:
+				}
+				return
+			}
+			if err := requestTracker.acquire(listenerCtx, budget.done, requestID); err != nil {
+				budget.failPolicy(err)
+				select {
+				case pausedCommands <- pausedCommand{requestID: event.RequestID, fail: true}:
+				default:
+				}
+				return
+			}
 			select {
-			case pausedRequests <- event:
+			case pausedCommands <- pausedCommand{requestID: event.RequestID, networkID: requestID, fail: false}:
 			default:
-				budget.fail(ErrRequestLimit)
+				requestTracker.release(requestID)
+				budget.failPolicy(ErrRequestLimit)
 			}
 		case *network.EventLoadingFinished:
 			requestTracker.release(event.RequestID)
@@ -344,17 +385,17 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			requestTracker.release(event.RequestID)
 			notifyActivity()
 		case *network.EventWebSocketCreated:
-			budget.fail(fmt.Errorf("%w: WebSocket transport is not allowed", networkguard.ErrInvalidURL))
+			budget.failPolicy(fmt.Errorf("%w: WebSocket transport is not allowed", networkguard.ErrInvalidURL))
 		case *page.EventWindowOpen:
-			budget.fail(ErrUnsupportedTarget)
+			budget.failPolicy(ErrUnsupportedTarget)
 		case *target.EventAttachedToTarget:
 			if event.TargetInfo == nil || !blockedChildTargetType(event.TargetInfo.Type) {
 				return
 			}
+			budget.failPolicy(ErrUnsupportedTarget)
 			select {
 			case blockedTargets <- event.TargetInfo.TargetID:
 			default:
-				budget.fail(ErrUnsupportedTarget)
 			}
 		default:
 			return
@@ -460,32 +501,10 @@ func waitForNetworkQuiet(ctx context.Context, activity <-chan struct{}, tracker 
 	}
 }
 
-func handlePausedRequest(ctx context.Context, budget *navigationBudget, tracker *browserRequestTracker, event *fetch.EventRequestPaused) {
-	if event == nil || event.Request == nil {
-		budget.fail(errors.New("CDP paused request is missing metadata"))
-		return
-	}
-	if err := budget.authorize(event.Request.URL, event.RedirectedRequestID != ""); err != nil {
-		failErr := fetch.FailRequest(event.RequestID, network.ErrorReasonAborted).Do(ctx)
-		budget.fail(errors.Join(err, failErr))
-		return
-	}
-	requestID := event.NetworkID
-	if requestID == "" {
-		err := ErrUnsupportedTarget
-		failErr := fetch.FailRequest(event.RequestID, network.ErrorReasonAborted).Do(ctx)
-		budget.fail(errors.Join(err, failErr))
-		return
-	}
-	if err := tracker.acquire(ctx, budget.done, requestID); err != nil {
-		failErr := fetch.FailRequest(event.RequestID, network.ErrorReasonAborted).Do(ctx)
-		budget.fail(errors.Join(err, failErr))
-		return
-	}
-	if err := fetch.ContinueRequest(event.RequestID).Do(ctx); err != nil {
-		tracker.release(requestID)
-		budget.fail(fmt.Errorf("continue validated browser request: %w", err))
-	}
+type pausedCommand struct {
+	requestID fetch.RequestID
+	networkID network.RequestID
+	fail      bool
 }
 
 // browserRequestTracker applies the concurrency ceiling to browser request
