@@ -314,7 +314,7 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 	}
 	stopWorker := make(chan struct{})
 	workerDone := make(chan struct{})
-	blockedTargets := make(chan target.ID, 4)
+	blockedTargets := make(chan target.ID, 16)
 	go func() {
 		defer close(workerDone)
 		for {
@@ -322,21 +322,41 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			case cmd := <-pausedCommands:
 				if cmd.fail {
 					if failErr := fetch.FailRequest(cmd.requestID, network.ErrorReasonAborted).Do(commandCtx); failErr != nil {
-						budget.failInfrastructure(fmt.Errorf("fail rejected browser request: %w", failErr))
+						if listenerCtx.Err() == nil && !errors.Is(failErr, context.Canceled) {
+							budget.failInfrastructure(fmt.Errorf("fail rejected browser request: %w", failErr))
+						}
 					}
 				} else {
 					if err := fetch.ContinueRequest(cmd.requestID).Do(commandCtx); err != nil {
 						requestTracker.release(cmd.networkID)
-						budget.failInfrastructure(fmt.Errorf("continue validated browser request: %w", err))
+						if listenerCtx.Err() == nil && !errors.Is(err, context.Canceled) {
+							budget.failInfrastructure(fmt.Errorf("continue validated browser request: %w", err))
+						}
 					}
 				}
 			case targetID := <-blockedTargets:
 				closeErr := target.CloseTarget(targetID).Do(browserCtx)
 				if closeErr != nil {
-					budget.failInfrastructure(fmt.Errorf("close blocked child target: %w", closeErr))
+					if listenerCtx.Err() == nil && !errors.Is(closeErr, context.Canceled) {
+						budget.failInfrastructure(fmt.Errorf("close blocked child target: %w", closeErr))
+					}
 				}
 			case <-stopWorker:
-				return
+				for {
+					select {
+					case cmd := <-pausedCommands:
+						if cmd.fail {
+							_ = fetch.FailRequest(cmd.requestID, network.ErrorReasonAborted).Do(commandCtx)
+						} else {
+							requestTracker.release(cmd.networkID)
+							_ = fetch.ContinueRequest(cmd.requestID).Do(commandCtx)
+						}
+					case targetID := <-blockedTargets:
+						_ = target.CloseTarget(targetID).Do(browserCtx)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -407,16 +427,6 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			return
 		}
 	})
-	defer func() {
-		stopListener()
-		close(stopWorker)
-		<-workerDone
-		requestTracker.releaseAll()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = runChromedpWithCaller(taskCtx, cleanupCtx, fetch.Disable(), page.StopLoading())
-		_ = runChromedpWithCaller(taskCtx, cleanupCtx, target.SetAutoAttach(false, false))
-	}()
 
 	patterns := []*fetch.RequestPattern{
 		{URLPattern: "http://*", RequestStage: fetch.RequestStageRequest},
@@ -443,20 +453,48 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			return cdpbrowser.SetDownloadBehavior(cdpbrowser.SetDownloadBehaviorBehaviorDeny).Do(browserCtx)
 		}),
 	); err != nil {
-		return err
+		stopListener()
+		close(stopWorker)
+		<-workerDone
+		requestTracker.releaseAll()
+		if failure := budget.failure(); failure != nil {
+			return failure
+		}
+		return fmt.Errorf("browser navigation setup failed: %w", err)
 	}
 
+	var navigationStage string
 	navigationErr := runChromedpWithCaller(taskCtx, runCtx, chromedp.Navigate(targetURL))
-	if navigationErr == nil {
+	if navigationErr != nil {
+		navigationStage = "navigate"
+	} else {
+		navigationStage = "post_load_wait"
 		navigationErr = waitForNetworkQuiet(runCtx, activity, requestTracker, config.NetworkIdleTime, config.PostLoadTimeout)
 	}
+
+	stopListener()
+	close(stopWorker)
+	<-workerDone
+	requestTracker.releaseAll()
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), time.Second)
+	defer cancelCleanup()
+	_ = runChromedpWithCaller(taskCtx, cleanupCtx, fetch.Disable(), page.StopLoading())
+	_ = runChromedpWithCaller(taskCtx, cleanupCtx, target.SetAutoAttach(false, false))
+
 	if failure := budget.failure(); failure != nil {
 		return failure
 	}
 	if err := navigationCtx.Err(); err != nil {
 		return err
 	}
-	return navigationErr
+	if navigationErr != nil {
+		if errors.Is(navigationErr, context.Canceled) || errors.Is(navigationErr, context.DeadlineExceeded) {
+			return navigationErr
+		}
+		return fmt.Errorf("browser navigation failed during %s: %w", navigationStage, navigationErr)
+	}
+	return nil
 }
 
 func blockedChildTargetType(targetType string) bool {

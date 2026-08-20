@@ -384,6 +384,147 @@ func TestBoundedDOMCaptureRetriesOnlyClassifiedFrameTransitions(t *testing.T) {
 		}
 	})
 
+	t.Run("frame ID change with same loader retries once", func(t *testing.T) {
+		frameOther := mainFrameIdentity{frameID: cdp.FrameID("other"), loaderID: cdp.LoaderID("loader-a")}
+		frames := []mainFrameIdentity{frameA, frameOther, frameOther, frameOther}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				if evaluateCall == 1 {
+					return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+				}
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "frame-change-retry"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "frame-change-retry" || evaluateCall != 2 {
+			t.Fatalf("capture = %#v after %d evaluations, want frame ID change retry", snapshot, evaluateCall)
+		}
+	})
+
+	t.Run("frame and loader both change retries once", func(t *testing.T) {
+		frameBoth := mainFrameIdentity{frameID: cdp.FrameID("other"), loaderID: cdp.LoaderID("loader-b")}
+		frames := []mainFrameIdentity{frameA, frameBoth, frameBoth, frameBoth}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				if evaluateCall == 1 {
+					return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+				}
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "both-change-retry"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "both-change-retry" || evaluateCall != 2 {
+			t.Fatalf("capture = %#v after %d evaluations, want both change retry", snapshot, evaluateCall)
+		}
+	})
+
+	t.Run("second transition invalidation is fatal without third attempt", func(t *testing.T) {
+		frameC := mainFrameIdentity{frameID: cdp.FrameID("main"), loaderID: cdp.LoaderID("loader-c")}
+		frames := []mainFrameIdentity{frameA, frameB, frameB, frameC}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "Execution context was destroyed") || evaluateCall != 2 {
+			t.Fatalf("capture error = %v after %d evaluations, want fatal after 2 attempts", err, evaluateCall)
+		}
+	})
+
+	t.Run("createIsolatedWorld transient error during transition retries once", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB, frameB, frameB}
+		frameCall := 0
+		worldCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				worldCall++
+				if worldCall == 1 {
+					return 0, &cdproto.Error{Code: -32000, Message: "No frame with given id found."}
+				}
+				return cdpruntime.ExecutionContextID(2), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "world-retry-success"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "world-retry-success" || worldCall != 2 || evaluateCall != 1 {
+			t.Fatalf("capture = %#v (worlds=%d evaluates=%d), want retry on transient world failure", snapshot, worldCall, evaluateCall)
+		}
+	})
+
+	t.Run("createIsolatedWorld unclassified error remains fatal", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB}
+		frameCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return 0, errors.New("Page.createIsolatedWorld unexpected error")
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "unexpected"}), nil, nil
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "Page.createIsolatedWorld unexpected error") {
+			t.Fatalf("capture error = %v, want unclassified world error to be fatal", err)
+		}
+	})
+
 	t.Run("serializer exception remains fatal across frame transition", func(t *testing.T) {
 		frames := []mainFrameIdentity{frameA, frameB}
 		frameCall := 0

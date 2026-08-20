@@ -302,6 +302,13 @@
       "file": "limits/postload-redirect.html"
     },
     {
+      "name": "limit-postload-redirect-barrier",
+      "path": "/limits/postload-redirect-barrier",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "postload-redirect-barrier"
+    },
+    {
       "name": "limit-postload-transfer",
       "path": "/limits/postload-transfer",
       "status": 200,

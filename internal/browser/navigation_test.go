@@ -751,3 +751,196 @@ func TestSafeProxyConnectionClosureAndCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestNavigationBudgetPriorityMatrix(t *testing.T) {
+	t.Parallel()
+
+	transportErr := errors.New("read tcp 127.0.0.1:12345->127.0.0.1:54321: read: connection reset by peer")
+
+	tests := []struct {
+		name     string
+		sequence func(*navigationBudget)
+		wantErr  error
+	}{
+		{
+			name: "policy redirect then infrastructure reset",
+			sequence: func(b *navigationBudget) {
+				b.failPolicy(ErrRedirectLimit)
+				b.failInfrastructure(transportErr)
+			},
+			wantErr: ErrRedirectLimit,
+		},
+		{
+			name: "infrastructure reset then policy redirect",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(ErrRedirectLimit)
+			},
+			wantErr: ErrRedirectLimit,
+		},
+		{
+			name: "policy redirect alone",
+			sequence: func(b *navigationBudget) {
+				b.failPolicy(ErrRedirectLimit)
+			},
+			wantErr: ErrRedirectLimit,
+		},
+		{
+			name: "infrastructure reset alone",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+			},
+			wantErr: transportErr,
+		},
+		{
+			name: "infrastructure EOF then policy forbidden destination",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(io.EOF)
+				b.failPolicy(networkguard.ErrForbiddenDestination)
+			},
+			wantErr: networkguard.ErrForbiddenDestination,
+		},
+		{
+			name: "infrastructure ECONNRESET then policy request limit",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(ErrRequestLimit)
+			},
+			wantErr: ErrRequestLimit,
+		},
+		{
+			name: "infrastructure ECONNRESET then policy transfer limit",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(ErrTransferLimit)
+			},
+			wantErr: ErrTransferLimit,
+		},
+		{
+			name: "infrastructure ECONNRESET then policy concurrency limit",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(ErrConcurrencyLimit)
+			},
+			wantErr: ErrConcurrencyLimit,
+		},
+		{
+			name: "infrastructure ECONNRESET then policy unsupported target",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(ErrUnsupportedTarget)
+			},
+			wantErr: ErrUnsupportedTarget,
+		},
+		{
+			name: "infrastructure ECONNRESET then policy invalid URL",
+			sequence: func(b *navigationBudget) {
+				b.failInfrastructure(transportErr)
+				b.failPolicy(networkguard.ErrInvalidURL)
+			},
+			wantErr: networkguard.ErrInvalidURL,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			budget := newNavigationBudget(DefaultConfig())
+			test.sequence(budget)
+			got := budget.failure()
+			if !errors.Is(got, test.wantErr) {
+				t.Fatalf("budget.failure() = %v, want %v", got, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNavigationLifecycleSecurityInvariants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("redirect exceeding limit fails closed and rejects further authorize", func(t *testing.T) {
+		t.Parallel()
+		config := DefaultConfig()
+		config.MaxRedirects = 2
+		budget := newNavigationBudget(config)
+		defer budget.stop()
+
+		if err := budget.authorize("http://example.com/start", false); err != nil {
+			t.Fatal(err)
+		}
+		if err := budget.authorize("http://example.com/r1", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := budget.authorize("http://example.com/r2", true); err != nil {
+			t.Fatal(err)
+		}
+		err := budget.authorize("http://example.com/r3", true)
+		if !errors.Is(err, ErrRedirectLimit) {
+			t.Fatalf("third redirect authorize() = %v, want ErrRedirectLimit", err)
+		}
+		budget.failPolicy(err)
+
+		if err := budget.authorize("http://example.com/r4", false); !errors.Is(err, ErrRedirectLimit) {
+			t.Fatalf("subsequent authorize() = %v, want ErrRedirectLimit", err)
+		}
+		if err := budget.authorizeProxy(); !errors.Is(err, ErrRedirectLimit) {
+			t.Fatalf("subsequent authorizeProxy() = %v, want ErrRedirectLimit", err)
+		}
+		if !budget.stopped() {
+			t.Fatal("budget must be stopped after policy failure")
+		}
+	})
+
+	t.Run("request limit fails closed and rejects further requests", func(t *testing.T) {
+		t.Parallel()
+		config := DefaultConfig()
+		config.MaxRequests = 1
+		budget := newNavigationBudget(config)
+		defer budget.stop()
+
+		if err := budget.authorize("http://example.com/1", false); err != nil {
+			t.Fatal(err)
+		}
+		err := budget.authorize("http://example.com/2", false)
+		if !errors.Is(err, ErrRequestLimit) {
+			t.Fatalf("second authorize() = %v, want ErrRequestLimit", err)
+		}
+		budget.failPolicy(err)
+
+		if err := budget.authorize("http://example.com/3", false); !errors.Is(err, ErrRequestLimit) {
+			t.Fatalf("subsequent authorize() = %v, want ErrRequestLimit", err)
+		}
+	})
+
+	t.Run("transfer limit fails closed and rejects further consumption", func(t *testing.T) {
+		t.Parallel()
+		config := DefaultConfig()
+		config.MaxTransferBytes = 100
+		budget := newNavigationBudget(config)
+		defer budget.stop()
+
+		if err := budget.consume(50); err != nil {
+			t.Fatal(err)
+		}
+		err := budget.consume(51)
+		if !errors.Is(err, ErrTransferLimit) {
+			t.Fatalf("overflow consume() = %v, want ErrTransferLimit", err)
+		}
+		budget.failPolicy(err)
+
+		if err := budget.consume(1); !errors.Is(err, ErrTransferLimit) {
+			t.Fatalf("subsequent consume() = %v, want ErrTransferLimit", err)
+		}
+	})
+
+	t.Run("infrastructure error does not transform policy error into success", func(t *testing.T) {
+		t.Parallel()
+		budget := newNavigationBudget(DefaultConfig())
+		budget.failPolicy(ErrRedirectLimit)
+		budget.failInfrastructure(errors.New("connection reset"))
+
+		if failure := budget.failure(); !errors.Is(failure, ErrRedirectLimit) {
+			t.Fatalf("failure() = %v, want ErrRedirectLimit", failure)
+		}
+	})
+}

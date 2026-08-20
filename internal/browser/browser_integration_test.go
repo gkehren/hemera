@@ -597,6 +597,10 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 				"large-response": func(writer http.ResponseWriter, _ *http.Request) {
 					_, _ = writer.Write([]byte(strings.Repeat("x", 64<<10)))
 				},
+				"postload-redirect-barrier": func(writer http.ResponseWriter, _ *http.Request) {
+					writer.WriteHeader(http.StatusOK)
+					_, _ = fmt.Fprint(writer, "barrier reached")
+				},
 			})
 			config, explicit := integrationConfig(t)
 			targetURL := configureIntegrationFixture(t, &config, fixture.server)
