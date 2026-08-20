@@ -549,7 +549,7 @@
               "description": "DataDome JavaScript tag URL",
               "type": "script_url",
               "value": {
-                "regex": "^https://js\\.datadome\\.co/(?:v[0-9]+(?:\\.[0-9]+)+/)?tags\\.js(?:\\?redacted)?$",
+                "regex": "^https://js\\.datadome\\.co/(?:v[0-9]+\\.[0-9]+\\.[0-9]+/)?tags\\.js(?:\\?redacted)?$",
                 "case_insensitive": true
               },
               "weight": 75
@@ -588,7 +588,7 @@
               "description": "DataDome CAPTCHA delivery interstitial iframe URL",
               "type": "iframe_url",
               "value": {
-                "regex": "^https://(?:[a-z0-9-]+\\.)*captcha-delivery\\.com/captcha/",
+                "regex": "^https://(?:[a-z0-9-]+\\.)+captcha-delivery\\.com/",
                 "case_insensitive": true
               },
               "weight": 75
@@ -601,7 +601,7 @@
               "description": "DataDome CAPTCHA delivery script URL",
               "type": "script_url",
               "value": {
-                "regex": "^https://(?:[a-z0-9-]+\\.)*captcha-delivery\\.com/captcha/",
+                "regex": "^https://ct\\.captcha-delivery\\.com/",
                 "case_insensitive": true
               },
               "weight": 75
@@ -813,62 +813,6 @@
               "type": "page_content",
               "value": {
                 "regex": "(?:window\\._sec|akamai\\.bmp)",
-                "case_insensitive": true
-              },
-              "weight": 35
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "akamai.app_and_api_protector",
-      "name": "Akamai App & API Protector",
-      "description": "Detects Akamai App & API Protector or Kona Site Defender WAF reference error block pages and mitigation headers.",
-      "category": "waf",
-      "vendor": "Akamai",
-      "product": "App & API Protector",
-      "minimum_evidence": 1,
-      "minimum_score": 75,
-      "requires": [
-        "akamai.edge"
-      ],
-      "match": {
-        "any": [
-          {
-            "signal": {
-              "id": "akamai-waf-block-page",
-              "group": "static_integration",
-              "description": "Akamai WAF reference error block page content",
-              "type": "page_content",
-              "value": {
-                "regex": "(?s)(?:Access Denied.*You don't have permission to access.*Reference&#32;&#35;|<title>Access Denied</title>.*Reference&#32;&#35;[0-9a-fA-F.]+)",
-                "case_insensitive": true
-              },
-              "weight": 75
-            }
-          },
-          {
-            "signal": {
-              "id": "akamai-waf-action-header",
-              "group": "response_headers",
-              "description": "Akamai WAF action response header",
-              "type": "response_header",
-              "key": {
-                "exact": "x-akamai-waf-action",
-                "case_insensitive": true
-              },
-              "weight": 35
-            }
-          },
-          {
-            "signal": {
-              "id": "akamai-waf-marker",
-              "group": "static_integration",
-              "description": "Akamai reference error marker",
-              "type": "page_content",
-              "value": {
-                "regex": "Reference&#32;&#35;[0-9a-fA-F.]+",
                 "case_insensitive": true
               },
               "weight": 35
