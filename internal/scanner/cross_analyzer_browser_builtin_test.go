@@ -88,12 +88,13 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 			wantEvidenceIDs: []string{"arkose-client-script"},
 		},
 		{
-			name: "DataDome interstitial iframe and cookie in Browser",
+			name: "DataDome interstitial iframe, DOM and cookie in Browser",
 			htmlContent: `<!DOCTYPE html>
 <html>
 <head><title>DataDome Dynamic Test</title></head>
 <body>
 <script>
+  window.datadomeOptions = { version: "4.6.0" };
   setTimeout(() => {
     const f = document.createElement('iframe');
     f.src = 'https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAAAAAMAx_example_interstitial';
@@ -133,6 +134,100 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 			wantDetected:    true,
 			wantLevel:       scoring.LevelVeryHigh,
 			wantEvidenceIDs: []string{"akamai-bm-sensor-script", "akamai-bm-abck-cookie"},
+		},
+		{
+			name: "Cloudflare Challenge Page script and DOM in Browser with edge prerequisite",
+			headers: map[string]string{
+				"Server": "cloudflare",
+			},
+			htmlContent: `<!DOCTYPE html>
+<html>
+<head><title>Cloudflare Challenge Dynamic Test</title></head>
+<body>
+<div id="cf-wrapper">
+  <div id="cf-error-details"></div>
+</div>
+<script>
+  setTimeout(() => {
+    const s = document.createElement('script');
+    s.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1/flow.js';
+    document.head.appendChild(s);
+  }, 50);
+</script>
+</body>
+</html>`,
+			wantRuleID:      "cloudflare.challenge_page",
+			wantScore:       75,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelHigh,
+			wantEvidenceIDs: []string{"cloudflare-challenge-script"},
+		},
+		{
+			name: "Cloudflare Bot Protection telemetry script and cookie in Browser with edge prerequisite",
+			headers: map[string]string{
+				"Server": "cloudflare",
+			},
+			htmlContent: `<!DOCTYPE html>
+<html>
+<head><title>Cloudflare Bot Protection Dynamic Test</title></head>
+<body>
+<script>
+  setTimeout(() => {
+    const s = document.createElement('script');
+    s.src = '/cdn-cgi/challenge-platform/scripts/jsd/main.js';
+    document.head.appendChild(s);
+    document.cookie = '__cf_bm=synthetic_cf_bm_token; path=/';
+  }, 50);
+</script>
+</body>
+</html>`,
+			wantRuleID:      "cloudflare.bot_protection",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"cloudflare-bot-telemetry-script", "cloudflare-bot-cookie"},
+		},
+		{
+			name: "AWS WAF SDK script, marker and cookie in Browser",
+			htmlContent: `<!DOCTYPE html>
+<html>
+<head><title>AWS WAF Dynamic Test</title></head>
+<body>
+<div id="aws-waf-container"></div>
+<script>
+  setTimeout(() => {
+    const s = document.createElement('script');
+    s.src = 'https://123456abcdef.awswaf.com/sdk.js';
+    document.head.appendChild(s);
+    document.cookie = 'aws-waf-token=synthetic_token; path=/';
+  }, 50);
+</script>
+</body>
+</html>`,
+			wantRuleID:      "aws.waf",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"aws-waf-sdk-script", "aws-waf-token-cookie"},
+		},
+		{
+			name: "Cloudflare Proxy clearance cookie in Browser",
+			htmlContent: `<!DOCTYPE html>
+<html>
+<head><title>Cloudflare Proxy Clearance Cookie Test</title></head>
+<body>
+<script>
+  setTimeout(() => {
+    document.cookie = 'cf_clearance=synthetic_clearance_token; path=/';
+  }, 50);
+</script>
+</body>
+</html>`,
+			wantRuleID:      "cloudflare.proxy",
+			wantScore:       25,
+			wantDetected:    false,
+			wantLevel:       scoring.LevelLow,
+			wantEvidenceIDs: []string{"cloudflare-clearance-cookie"},
 		},
 	}
 
@@ -243,7 +338,7 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 			var matchedEvidenceIDs []string
 			for _, ev := range matched.PositiveEvidence {
 				matchedEvidenceIDs = append(matchedEvidenceIDs, ev.Match.EvidenceID)
-				if ev.Match.Signal.Source != analysis.SourceBrowser && tc.wantRuleID != "akamai.bot_manager" {
+				if ev.Match.Signal.Source != analysis.SourceBrowser && tc.wantRuleID != "akamai.bot_manager" && tc.wantRuleID != "cloudflare.challenge_page" && tc.wantRuleID != "cloudflare.bot_protection" {
 					t.Errorf("rule %q evidence %q has source %q, want %q", tc.wantRuleID, ev.Match.EvidenceID, ev.Match.Signal.Source, analysis.SourceBrowser)
 				}
 			}

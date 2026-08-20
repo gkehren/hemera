@@ -209,7 +209,7 @@
     "aws.waf": {
       "minimum_score": 75,
       "minimum_evidence": 1,
-      "scoring_rationale": "AWS WAF JavaScript SDK (/aws-waf-sdk/), x-amzn-waf-action header, or AWS WAF challenge interstitial DOM decisively identifies AWS WAF (75 points). aws-waf-token cookie (40 points), x-amzn-errortype header (35 points), and aws-waf-container marker (30 points) provide supporting evidence.",
+      "scoring_rationale": "AWS WAF JavaScript SDK (/aws-waf-sdk/), x-amzn-waf-action header, or AWS WAF challenge interstitial DOM decisively identifies AWS WAF (75 points). aws-waf-token cookie (40 points) and aws-waf-container marker (30 points) provide supporting evidence.",
       "evidence": {
         "aws-waf-sdk-script": {
           "weight": 75,
