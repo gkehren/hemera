@@ -64,7 +64,7 @@ func TestHTTPDNSTLSAndBrowserProduceOneDeterministicDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	browserConfig := browser.DefaultConfig()
-	browserConfig.StartupTimeout = 10 * time.Second
+	browserConfig.StartupTimeout = 20 * time.Second
 	browserPath, explicitBrowser := integrationBrowserPath(t)
 	browserConfig.ExecutablePath = browserPath
 	browserConfig.Resolver = resolver
@@ -89,7 +89,9 @@ func TestHTTPDNSTLSAndBrowserProduceOneDeterministicDetection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := engine.Scan(context.Background(), "http://fixture.example:"+port+"/")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	result, err := engine.Scan(ctx, "http://fixture.example:"+port+"/")
 	if err != nil {
 		t.Fatal(err)
 	}

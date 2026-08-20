@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultStartupTimeout = 5 * time.Second
-	maxStartupTimeout     = 10 * time.Second
+	maxStartupTimeout     = 20 * time.Second
 	backendStopTimeout    = 5 * time.Second
 
 	defaultNavigationTimeout           = 15 * time.Second

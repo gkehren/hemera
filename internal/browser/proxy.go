@@ -143,13 +143,13 @@ func (p *safeProxy) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	if err := budget.authorizeProxy(); err != nil {
-		budget.fail(err)
+		budget.failPolicy(err)
 		http.Error(writer, "browser resource limit exceeded", http.StatusServiceUnavailable)
 		return
 	}
 	requestBytes := headerSize(request.Header) + int64(len(request.Method)+len(request.Host)+len(request.URL.String()))
 	if err := budget.consume(requestBytes); err != nil {
-		budget.fail(err)
+		budget.failPolicy(err)
 		http.Error(writer, "browser resource limit exceeded", http.StatusServiceUnavailable)
 		return
 	}
@@ -173,7 +173,7 @@ func (p *safeProxy) startHandler() bool {
 func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Request, budget *navigationBudget) {
 	parsed, err := parseBrowserURL(request.URL.String())
 	if err != nil {
-		budget.fail(err)
+		budget.failPolicy(err)
 		http.Error(writer, "invalid browser destination", http.StatusBadGateway)
 		return
 	}
@@ -189,8 +189,8 @@ func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Reques
 	}
 	response, err := p.transport.RoundTrip(upstream)
 	if err != nil {
-		if failure := budget.failure(); failure == nil {
-			budget.fail(err)
+		if !budget.stopped() {
+			budget.failInfrastructure(err)
 		}
 		http.Error(writer, "browser destination failed", http.StatusBadGateway)
 		return
@@ -198,21 +198,25 @@ func (p *safeProxy) forwardHTTP(writer http.ResponseWriter, request *http.Reques
 	defer response.Body.Close()
 	removeHopByHopHeaders(response.Header)
 	if err := budget.consume(headerSize(response.Header)); err != nil {
-		budget.fail(err)
+		budget.failPolicy(err)
 		http.Error(writer, "browser resource limit exceeded", http.StatusBadGateway)
 		return
 	}
 	copyHeader(writer.Header(), response.Header)
 	writer.WriteHeader(response.StatusCode)
 	if err := copyWithBudget(writer, response.Body, budget); err != nil {
-		budget.fail(err)
+		if isPolicyError(err) {
+			budget.failPolicy(err)
+		} else if !budget.stopped() {
+			budget.failInfrastructure(err)
+		}
 	}
 }
 
 func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, budget *navigationBudget) {
 	parsed, err := parseBrowserURL("https://" + request.Host)
 	if err != nil {
-		budget.fail(err)
+		budget.failPolicy(err)
 		http.Error(writer, "invalid browser destination", http.StatusBadGateway)
 		return
 	}
@@ -222,31 +226,41 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	cancel()
 	cancelBase()
 	if err != nil {
-		budget.fail(err)
+		if isPolicyError(err) {
+			budget.failPolicy(err)
+		} else if !budget.stopped() {
+			budget.failInfrastructure(err)
+		}
 		http.Error(writer, "browser destination failed", http.StatusBadGateway)
 		return
 	}
 	hijacker, ok := writer.(http.Hijacker)
 	if !ok {
 		upstream.Close()
-		budget.fail(errors.New("browser safety proxy cannot create a tunnel"))
+		budget.failInfrastructure(errors.New("browser safety proxy cannot create a tunnel"))
 		http.Error(writer, "browser destination failed", http.StatusInternalServerError)
 		return
 	}
 	client, buffered, err := hijacker.Hijack()
 	if err != nil {
 		upstream.Close()
-		budget.fail(err)
+		if !budget.stopped() {
+			budget.failInfrastructure(err)
+		}
 		return
 	}
 	defer client.Close()
 	defer upstream.Close()
 	if _, err := buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		budget.fail(err)
+		if !budget.stopped() {
+			budget.failInfrastructure(err)
+		}
 		return
 	}
 	if err := buffered.Flush(); err != nil {
-		budget.fail(err)
+		if !budget.stopped() {
+			budget.failInfrastructure(err)
+		}
 		return
 	}
 
@@ -256,7 +270,11 @@ func (p *safeProxy) connect(writer http.ResponseWriter, request *http.Request, b
 	select {
 	case err := <-results:
 		if err != nil && !budget.stopped() {
-			budget.fail(err)
+			if isPolicyError(err) {
+				budget.failPolicy(err)
+			} else {
+				budget.failInfrastructure(err)
+			}
 		}
 	case <-budget.done:
 	}
@@ -273,7 +291,8 @@ type navigationBudget struct {
 	redirects     int
 	transferBytes int64
 	decodedBytes  int64
-	err           error
+	policyErr     error
+	infraErr      error
 }
 
 func newNavigationBudget(config Config) *navigationBudget {
@@ -289,8 +308,8 @@ func (b *navigationBudget) authorize(rawURL string, redirect bool) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.err != nil {
-		return b.err
+	if b.policyErr != nil {
+		return b.policyErr
 	}
 	if b.requests >= b.config.MaxRequests {
 		return ErrRequestLimit
@@ -308,8 +327,8 @@ func (b *navigationBudget) authorize(rawURL string, redirect bool) error {
 func (b *navigationBudget) authorizeProxy() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.err != nil {
-		return b.err
+	if b.policyErr != nil {
+		return b.policyErr
 	}
 	if b.proxyRequests >= b.config.MaxRequests {
 		return ErrRequestLimit
@@ -324,8 +343,8 @@ func (b *navigationBudget) consume(count int64) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.err != nil {
-		return b.err
+	if b.policyErr != nil {
+		return b.policyErr
 	}
 	if count > b.config.MaxTransferBytes-b.transferBytes {
 		return ErrTransferLimit
@@ -340,8 +359,8 @@ func (b *navigationBudget) consumeDecoded(count int64) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.err != nil {
-		return b.err
+	if b.policyErr != nil {
+		return b.policyErr
 	}
 	if count > b.config.MaxTransferBytes-b.decodedBytes {
 		return ErrTransferLimit
@@ -350,22 +369,48 @@ func (b *navigationBudget) consumeDecoded(count int64) error {
 	return nil
 }
 
-func (b *navigationBudget) fail(err error) {
+func (b *navigationBudget) failPolicy(err error) {
 	if err == nil {
 		return
 	}
 	b.mu.Lock()
-	if b.err == nil {
-		b.err = err
+	if b.policyErr == nil {
+		b.policyErr = err
 		b.stop()
 	}
 	b.mu.Unlock()
 }
 
+func (b *navigationBudget) failInfrastructure(err error) {
+	if err == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.infraErr == nil {
+		b.infraErr = err
+		b.stop()
+	}
+	b.mu.Unlock()
+}
+
+func (b *navigationBudget) fail(err error) {
+	if err == nil {
+		return
+	}
+	if isPolicyError(err) {
+		b.failPolicy(err)
+	} else {
+		b.failInfrastructure(err)
+	}
+}
+
 func (b *navigationBudget) failure() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.err
+	if b.policyErr != nil {
+		return b.policyErr
+	}
+	return b.infraErr
 }
 
 func (b *navigationBudget) stop() {
@@ -379,6 +424,19 @@ func (b *navigationBudget) stopped() bool {
 	default:
 		return false
 	}
+}
+
+func isPolicyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, ErrRequestLimit) ||
+		errors.Is(err, ErrRedirectLimit) ||
+		errors.Is(err, ErrTransferLimit) ||
+		errors.Is(err, ErrConcurrencyLimit) ||
+		errors.Is(err, ErrUnsupportedTarget) ||
+		errors.Is(err, networkguard.ErrInvalidURL) ||
+		errors.Is(err, networkguard.ErrForbiddenDestination)
 }
 
 type budgetReadCloser struct {
