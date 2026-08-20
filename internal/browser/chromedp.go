@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
+	cdproto "github.com/chromedp/cdproto"
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
@@ -24,9 +27,12 @@ import (
 )
 
 const (
-	profilePrefix        = "hemera-chromium-"
-	gracefulCloseTimeout = 2 * time.Second
-	browserCloseTimeout  = 5 * time.Second
+	profilePrefix              = "hemera-chromium-"
+	gracefulCloseTimeout       = 2 * time.Second
+	browserCloseTimeout        = 5 * time.Second
+	maxDOMDiagnosticBytes      = 1024
+	maxDOMDiagnosticFieldBytes = 192
+	maxDOMDiagnosticFrames     = 3
 )
 
 type chromedpBackend struct {
@@ -308,7 +314,7 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 	}
 	stopWorker := make(chan struct{})
 	workerDone := make(chan struct{})
-	blockedTargets := make(chan target.ID, 4)
+	blockedTargets := make(chan target.ID, 16)
 	go func() {
 		defer close(workerDone)
 		for {
@@ -316,21 +322,41 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			case cmd := <-pausedCommands:
 				if cmd.fail {
 					if failErr := fetch.FailRequest(cmd.requestID, network.ErrorReasonAborted).Do(commandCtx); failErr != nil {
-						budget.failInfrastructure(fmt.Errorf("fail rejected browser request: %w", failErr))
+						if listenerCtx.Err() == nil && !errors.Is(failErr, context.Canceled) {
+							budget.failInfrastructure(fmt.Errorf("fail rejected browser request: %w", failErr))
+						}
 					}
 				} else {
 					if err := fetch.ContinueRequest(cmd.requestID).Do(commandCtx); err != nil {
 						requestTracker.release(cmd.networkID)
-						budget.failInfrastructure(fmt.Errorf("continue validated browser request: %w", err))
+						if listenerCtx.Err() == nil && !errors.Is(err, context.Canceled) {
+							budget.failInfrastructure(fmt.Errorf("continue validated browser request: %w", err))
+						}
 					}
 				}
 			case targetID := <-blockedTargets:
 				closeErr := target.CloseTarget(targetID).Do(browserCtx)
 				if closeErr != nil {
-					budget.failInfrastructure(fmt.Errorf("close blocked child target: %w", closeErr))
+					if listenerCtx.Err() == nil && !errors.Is(closeErr, context.Canceled) {
+						budget.failInfrastructure(fmt.Errorf("close blocked child target: %w", closeErr))
+					}
 				}
 			case <-stopWorker:
-				return
+				for {
+					select {
+					case cmd := <-pausedCommands:
+						if cmd.fail {
+							_ = fetch.FailRequest(cmd.requestID, network.ErrorReasonAborted).Do(commandCtx)
+						} else {
+							requestTracker.release(cmd.networkID)
+							_ = fetch.ContinueRequest(cmd.requestID).Do(commandCtx)
+						}
+					case targetID := <-blockedTargets:
+						_ = target.CloseTarget(targetID).Do(browserCtx)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -401,16 +427,6 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			return
 		}
 	})
-	defer func() {
-		stopListener()
-		close(stopWorker)
-		<-workerDone
-		requestTracker.releaseAll()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = runChromedpWithCaller(taskCtx, cleanupCtx, fetch.Disable(), page.StopLoading())
-		_ = runChromedpWithCaller(taskCtx, cleanupCtx, target.SetAutoAttach(false, false))
-	}()
 
 	patterns := []*fetch.RequestPattern{
 		{URLPattern: "http://*", RequestStage: fetch.RequestStageRequest},
@@ -437,20 +453,48 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 			return cdpbrowser.SetDownloadBehavior(cdpbrowser.SetDownloadBehaviorBehaviorDeny).Do(browserCtx)
 		}),
 	); err != nil {
-		return err
+		stopListener()
+		close(stopWorker)
+		<-workerDone
+		requestTracker.releaseAll()
+		if failure := budget.failure(); failure != nil {
+			return failure
+		}
+		return fmt.Errorf("browser navigation setup failed: %w", err)
 	}
 
+	var navigationStage string
 	navigationErr := runChromedpWithCaller(taskCtx, runCtx, chromedp.Navigate(targetURL))
-	if navigationErr == nil {
+	if navigationErr != nil {
+		navigationStage = "navigate"
+	} else {
+		navigationStage = "post_load_wait"
 		navigationErr = waitForNetworkQuiet(runCtx, activity, requestTracker, config.NetworkIdleTime, config.PostLoadTimeout)
 	}
+
+	stopListener()
+	close(stopWorker)
+	<-workerDone
+	requestTracker.releaseAll()
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), time.Second)
+	defer cancelCleanup()
+	_ = runChromedpWithCaller(taskCtx, cleanupCtx, fetch.Disable(), page.StopLoading())
+	_ = runChromedpWithCaller(taskCtx, cleanupCtx, target.SetAutoAttach(false, false))
+
 	if failure := budget.failure(); failure != nil {
 		return failure
 	}
 	if err := navigationCtx.Err(); err != nil {
 		return err
 	}
-	return navigationErr
+	if navigationErr != nil {
+		if errors.Is(navigationErr, context.Canceled) || errors.Is(navigationErr, context.DeadlineExceeded) {
+			return navigationErr
+		}
+		return fmt.Errorf("browser navigation failed during %s: %w", navigationStage, navigationErr)
+	}
+	return nil
 }
 
 func blockedChildTargetType(targetType string) bool {
@@ -685,39 +729,155 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 }
 
 func captureBoundedDOM(ctx context.Context, snapshot *boundedDOMSnapshot) error {
+	expression := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
+	ops := boundedDOMCaptureOps{
+		mainFrame: currentMainFrame,
+		createIsolatedWorld: func(ctx context.Context, frameID cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+			return page.CreateIsolatedWorld(frameID).
+				WithWorldName("hemera-bounded-capture").
+				Do(ctx)
+		},
+		evaluate: func(ctx context.Context, contextID cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+			return cdpruntime.Evaluate(expression).
+				WithContextID(contextID).
+				WithReturnByValue(true).
+				WithSilent(true).
+				WithDisableBreaks(true).
+				Do(ctx)
+		},
+	}
+	return captureBoundedDOMWithOps(ctx, snapshot, ops)
+}
+
+type mainFrameIdentity struct {
+	frameID  cdp.FrameID
+	loaderID cdp.LoaderID
+}
+
+type boundedDOMCaptureOps struct {
+	mainFrame           func(context.Context) (mainFrameIdentity, error)
+	createIsolatedWorld func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error)
+	evaluate            func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error)
+}
+
+func currentMainFrame(ctx context.Context) (mainFrameIdentity, error) {
 	frameTree, err := page.GetFrameTree().Do(ctx)
 	if err != nil {
-		return fmt.Errorf("Page.getFrameTree: %w", err)
+		return mainFrameIdentity{}, fmt.Errorf("Page.getFrameTree: %w", err)
 	}
 	if frameTree == nil || frameTree.Frame == nil {
-		return errors.New("Page.getFrameTree returned no main frame")
+		return mainFrameIdentity{}, errors.New("Page.getFrameTree returned no main frame")
 	}
-	executionContextID, err := page.CreateIsolatedWorld(frameTree.Frame.ID).
-		WithWorldName("hemera-bounded-capture").
-		Do(ctx)
-	if err != nil {
-		return fmt.Errorf("Page.createIsolatedWorld: %w", err)
+	return mainFrameIdentity{frameID: frameTree.Frame.ID, loaderID: frameTree.Frame.LoaderID}, nil
+}
+
+func captureBoundedDOMWithOps(ctx context.Context, snapshot *boundedDOMSnapshot, ops boundedDOMCaptureOps) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		before, err := ops.mainFrame(ctx)
+		if err != nil {
+			return err
+		}
+		candidate, captureErr := captureBoundedDOMAttempt(ctx, before.frameID, ops)
+		after, frameErr := ops.mainFrame(ctx)
+		if frameErr != nil {
+			return errors.Join(captureErr, fmt.Errorf("verify main frame after bounded DOM capture: %w", frameErr))
+		}
+		transitioned := before != after
+		if captureErr == nil && !transitioned {
+			*snapshot = candidate
+			return nil
+		}
+		if attempt == 0 && transitioned && (captureErr == nil || isTransientDOMContextError(captureErr)) {
+			continue
+		}
+		if captureErr != nil {
+			return captureErr
+		}
+		return errors.New("bounded DOM capture main frame changed during isolated-world evaluation")
 	}
-	expression := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
-	value, exception, err := cdpruntime.Evaluate(expression).
-		WithContextID(executionContextID).
-		WithReturnByValue(true).
-		WithSilent(true).
-		WithDisableBreaks(true).
-		Do(ctx)
+	return errors.New("bounded DOM capture could not acquire a stable main-frame execution context")
+}
+
+func captureBoundedDOMAttempt(ctx context.Context, frameID cdp.FrameID, ops boundedDOMCaptureOps) (boundedDOMSnapshot, error) {
+	contextID, err := ops.createIsolatedWorld(ctx, frameID)
 	if err != nil {
-		return fmt.Errorf("Runtime.evaluate bounded DOM serializer: %w", err)
+		return boundedDOMSnapshot{}, fmt.Errorf("Page.createIsolatedWorld: %w", err)
+	}
+	value, exception, err := ops.evaluate(ctx, contextID)
+	if err != nil {
+		return boundedDOMSnapshot{}, fmt.Errorf("Runtime.evaluate bounded DOM serializer: %w", err)
 	}
 	if exception != nil {
-		return errors.New("bounded DOM serializer failed in the isolated world")
+		return boundedDOMSnapshot{}, formatBoundedDOMException(exception)
 	}
 	if value == nil || len(value.Value) == 0 {
-		return errors.New("bounded DOM serializer returned no value")
+		return boundedDOMSnapshot{}, errors.New("bounded DOM serializer returned no value")
 	}
-	if err := json.Unmarshal(value.Value, snapshot); err != nil {
-		return fmt.Errorf("decode bounded DOM snapshot: %w", err)
+	var snapshot boundedDOMSnapshot
+	if err := json.Unmarshal(value.Value, &snapshot); err != nil {
+		return boundedDOMSnapshot{}, fmt.Errorf("decode bounded DOM snapshot: %w", err)
 	}
-	return nil
+	return snapshot, nil
+}
+
+func isTransientDOMContextError(err error) bool {
+	var protocolErr *cdproto.Error
+	if !errors.As(err, &protocolErr) || protocolErr.Code != -32000 {
+		return false
+	}
+	message := strings.TrimSuffix(strings.TrimSpace(protocolErr.Message), ".")
+	switch message {
+	case "Execution context was destroyed",
+		"Cannot find context with specified id",
+		"Inspected target navigated or closed",
+		"No frame with given id found":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatBoundedDOMException(details *cdpruntime.ExceptionDetails) error {
+	if details == nil {
+		return errors.New("bounded DOM serializer returned empty exception details")
+	}
+	parts := []string{"bounded DOM serializer exception"}
+	if text := sanitizeDOMDiagnosticField(details.Text); text != "" {
+		parts = append(parts, "text="+strconv.Quote(text))
+	}
+	if details.Exception != nil {
+		if description := sanitizeDOMDiagnosticField(details.Exception.Description); description != "" {
+			parts = append(parts, "description="+strconv.Quote(description))
+		}
+	}
+	parts = append(parts, fmt.Sprintf("location=%d:%d", details.LineNumber, details.ColumnNumber))
+	if details.StackTrace != nil {
+		frames := make([]string, 0, maxDOMDiagnosticFrames)
+		for _, frame := range details.StackTrace.CallFrames {
+			if frame == nil || len(frames) == maxDOMDiagnosticFrames {
+				continue
+			}
+			name := sanitizeDOMDiagnosticField(frame.FunctionName)
+			if name == "" {
+				name = "<anonymous>"
+			}
+			frames = append(frames, fmt.Sprintf("%s@%d:%d", name, frame.LineNumber, frame.ColumnNumber))
+		}
+		if len(frames) > 0 {
+			parts = append(parts, "stack="+strings.Join(frames, ","))
+		}
+	}
+	return errors.New(truncateUTF8(strings.Join(parts, " "), maxDOMDiagnosticBytes))
+}
+
+func sanitizeDOMDiagnosticField(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	return truncateUTF8(strings.Join(strings.Fields(value), " "), maxDOMDiagnosticFieldBytes)
 }
 
 const boundedDOMSerializer = `(() => {
@@ -727,7 +887,10 @@ const boundedDOMSerializer = `(() => {
   const maxResources = %d;
   const maxURLBytes = %d;
   const encoder = new TextEncoder();
+  const encodeScratch = new Uint8Array(Math.min(maxBytes, 65536));
+  const urlScratch = new Uint8Array(maxURLBytes + 1);
   const chunks = [];
+  let currentChunk = "";
   const scripts = [];
   const iframes = [];
   const voidElements = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
@@ -747,15 +910,19 @@ const boundedDOMSerializer = `(() => {
     const value = String(input);
     let offset = 0;
     while (offset < value.length && bytes < maxBytes) {
-      const capacity = Math.min(maxBytes - bytes, 65536);
+      const capacity = Math.min(maxBytes - bytes, encodeScratch.length);
       const candidate = value.slice(offset, offset + capacity);
-      const buffer = new Uint8Array(capacity);
+      const buffer = encodeScratch.subarray(0, capacity);
       const progress = encoder.encodeInto(candidate, buffer);
       if (progress.read === 0) {
         domTruncated = true;
         break;
       }
-      chunks.push(candidate.slice(0, progress.read));
+      currentChunk += candidate.slice(0, progress.read);
+      if (currentChunk.length >= 16384) {
+        chunks.push(currentChunk);
+        currentChunk = "";
+      }
       offset += progress.read;
       bytes += progress.written;
     }
@@ -785,8 +952,7 @@ const boundedDOMSerializer = `(() => {
 
   function fitsURL(value) {
     if (value.length > maxURLBytes) return false;
-    const buffer = new Uint8Array(maxURLBytes + 1);
-    return encoder.encodeInto(value, buffer).read === value.length;
+    return encoder.encodeInto(value, urlScratch).read === value.length;
   }
 
   function collectResource(kind, rawURL) {
@@ -896,6 +1062,9 @@ const boundedDOMSerializer = `(() => {
     stack.pop();
   }
   if (traversalTruncated) domTruncated = true;
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
   return {
     dom: chunks.join(""),
     script_urls: scripts,

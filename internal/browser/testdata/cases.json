@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "host": "fixture.test",
   "routes": [
     {
@@ -239,6 +239,20 @@
       "file": "limits/large-postload-dom.html"
     },
     {
+      "name": "limit-large-postload-dom-barrier",
+      "path": "/limits/large-postload-dom-barrier",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "dom-completion-barrier"
+    },
+    {
+      "name": "limit-large-postload-dom-complete",
+      "path": "/limits/large-postload-dom-complete",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "dom-completion-signal"
+    },
+    {
       "name": "limit-recursive-frame",
       "path": "/limits/recursive-frame",
       "status": 200,
@@ -286,6 +300,13 @@
       "status": 200,
       "content_type": "text/html; charset=utf-8",
       "file": "limits/postload-redirect.html"
+    },
+    {
+      "name": "limit-postload-redirect-barrier",
+      "path": "/limits/postload-redirect-barrier",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "behavior": "postload-redirect-barrier"
     },
     {
       "name": "limit-postload-transfer",
@@ -364,6 +385,14 @@
         "dynamic-completion-barrier",
         "dynamic-api"
       ],
+      "traffic_dependencies": [
+        {"before": "dynamic-start", "after": "dynamic-page"},
+        {"before": "dynamic-page", "after": "dynamic-bootstrap"},
+        {"before": "dynamic-bootstrap", "after": "dynamic-script"},
+        {"before": "dynamic-script", "after": "dynamic-frame"},
+        {"before": "dynamic-frame", "after": "dynamic-completion-barrier"},
+        {"before": "dynamic-frame", "after": "dynamic-api"}
+      ],
       "scripts": [
         "/dynamic/bootstrap.js",
         "/dynamic/injected.js?redacted"
@@ -400,6 +429,7 @@
       "traffic": [
         "static-negative"
       ],
+      "traffic_dependencies": [],
       "scripts": [],
       "iframes": [],
       "cookies": [],
@@ -418,6 +448,10 @@
         "delayed-page",
         "delayed-api",
         "delayed-script"
+      ],
+      "traffic_dependencies": [
+        {"before": "delayed-page", "after": "delayed-api"},
+        {"before": "delayed-api", "after": "delayed-script"}
       ],
       "scripts": [
         "/delayed/injected.js"

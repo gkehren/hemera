@@ -27,17 +27,20 @@ const (
 )
 
 var allowedFixtureBehaviors = map[string]struct{}{
-	"completion-barrier":  {},
-	"compressed-response": {},
-	"redirect-loop":       {},
-	"credential-redirect": {},
-	"large-response":      {},
-	"large-worker-script": {},
-	"long-poll":           {},
-	"held-resource":       {},
-	"slow-response":       {},
-	"private-subresource": {},
-	"private-trap":        {},
+	"completion-barrier":        {},
+	"compressed-response":       {},
+	"redirect-loop":             {},
+	"credential-redirect":       {},
+	"large-response":            {},
+	"large-worker-script":       {},
+	"long-poll":                 {},
+	"held-resource":             {},
+	"dom-completion-barrier":    {},
+	"dom-completion-signal":     {},
+	"slow-response":             {},
+	"private-subresource":       {},
+	"private-trap":              {},
+	"postload-redirect-barrier": {},
 }
 
 type fixtureManifest struct {
@@ -61,16 +64,22 @@ type fixtureRoute struct {
 }
 
 type fixtureCase struct {
-	Name               string   `json:"name"`
-	EntryRoute         string   `json:"entry_route"`
-	FinalRoute         string   `json:"final_route"`
-	CompletionSelector string   `json:"completion_selector"`
-	DOMMarkers         []string `json:"dom_markers"`
-	Traffic            []string `json:"traffic"`
-	Scripts            []string `json:"scripts"`
-	Iframes            []string `json:"iframes"`
-	Cookies            []string `json:"cookies"`
-	ForbiddenMetadata  []string `json:"forbidden_metadata"`
+	Name                string                     `json:"name"`
+	EntryRoute          string                     `json:"entry_route"`
+	FinalRoute          string                     `json:"final_route"`
+	CompletionSelector  string                     `json:"completion_selector"`
+	DOMMarkers          []string                   `json:"dom_markers"`
+	Traffic             []string                   `json:"traffic"`
+	TrafficDependencies []fixtureTrafficDependency `json:"traffic_dependencies"`
+	Scripts             []string                   `json:"scripts"`
+	Iframes             []string                   `json:"iframes"`
+	Cookies             []string                   `json:"cookies"`
+	ForbiddenMetadata   []string                   `json:"forbidden_metadata"`
+}
+
+type fixtureTrafficDependency struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
 
 type fixtureCorpus struct {
@@ -204,6 +213,156 @@ func TestBrowserFixtureServerRejectsUnexpectedRequests(t *testing.T) {
 	}
 }
 
+func TestFixtureTrafficPartialOrder(t *testing.T) {
+	t.Parallel()
+	expected := []string{"start", "page", "frame", "api", "barrier"}
+	dependencies := []fixtureTrafficDependency{
+		{Before: "start", After: "page"},
+		{Before: "page", After: "frame"},
+		{Before: "frame", After: "api"},
+		{Before: "frame", After: "barrier"},
+	}
+	tests := []struct {
+		name     string
+		observed []string
+		wantErr  string
+	}{
+		{
+			name:     "valid API before completion barrier",
+			observed: []string{"start", "page", "frame", "api", "barrier"},
+		},
+		{
+			name:     "valid completion barrier before API",
+			observed: []string{"start", "page", "frame", "barrier", "api"},
+		},
+		{
+			name:     "dependency violation",
+			observed: []string{"start", "frame", "page", "api", "barrier"},
+			wantErr:  `route "page" must be observed before "frame"`,
+		},
+		{
+			name:     "transitive dependency violation",
+			observed: []string{"start", "page", "api", "barrier", "frame"},
+			wantErr:  `route "frame" must be observed before "api"`,
+		},
+		{
+			name:     "missing route",
+			observed: []string{"start", "page", "frame", "api"},
+			wantErr:  `expected route "barrier" was not observed`,
+		},
+		{
+			name:     "unexpected route",
+			observed: []string{"start", "page", "frame", "api", "outside"},
+			wantErr:  `unexpected route "outside"`,
+		},
+		{
+			name:     "duplicate route",
+			observed: []string{"start", "page", "frame", "api", "api", "barrier"},
+			wantErr:  `route "api" was observed more than once`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateFixtureTraffic(test.observed, expected, dependencies)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateFixtureTraffic() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validateFixtureTraffic() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestFixtureTrafficDefinitionRejectsAmbiguity(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		expected     []string
+		dependencies []fixtureTrafficDependency
+		wantErr      string
+	}{
+		{
+			name:     "empty traffic list",
+			expected: []string{},
+			wantErr:  "at least one expected route",
+		},
+		{
+			name:     "empty route name",
+			expected: []string{"page", ""},
+			wantErr:  "empty route name",
+		},
+		{
+			name:         "dependency with empty before",
+			expected:     []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{{Before: "", After: "script"}},
+			wantErr:      "empty before route",
+		},
+		{
+			name:         "dependency with empty after",
+			expected:     []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{{Before: "page", After: ""}},
+			wantErr:      "empty after route",
+		},
+		{
+			name:     "duplicate dependency",
+			expected: []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{
+				{Before: "page", After: "script"},
+				{Before: "page", After: "script"},
+			},
+			wantErr: "is duplicated",
+		},
+		{
+			name:         "self dependency",
+			expected:     []string{"page"},
+			dependencies: []fixtureTrafficDependency{{Before: "page", After: "page"}},
+			wantErr:      "self-referential",
+		},
+		{
+			name:     "duplicate expected route",
+			expected: []string{"page", "page"},
+			wantErr:  "more than once",
+		},
+		{
+			name:         "undeclared dependency route",
+			expected:     []string{"page"},
+			dependencies: []fixtureTrafficDependency{{Before: "page", After: "script"}},
+			wantErr:      "undeclared route",
+		},
+		{
+			name:     "2-node cycle",
+			expected: []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{
+				{Before: "page", After: "script"},
+				{Before: "script", After: "page"},
+			},
+			wantErr: "contain a cycle",
+		},
+		{
+			name:     "3-node cycle",
+			expected: []string{"page", "script", "frame"},
+			dependencies: []fixtureTrafficDependency{
+				{Before: "page", After: "script"},
+				{Before: "script", After: "frame"},
+				{Before: "frame", After: "page"},
+			},
+			wantErr: "contain a cycle",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateFixtureTrafficDefinition(test.expected, test.dependencies)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validateFixtureTrafficDefinition() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func loadFixtureCorpus(manifestPath string) (*fixtureCorpus, error) {
 	root := filepath.Dir(manifestPath)
 	manifestData, err := os.ReadFile(manifestPath)
@@ -222,7 +381,7 @@ func loadFixtureCorpus(manifestPath string) (*fixtureCorpus, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, errors.New("browser fixture manifest must contain exactly one JSON value")
 	}
-	if manifest.SchemaVersion != 1 {
+	if manifest.SchemaVersion != 2 {
 		return nil, fmt.Errorf("unsupported browser fixture schema_version %d", manifest.SchemaVersion)
 	}
 	if manifest.Host != "fixture.test" {
@@ -360,8 +519,11 @@ func (c *fixtureCorpus) validateCases() error {
 				return fmt.Errorf("case %q references unknown route %q", fixtureCase.Name, routeName)
 			}
 		}
-		if fixtureCase.Traffic[0] != fixtureCase.EntryRoute {
-			return fmt.Errorf("case %q traffic does not start with its entry route", fixtureCase.Name)
+		if err := validateFixtureTrafficDefinition(fixtureCase.Traffic, fixtureCase.TrafficDependencies); err != nil {
+			return fmt.Errorf("case %q has invalid traffic contract: %w", fixtureCase.Name, err)
+		}
+		if !slices.Contains(fixtureCase.Traffic, fixtureCase.EntryRoute) {
+			return fmt.Errorf("case %q traffic does not contain its entry route", fixtureCase.Name)
 		}
 		for _, collection := range [][]string{fixtureCase.DOMMarkers, fixtureCase.Scripts, fixtureCase.Iframes, fixtureCase.Cookies, fixtureCase.ForbiddenMetadata} {
 			for _, value := range collection {
@@ -369,6 +531,106 @@ func (c *fixtureCorpus) validateCases() error {
 					return fmt.Errorf("case %q contains an empty or invalid expectation", fixtureCase.Name)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func validateFixtureTrafficDefinition(expected []string, dependencies []fixtureTrafficDependency) error {
+	if len(expected) == 0 {
+		return errors.New("traffic must declare at least one expected route")
+	}
+	declared := make(map[string]struct{}, len(expected))
+	for _, routeName := range expected {
+		if routeName == "" {
+			return errors.New("traffic contains an empty route name")
+		}
+		if _, duplicate := declared[routeName]; duplicate {
+			return fmt.Errorf("traffic declares route %q more than once", routeName)
+		}
+		declared[routeName] = struct{}{}
+	}
+
+	edges := make(map[fixtureTrafficDependency]struct{}, len(dependencies))
+	indegree := make(map[string]int, len(expected))
+	children := make(map[string][]string, len(expected))
+	for routeName := range declared {
+		indegree[routeName] = 0
+	}
+	for _, dependency := range dependencies {
+		if dependency.Before == "" {
+			return errors.New("traffic dependency has an empty before route")
+		}
+		if dependency.After == "" {
+			return errors.New("traffic dependency has an empty after route")
+		}
+		if dependency.Before == dependency.After {
+			return fmt.Errorf("traffic dependency for %q is self-referential", dependency.Before)
+		}
+		if _, ok := declared[dependency.Before]; !ok {
+			return fmt.Errorf("traffic dependency references undeclared route %q", dependency.Before)
+		}
+		if _, ok := declared[dependency.After]; !ok {
+			return fmt.Errorf("traffic dependency references undeclared route %q", dependency.After)
+		}
+		if _, duplicate := edges[dependency]; duplicate {
+			return fmt.Errorf("traffic dependency %q before %q is duplicated", dependency.Before, dependency.After)
+		}
+		edges[dependency] = struct{}{}
+		children[dependency.Before] = append(children[dependency.Before], dependency.After)
+		indegree[dependency.After]++
+	}
+
+	queue := make([]string, 0, len(expected))
+	for _, routeName := range expected {
+		if indegree[routeName] == 0 {
+			queue = append(queue, routeName)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		routeName := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, child := range children[routeName] {
+			indegree[child]--
+			if indegree[child] == 0 {
+				queue = append(queue, child)
+			}
+		}
+	}
+	if visited != len(expected) {
+		return errors.New("traffic dependencies contain a cycle")
+	}
+	return nil
+}
+
+func validateFixtureTraffic(observed, expected []string, dependencies []fixtureTrafficDependency) error {
+	if err := validateFixtureTrafficDefinition(expected, dependencies); err != nil {
+		return err
+	}
+	positions := make(map[string]int, len(observed))
+	declared := make(map[string]struct{}, len(expected))
+	for _, routeName := range expected {
+		declared[routeName] = struct{}{}
+	}
+	for index, routeName := range observed {
+		if _, ok := declared[routeName]; !ok {
+			return fmt.Errorf("unexpected route %q", routeName)
+		}
+		if _, duplicate := positions[routeName]; duplicate {
+			return fmt.Errorf("route %q was observed more than once", routeName)
+		}
+		positions[routeName] = index
+	}
+	for _, routeName := range expected {
+		if _, ok := positions[routeName]; !ok {
+			return fmt.Errorf("expected route %q was not observed", routeName)
+		}
+	}
+	for _, dependency := range dependencies {
+		if positions[dependency.Before] >= positions[dependency.After] {
+			return fmt.Errorf("route %q must be observed before %q", dependency.Before, dependency.After)
 		}
 	}
 	return nil

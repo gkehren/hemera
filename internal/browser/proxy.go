@@ -413,7 +413,6 @@ func (b *navigationBudget) failInfrastructure(err error) {
 	b.mu.Lock()
 	if b.infraErr == nil {
 		b.infraErr = err
-		b.stop()
 	}
 	b.mu.Unlock()
 }

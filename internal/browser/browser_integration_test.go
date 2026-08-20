@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func TestSandboxedChromiumLifecycle(t *testing.T) {
 		}
 		t.Fatalf("start explicitly configured Chromium: %v", err)
 	}
-	t.Logf("first Chromium startup completed in %s", time.Since(startedFirst))
+	logChromiumStartup(t, first, "first", startedFirst)
 	defer first.Close()
 
 	startedSecond := time.Now()
@@ -68,7 +69,7 @@ func TestSandboxedChromiumLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("second Chromium startup completed in %s", time.Since(startedSecond))
+	logChromiumStartup(t, second, "second", startedSecond)
 	defer second.Close()
 
 	if version := first.Version(); version.Product == "" || version.ProtocolVersion == "" {
@@ -129,7 +130,7 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 				}
 				t.Fatalf("start explicitly configured Chromium: %v", err)
 			}
-			t.Logf("Chromium startup completed in %s", time.Since(started))
+			logChromiumStartup(t, session, "fixture capture", started)
 			defer session.Close()
 
 			opCtx1, cancelOp1 := integrationOperationContext(t, sessionCtx)
@@ -254,7 +255,7 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 				}
 				t.Fatal(err)
 			}
-			t.Logf("Chromium startup completed in %s", time.Since(started))
+			logChromiumStartup(t, session, "blocked child target", started)
 			defer session.Close()
 
 			opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
@@ -292,7 +293,7 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		t.Logf("Chromium startup completed in %s", time.Since(started))
+		logChromiumStartup(t, session, "continuous traffic", started)
 		defer session.Close()
 
 		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
@@ -328,7 +329,7 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		t.Logf("Chromium startup completed in %s", time.Since(started))
+		logChromiumStartup(t, session, "post-load request budget", started)
 		defer session.Close()
 
 		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
@@ -368,7 +369,7 @@ func TestSandboxedChromiumPostLoadDeadlineAndBlockedChildTargets(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		t.Logf("Chromium startup completed in %s", time.Since(started))
+		logChromiumStartup(t, session, "long polling", started)
 		defer session.Close()
 
 		opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
@@ -391,7 +392,30 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	}
 	var activeResources atomic.Int32
 	var peakResources atomic.Int32
+	domBarrierStarted := make(chan struct{}, 1)
+	domBarrierDone := make(chan bool, 1)
+	domBarrierRelease := make(chan struct{})
+	var releaseDOMBarrier sync.Once
 	fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+		"dom-completion-barrier": func(writer http.ResponseWriter, request *http.Request) {
+			domBarrierStarted <- struct{}{}
+			select {
+			case <-domBarrierRelease:
+				writer.WriteHeader(http.StatusOK)
+				_, _ = writer.Write([]byte("DOM mutation complete"))
+				domBarrierDone <- true
+			case <-request.Context().Done():
+				domBarrierDone <- false
+			case <-time.After(5 * time.Second):
+				domBarrierDone <- false
+				http.Error(writer, "DOM completion signal was not received", http.StatusGatewayTimeout)
+			}
+		},
+		"dom-completion-signal": func(writer http.ResponseWriter, _ *http.Request) {
+			releaseDOMBarrier.Do(func() { close(domBarrierRelease) })
+			writer.WriteHeader(http.StatusOK)
+			_, _ = writer.Write([]byte("released"))
+		},
 		"held-resource": func(writer http.ResponseWriter, _ *http.Request) {
 			current := activeResources.Add(1)
 			defer activeResources.Add(-1)
@@ -409,7 +433,7 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 
 	config, explicit := integrationConfig(t)
 	targetURL := configureIntegrationFixture(t, &config, fixture.server)
-	config.MaxConcurrentRequests = 1
+	config.MaxConcurrentRequests = 2
 	client, err := New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -425,23 +449,23 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	t.Logf("Chromium startup completed in %s", time.Since(started))
+	logChromiumStartup(t, session, "bounded DOM and concurrency", started)
 	defer session.Close()
 
 	opCtx1, cancelOp1 := integrationOperationContext(t, sessionCtx)
 	recorder, err := session.BeginCapture(opCtx1)
 	if err != nil {
 		cancelOp1()
-		t.Fatal(err)
+		t.Fatalf("begin initial bounded DOM capture: %v", err)
 	}
 	if err := session.Navigate(opCtx1, targetURL+"/limits/bounded-dom"); err != nil {
 		cancelOp1()
-		t.Fatal(err)
+		t.Fatalf("navigate initial bounded DOM fixture: %v", err)
 	}
 	result, err := recorder.Finish(opCtx1)
 	cancelOp1()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finish initial bounded DOM capture: %v", err)
 	}
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Fatalf("DOM snapshot = %d bytes, truncated=%t", len(result.DOM), result.DOMTruncated)
@@ -451,24 +475,55 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	recorder, err = session.BeginCapture(opCtx2)
 	if err != nil {
 		cancelOp2()
-		t.Fatal(err)
+		t.Fatalf("begin post-load bounded DOM capture: %v", err)
 	}
 	if err := session.Navigate(opCtx2, targetURL+"/limits/large-postload-dom"); err != nil {
 		cancelOp2()
-		t.Fatal(err)
+		t.Fatalf("navigate post-load bounded DOM fixture: %v", err)
 	}
 	postLoadResult, err := recorder.Finish(opCtx2)
 	cancelOp2()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finish post-load bounded DOM capture: %v", err)
 	}
 	if !postLoadResult.DOMTruncated || len(postLoadResult.DOM) > maxDOMBytes {
 		t.Fatalf("post-load DOM snapshot = %d bytes, truncated=%t", len(postLoadResult.DOM), postLoadResult.DOMTruncated)
 	}
+	if !strings.Contains(postLoadResult.DOM, `data-mutation-complete="true"`) {
+		t.Fatal("post-load DOM snapshot was captured before the fixture mutation completed")
+	}
+	select {
+	case <-domBarrierStarted:
+	default:
+		t.Fatal("post-load DOM completion barrier was not requested")
+	}
+	select {
+	case canceled := <-domBarrierDone:
+		if !canceled {
+			t.Fatal("post-load DOM completion barrier reached its fallback deadline")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("post-load DOM completion barrier did not quiesce before capture")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close bounded DOM Chromium session: %v", err)
+	}
 
+	config.MaxConcurrentRequests = 1
+	client, err = New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started = time.Now()
+	concurrencySession, err := client.Start(sessionCtx)
+	if err != nil {
+		t.Fatalf("start concurrency-limit Chromium session: %v", err)
+	}
+	logChromiumStartup(t, concurrencySession, "request concurrency", started)
+	defer concurrencySession.Close()
 	opCtx3, cancelOp3 := integrationOperationContext(t, sessionCtx)
 	defer cancelOp3()
-	if err := session.Navigate(opCtx3, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
+	if err := concurrencySession.Navigate(opCtx3, targetURL+"/limits/concurrency"); !errors.Is(err, ErrConcurrencyLimit) {
 		t.Fatalf("concurrent resource navigation error = %v, want ErrConcurrencyLimit", err)
 	}
 	if peak := peakResources.Load(); peak > 1 {
@@ -542,6 +597,10 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 				"large-response": func(writer http.ResponseWriter, _ *http.Request) {
 					_, _ = writer.Write([]byte(strings.Repeat("x", 64<<10)))
 				},
+				"postload-redirect-barrier": func(writer http.ResponseWriter, _ *http.Request) {
+					writer.WriteHeader(http.StatusOK)
+					_, _ = fmt.Fprint(writer, "barrier reached")
+				},
 			})
 			config, explicit := integrationConfig(t)
 			targetURL := configureIntegrationFixture(t, &config, fixture.server)
@@ -561,7 +620,7 @@ func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 				}
 				t.Fatal(err)
 			}
-			t.Logf("Chromium startup completed in %s", time.Since(started))
+			logChromiumStartup(t, session, "navigation limits", started)
 			defer session.Close()
 
 			opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
@@ -641,8 +700,19 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 		gotResponses[response.URL] = append(gotResponses[response.URL], response.Status)
 		assertDeclaredCaptureURL(t, fixture, response.URL)
 	}
-	if fmt.Sprint(gotRequestURLs) != fmt.Sprint(wantURLs) {
-		t.Errorf("request order = %#v, want %#v", gotRequestURLs, wantURLs)
+	wantURLByRoute := make(map[string]string, len(fixtureCase.Traffic))
+	for index, routeName := range fixtureCase.Traffic {
+		wantURLByRoute[routeName] = wantURLs[index]
+	}
+	urlDependencies := make([]fixtureTrafficDependency, len(fixtureCase.TrafficDependencies))
+	for index, dependency := range fixtureCase.TrafficDependencies {
+		urlDependencies[index] = fixtureTrafficDependency{
+			Before: wantURLByRoute[dependency.Before],
+			After:  wantURLByRoute[dependency.After],
+		}
+	}
+	if err := validateFixtureTraffic(gotRequestURLs, wantURLs, urlDependencies); err != nil {
+		t.Errorf("captured request traffic violates fixture contract: %v; observed %#v", err, gotRequestURLs)
 	}
 	for index, wantURL := range wantURLs {
 		statuses := gotResponses[wantURL]
@@ -655,8 +725,8 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 		t.Errorf("capture contains unexpected responses: %#v", gotResponses)
 	}
 	served, unexpected := fixture.snapshot()
-	if fmt.Sprint(served) != fmt.Sprint(fixtureCase.Traffic) {
-		t.Errorf("fixture server request order = %#v, want %#v", served, fixtureCase.Traffic)
+	if err := validateFixtureTraffic(served, fixtureCase.Traffic, fixtureCase.TrafficDependencies); err != nil {
+		t.Errorf("fixture server traffic violates fixture contract: %v; observed %#v", err, served)
 	}
 	if len(unexpected) != 0 {
 		t.Errorf("fixture server received undeclared requests: %#v", unexpected)
@@ -760,6 +830,13 @@ func integrationRuntime(t *testing.T, session *Session) *chromedpSession {
 		t.Fatalf("backend session type = %T, want *chromedpSession", session.backend)
 	}
 	return runtime
+}
+
+func logChromiumStartup(t *testing.T, session *Session, phase string, started time.Time) {
+	t.Helper()
+	version := session.Version()
+	t.Logf("%s Chromium startup completed in %s (product %q, CDP %q)",
+		phase, time.Since(started), version.Product, version.ProtocolVersion)
 }
 
 func assertChromiumArguments(t *testing.T, runtime *chromedpSession) {

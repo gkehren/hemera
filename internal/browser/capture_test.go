@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,7 +10,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	cdproto "github.com/chromedp/cdproto"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 )
 
 func TestRecorderLifecycleAndSessionExclusivity(t *testing.T) {
@@ -327,6 +331,275 @@ func TestBoundedDOMSnapshotPreservesSerializerLimits(t *testing.T) {
 	}
 }
 
+func TestBoundedDOMCaptureRetriesOnlyClassifiedFrameTransitions(t *testing.T) {
+	t.Parallel()
+	frameA := mainFrameIdentity{frameID: cdp.FrameID("main"), loaderID: cdp.LoaderID("loader-a")}
+	frameB := mainFrameIdentity{frameID: cdp.FrameID("main"), loaderID: cdp.LoaderID("loader-b")}
+
+	t.Run("context invalidation with loader transition retries once", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB, frameB, frameB}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				if evaluateCall == 1 {
+					return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+				}
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "stable"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "stable" || evaluateCall != 2 {
+			t.Fatalf("capture = %#v after %d evaluations, want stable retry", snapshot, evaluateCall)
+		}
+	})
+
+	t.Run("context error without frame transition remains fatal", func(t *testing.T) {
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) { return frameA, nil },
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "Execution context was destroyed") || evaluateCall != 1 {
+			t.Fatalf("capture error = %v after %d evaluations, want visible non-retried error", err, evaluateCall)
+		}
+	})
+
+	t.Run("frame ID change with same loader retries once", func(t *testing.T) {
+		frameOther := mainFrameIdentity{frameID: cdp.FrameID("other"), loaderID: cdp.LoaderID("loader-a")}
+		frames := []mainFrameIdentity{frameA, frameOther, frameOther, frameOther}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				if evaluateCall == 1 {
+					return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+				}
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "frame-change-retry"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "frame-change-retry" || evaluateCall != 2 {
+			t.Fatalf("capture = %#v after %d evaluations, want frame ID change retry", snapshot, evaluateCall)
+		}
+	})
+
+	t.Run("frame and loader both change retries once", func(t *testing.T) {
+		frameBoth := mainFrameIdentity{frameID: cdp.FrameID("other"), loaderID: cdp.LoaderID("loader-b")}
+		frames := []mainFrameIdentity{frameA, frameBoth, frameBoth, frameBoth}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				if evaluateCall == 1 {
+					return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+				}
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "both-change-retry"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "both-change-retry" || evaluateCall != 2 {
+			t.Fatalf("capture = %#v after %d evaluations, want both change retry", snapshot, evaluateCall)
+		}
+	})
+
+	t.Run("second transition invalidation is fatal without third attempt", func(t *testing.T) {
+		frameC := mainFrameIdentity{frameID: cdp.FrameID("main"), loaderID: cdp.LoaderID("loader-c")}
+		frames := []mainFrameIdentity{frameA, frameB, frameB, frameC}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return nil, nil, &cdproto.Error{Code: -32000, Message: "Execution context was destroyed."}
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "Execution context was destroyed") || evaluateCall != 2 {
+			t.Fatalf("capture error = %v after %d evaluations, want fatal after 2 attempts", err, evaluateCall)
+		}
+	})
+
+	t.Run("createIsolatedWorld transient error during transition retries once", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB, frameB, frameB}
+		frameCall := 0
+		worldCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				worldCall++
+				if worldCall == 1 {
+					return 0, &cdproto.Error{Code: -32000, Message: "No frame with given id found."}
+				}
+				return cdpruntime.ExecutionContextID(2), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "world-retry-success"}), nil, nil
+			},
+		}
+		var snapshot boundedDOMSnapshot
+		if err := captureBoundedDOMWithOps(context.Background(), &snapshot, ops); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.DOM != "world-retry-success" || worldCall != 2 || evaluateCall != 1 {
+			t.Fatalf("capture = %#v (worlds=%d evaluates=%d), want retry on transient world failure", snapshot, worldCall, evaluateCall)
+		}
+	})
+
+	t.Run("createIsolatedWorld unclassified error remains fatal", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB}
+		frameCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return 0, errors.New("Page.createIsolatedWorld unexpected error")
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				return serializedDOMRemoteObject(t, boundedDOMSnapshot{DOM: "unexpected"}), nil, nil
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "Page.createIsolatedWorld unexpected error") {
+			t.Fatalf("capture error = %v, want unclassified world error to be fatal", err)
+		}
+	})
+
+	t.Run("serializer exception remains fatal across frame transition", func(t *testing.T) {
+		frames := []mainFrameIdentity{frameA, frameB}
+		frameCall := 0
+		evaluateCall := 0
+		ops := boundedDOMCaptureOps{
+			mainFrame: func(context.Context) (mainFrameIdentity, error) {
+				frame := frames[frameCall]
+				frameCall++
+				return frame, nil
+			},
+			createIsolatedWorld: func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+				return cdpruntime.ExecutionContextID(1), nil
+			},
+			evaluate: func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+				evaluateCall++
+				return nil, &cdpruntime.ExceptionDetails{
+					Text:      "Uncaught TypeError",
+					Exception: &cdpruntime.RemoteObject{Description: "TypeError: serializer defect"},
+				}, nil
+			},
+		}
+		err := captureBoundedDOMWithOps(context.Background(), &boundedDOMSnapshot{}, ops)
+		if err == nil || !strings.Contains(err.Error(), "serializer defect") || evaluateCall != 1 {
+			t.Fatalf("capture error = %v after %d evaluations, want visible serializer failure", err, evaluateCall)
+		}
+	})
+}
+
+func TestBoundedDOMExceptionDiagnosticsAreBoundedAndSanitized(t *testing.T) {
+	t.Parallel()
+	details := &cdpruntime.ExceptionDetails{
+		Text:         "Uncaught\nTypeError",
+		LineNumber:   12,
+		ColumnNumber: 7,
+		URL:          "https://example.test/page?token=secret",
+		Exception: &cdpruntime.RemoteObject{
+			Description: "TypeError:\t" + strings.Repeat("serializer failed ", 100),
+		},
+		StackTrace: &cdpruntime.StackTrace{CallFrames: []*cdpruntime.CallFrame{
+			{FunctionName: "appendRaw\r", URL: "https://example.test/script?cookie=secret", LineNumber: 20, ColumnNumber: 4},
+			{FunctionName: "walk", LineNumber: 40, ColumnNumber: 2},
+			{FunctionName: "third", LineNumber: 50, ColumnNumber: 1},
+			{FunctionName: "omitted", LineNumber: 60, ColumnNumber: 1},
+		}},
+	}
+	diagnostic := formatBoundedDOMException(details).Error()
+	for _, want := range []string{
+		`text="Uncaught TypeError"`,
+		`description="TypeError: serializer failed`,
+		"location=12:7",
+		"stack=appendRaw@20:4,walk@40:2,third@50:1",
+	} {
+		if !strings.Contains(diagnostic, want) {
+			t.Errorf("diagnostic %q does not contain %q", diagnostic, want)
+		}
+	}
+	if len(diagnostic) > maxDOMDiagnosticBytes {
+		t.Errorf("diagnostic length = %d, want at most %d", len(diagnostic), maxDOMDiagnosticBytes)
+	}
+	for _, forbidden := range []string{"\n", "\r", "\t", "token=secret", "cookie=secret", "omitted"} {
+		if strings.Contains(diagnostic, forbidden) {
+			t.Errorf("diagnostic retained forbidden value %q: %q", forbidden, diagnostic)
+		}
+	}
+}
+
+func serializedDOMRemoteObject(t *testing.T, snapshot boundedDOMSnapshot) *cdpruntime.RemoteObject {
+	t.Helper()
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &cdpruntime.RemoteObject{Value: data}
+}
+
 func TestCaptureResultSlicesAreCloned(t *testing.T) {
 	t.Parallel()
 	original := CaptureResult{
@@ -390,4 +663,61 @@ func (s *fakeCaptureSource) finish(ctx context.Context) (CaptureResult, error) {
 func (s *fakeCaptureSource) Close() error {
 	s.closeCalls.Add(1)
 	return s.err
+}
+
+func TestBoundedDOMSerializerTemplateFormat(t *testing.T) {
+	t.Parallel()
+	script := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
+	for _, want := range []string{
+		"const encodeScratch = new Uint8Array(Math.min(maxBytes, 65536));",
+		"const urlScratch = new Uint8Array(maxURLBytes + 1);",
+		"let currentChunk = \"\";",
+		"if (currentChunk.length >= 16384)",
+		"chunks.join(\"\")",
+		"encodeInto(candidate, buffer)",
+		"encodeInto(value, urlScratch)",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("boundedDOMSerializer missing %q", want)
+		}
+	}
+}
+
+func TestBoundedDOMSnapshotUTF8MultibyteHandling(t *testing.T) {
+	t.Parallel()
+	collector := newCaptureCollector()
+	multibyteDOM := "<html><body>" + strings.Repeat("é€漢😀", 1000) + "</body></html>"
+	result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+		DOM: multibyteDOM,
+	}, nil)
+
+	if !strings.Contains(result.DOM, "é€漢😀") {
+		t.Error("multibyte characters were not retained")
+	}
+	if len([]byte(result.DOM)) > maxDOMBytes {
+		t.Errorf("DOM byte size %d exceeds %d", len([]byte(result.DOM)), maxDOMBytes)
+	}
+}
+
+func TestBoundedDOMSnapshotManyTinyNodesAndLargeAttributes(t *testing.T) {
+	t.Parallel()
+	collector := newCaptureCollector()
+	var dom strings.Builder
+	dom.WriteString("<html><body>")
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&dom, `<div class="node-%d" data-custom="%s">item</div>`, i, strings.Repeat("a", 100))
+	}
+	dom.WriteString("</body></html>")
+
+	result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+		DOM:          dom.String(),
+		DOMTruncated: true,
+	}, nil)
+
+	if !result.DOMTruncated {
+		t.Error("expected DOMTruncated to be preserved")
+	}
+	if len(result.DOM) > maxDOMBytes {
+		t.Errorf("DOM length = %d, want at most %d", len(result.DOM), maxDOMBytes)
+	}
 }
