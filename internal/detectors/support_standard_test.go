@@ -3,6 +3,7 @@ package detectors
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -478,26 +479,9 @@ type provenanceManifest struct {
 	Rules         map[string]ruleProvenance `json:"rules"`
 }
 
-func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
-	t.Parallel()
-	ruleSet, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	manifestPath := filepath.Join("provenance.json")
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatalf("read provenance manifest: %v", err)
-	}
-
-	var prov provenanceManifest
-	if err := json.Unmarshal(data, &prov); err != nil {
-		t.Fatalf("unmarshal provenance manifest: %v", err)
-	}
-
+func validateProvenanceManifest(prov provenanceManifest, ruleSet rules.RuleSet) error {
 	if prov.SchemaVersion != 1 {
-		t.Errorf("provenance manifest schema_version = %d, want 1", prov.SchemaVersion)
+		return fmt.Errorf("schema_version = %d, want 1", prov.SchemaVersion)
 	}
 
 	var collectEvidence func(rules.Condition) []*rules.Evidence
@@ -516,63 +500,58 @@ func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 	}
 
 	for _, rule := range ruleSet.Rules {
-		rule := rule
-		t.Run(rule.ID, func(t *testing.T) {
-			t.Parallel()
-			ruleProv, exists := prov.Rules[rule.ID]
-			if !exists {
-				t.Fatalf("rule %q is missing from provenance manifest", rule.ID)
-			}
-			if ruleProv.MinimumScore != rule.MinimumScore {
-				t.Errorf("rule %q minimum_score = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumScore, rule.MinimumScore)
-			}
-			if ruleProv.MinimumEvidence != rule.MinimumEvidence {
-				t.Errorf("rule %q minimum_evidence = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumEvidence, rule.MinimumEvidence)
-			}
-			if strings.TrimSpace(ruleProv.ScoringRationale) == "" {
-				t.Errorf("rule %q has empty scoring_rationale in provenance manifest", rule.ID)
+		ruleProv, exists := prov.Rules[rule.ID]
+		if !exists {
+			return fmt.Errorf("rule %q is missing from provenance manifest", rule.ID)
+		}
+		if ruleProv.MinimumScore != rule.MinimumScore {
+			return fmt.Errorf("rule %q minimum_score = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumScore, rule.MinimumScore)
+		}
+		if ruleProv.MinimumEvidence != rule.MinimumEvidence {
+			return fmt.Errorf("rule %q minimum_evidence = %v in provenance, want %v from rule", rule.ID, ruleProv.MinimumEvidence, rule.MinimumEvidence)
+		}
+		if strings.TrimSpace(ruleProv.ScoringRationale) == "" {
+			return fmt.Errorf("rule %q has empty scoring_rationale in provenance manifest", rule.ID)
+		}
+
+		ruleEvList := collectEvidence(rule.Match)
+		ruleEvMap := make(map[string]*rules.Evidence, len(ruleEvList))
+		for _, ev := range ruleEvList {
+			ruleEvMap[ev.ID] = ev
+		}
+
+		for _, ev := range ruleEvList {
+			evProv, ok := ruleProv.Evidence[ev.ID]
+			if !ok {
+				return fmt.Errorf("rule %q evidence %q is missing from provenance manifest", rule.ID, ev.ID)
 			}
 
-			ruleEvList := collectEvidence(rule.Match)
-			ruleEvMap := make(map[string]*rules.Evidence, len(ruleEvList))
-			for _, ev := range ruleEvList {
-				ruleEvMap[ev.ID] = ev
+			wantRole := "supporting"
+			if ev.Weight >= rule.MinimumScore {
+				wantRole = "decisive"
 			}
-
-			for _, ev := range ruleEvList {
-				evProv, ok := ruleProv.Evidence[ev.ID]
-				if !ok {
-					t.Errorf("rule %q evidence %q is missing from provenance manifest", rule.ID, ev.ID)
-					continue
-				}
-
-				wantRole := "supporting"
-				if ev.Weight >= rule.MinimumScore {
-					wantRole = "decisive"
-				}
-				if evProv.Role != wantRole {
-					t.Errorf("rule %q evidence %q role = %q, want %q (weight: %v, min_score: %v)", rule.ID, ev.ID, evProv.Role, wantRole, ev.Weight, rule.MinimumScore)
-				}
-				if evProv.Weight != ev.Weight {
-					t.Errorf("rule %q evidence %q weight = %v in provenance, want %v from rule", rule.ID, ev.ID, evProv.Weight, ev.Weight)
-				}
-				if evProv.Group != ev.Group {
-					t.Errorf("rule %q evidence %q group = %q, want %q", rule.ID, ev.ID, evProv.Group, ev.Group)
-				}
-				if !strings.HasPrefix(evProv.Source, "https://") {
-					t.Errorf("rule %q evidence %q source %q is not a valid https URL", rule.ID, ev.ID, evProv.Source)
-				}
-				if strings.TrimSpace(evProv.Rationale) == "" {
-					t.Errorf("rule %q evidence %q has empty rationale", rule.ID, ev.ID)
-				}
+			if evProv.Role != wantRole {
+				return fmt.Errorf("rule %q evidence %q role = %q, want %q (weight: %v, min_score: %v)", rule.ID, ev.ID, evProv.Role, wantRole, ev.Weight, rule.MinimumScore)
 			}
-
-			for provEvID := range ruleProv.Evidence {
-				if _, ok := ruleEvMap[provEvID]; !ok {
-					t.Errorf("provenance manifest declares evidence %q not found in rule %q", provEvID, rule.ID)
-				}
+			if evProv.Weight != ev.Weight {
+				return fmt.Errorf("rule %q evidence %q weight = %v in provenance, want %v from rule", rule.ID, ev.ID, evProv.Weight, ev.Weight)
 			}
-		})
+			if evProv.Group != ev.Group {
+				return fmt.Errorf("rule %q evidence %q group = %q, want %q", rule.ID, ev.ID, evProv.Group, ev.Group)
+			}
+			if !strings.HasPrefix(evProv.Source, "https://") {
+				return fmt.Errorf("rule %q evidence %q source %q is not a valid https URL", rule.ID, ev.ID, evProv.Source)
+			}
+			if strings.TrimSpace(evProv.Rationale) == "" {
+				return fmt.Errorf("rule %q evidence %q has empty rationale", rule.ID, ev.ID)
+			}
+		}
+
+		for provEvID := range ruleProv.Evidence {
+			if _, ok := ruleEvMap[provEvID]; !ok {
+				return fmt.Errorf("provenance manifest declares evidence %q not found in rule %q", provEvID, rule.ID)
+			}
+		}
 	}
 
 	for provRuleID := range prov.Rules {
@@ -584,8 +563,32 @@ func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("provenance manifest declares rule %q not found in rules.json", provRuleID)
+			return fmt.Errorf("provenance manifest declares rule %q not found in rules.json", provRuleID)
 		}
+	}
+	return nil
+}
+
+func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath := filepath.Join("provenance.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read provenance manifest: %v", err)
+	}
+
+	var prov provenanceManifest
+	if err := json.Unmarshal(data, &prov); err != nil {
+		t.Fatalf("unmarshal provenance manifest: %v", err)
+	}
+
+	if err := validateProvenanceManifest(prov, ruleSet); err != nil {
+		t.Fatalf("provenance manifest validation failed: %v", err)
 	}
 }
 
@@ -681,58 +684,126 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 
 func TestSupportStandardEnforcementRejections(t *testing.T) {
 	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("provenance weight drift fails", func(t *testing.T) {
+	data, err := os.ReadFile("provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var baseProv provenanceManifest
+	if err := json.Unmarshal(data, &baseProv); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("weight drift fails", func(t *testing.T) {
 		t.Parallel()
-		ruleSet, err := Load()
-		if err != nil {
-			t.Fatal(err)
-		}
-		ruleSet.Rules[0].Match.Signal = &rules.Evidence{
-			ID:     "drift-ev",
-			Type:   model.SignalTypeResponseHeader,
-			Weight: 99,
-		}
-		// Validate that altered rules fail support standard validation
-		if err := ValidateSupportStandard(ruleSet); err == nil {
-			t.Fatal("expected support standard violation for unachievable/drifted rule, got nil")
+		mutProv := cloneProvenance(baseProv)
+		ev := mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"]
+		ev.Weight = 99
+		mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"] = ev
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on weight drift, got nil")
 		}
 	})
 
-	t.Run("fixture intent duplicate rule rejection", func(t *testing.T) {
+	t.Run("minimum score drift fails", func(t *testing.T) {
 		t.Parallel()
-		caseIntent := struct {
-			PositiveFor []string
-		}{
-			PositiveFor: []string{"cloudflare.proxy", "cloudflare.proxy"},
-		}
-		seen := make(map[string]bool)
-		hasDuplicate := false
-		for _, r := range caseIntent.PositiveFor {
-			if seen[r] {
-				hasDuplicate = true
-				break
-			}
-			seen[r] = true
-		}
-		if !hasDuplicate {
-			t.Fatal("expected duplicate detection to flag duplicate rule in positive_for")
+		mutProv := cloneProvenance(baseProv)
+		r := mutProv.Rules["cloudflare.proxy"]
+		r.MinimumScore = 50
+		mutProv.Rules["cloudflare.proxy"] = r
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on minimum score drift, got nil")
 		}
 	})
 
-	t.Run("fixture intent cross-category overlap rejection", func(t *testing.T) {
+	t.Run("minimum evidence drift fails", func(t *testing.T) {
 		t.Parallel()
-		posList := []string{"cloudflare.proxy"}
-		negList := []string{"cloudflare.proxy"}
-		hasOverlap := false
-		for _, r := range posList {
-			if slices.Contains(negList, r) {
-				hasOverlap = true
-				break
-			}
-		}
-		if !hasOverlap {
-			t.Fatal("expected overlap check to flag rule present in both positive and negative")
+		mutProv := cloneProvenance(baseProv)
+		r := mutProv.Rules["cloudflare.proxy"]
+		r.MinimumEvidence = 5
+		mutProv.Rules["cloudflare.proxy"] = r
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on minimum evidence drift, got nil")
 		}
 	})
+
+	t.Run("group drift fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		ev := mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"]
+		ev.Group = "wrong_group"
+		mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"] = ev
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on group drift, got nil")
+		}
+	})
+
+	t.Run("role drift fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		ev := mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"]
+		ev.Role = "supporting" // weight is 75 >= 75 min_score, so role must be decisive
+		mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"] = ev
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on role drift, got nil")
+		}
+	})
+
+	t.Run("missing evidence fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		delete(mutProv.Rules["cloudflare.proxy"].Evidence, "cloudflare-server-header")
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on missing evidence, got nil")
+		}
+	})
+
+	t.Run("extra evidence fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		mutProv.Rules["cloudflare.proxy"].Evidence["non-existent-ev"] = evidenceProvenance{
+			Weight:    75,
+			Group:     "response_headers",
+			Role:      "decisive",
+			Source:    "https://example.com",
+			Rationale: "test",
+		}
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on extra evidence, got nil")
+		}
+	})
+
+	t.Run("invalid source URL fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		ev := mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"]
+		ev.Source = "http://insecure.example.com"
+		mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"] = ev
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on insecure source URL, got nil")
+		}
+	})
+
+	t.Run("empty rationale fails", func(t *testing.T) {
+		t.Parallel()
+		mutProv := cloneProvenance(baseProv)
+		ev := mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"]
+		ev.Rationale = "   "
+		mutProv.Rules["cloudflare.proxy"].Evidence["cloudflare-server-header"] = ev
+		if err := validateProvenanceManifest(mutProv, ruleSet); err == nil {
+			t.Fatal("expected error on empty rationale, got nil")
+		}
+	})
+}
+
+func cloneProvenance(src provenanceManifest) provenanceManifest {
+	data, _ := json.Marshal(src)
+	var dst provenanceManifest
+	_ = json.Unmarshal(data, &dst)
+	return dst
 }

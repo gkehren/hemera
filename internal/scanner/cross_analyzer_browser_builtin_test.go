@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/browser"
 	"github.com/gkehren/hemera/internal/detectors"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
@@ -25,14 +27,15 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		htmlContent   string
-		headers       map[string]string
-		cookies       []*http.Cookie
-		wantRuleID    string
-		wantScore     float64
-		wantDetected  bool
-		wantLevel     scoring.Level
+		name            string
+		htmlContent     string
+		headers         map[string]string
+		cookies         []*http.Cookie
+		wantRuleID      string
+		wantScore       float64
+		wantDetected    bool
+		wantLevel       scoring.Level
+		wantEvidenceIDs []string
 	}{
 		{
 			name: "Dynamic hCaptcha script and container injection in Browser",
@@ -54,10 +57,11 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 </script>
 </body>
 </html>`,
-			wantRuleID:   "hcaptcha.challenge",
-			wantScore:    75,
-			wantDetected: true,
-			wantLevel:    scoring.LevelHigh,
+			wantRuleID:      "hcaptcha.challenge",
+			wantScore:       75,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelHigh,
+			wantEvidenceIDs: []string{"hcaptcha-client-script"},
 		},
 		{
 			name: "Dynamic Arkose Labs script and challenge iframe in Browser",
@@ -77,10 +81,11 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 </script>
 </body>
 </html>`,
-			wantRuleID:   "arkoselabs.matchkey",
-			wantScore:    75,
-			wantDetected: true,
-			wantLevel:    scoring.LevelHigh,
+			wantRuleID:      "arkoselabs.matchkey",
+			wantScore:       75,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelHigh,
+			wantEvidenceIDs: []string{"arkose-client-script"},
 		},
 		{
 			name: "DataDome interstitial iframe and cookie in Browser",
@@ -98,10 +103,11 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 </script>
 </body>
 </html>`,
-			wantRuleID:   "datadome.bot_protection",
-			wantScore:    100,
-			wantDetected: true,
-			wantLevel:    scoring.LevelVeryHigh,
+			wantRuleID:      "datadome.bot_protection",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"datadome-interstitial-url", "datadome-cookie"},
 		},
 		{
 			name: "Akamai Bot Manager sensor script and cookie with HTTP edge prerequisite",
@@ -122,10 +128,11 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 </script>
 </body>
 </html>`,
-			wantRuleID:   "akamai.bot_manager",
-			wantScore:    100,
-			wantDetected: true,
-			wantLevel:    scoring.LevelVeryHigh,
+			wantRuleID:      "akamai.bot_manager",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"akamai-bm-sensor-script", "akamai-bm-abck-cookie"},
 		},
 	}
 
@@ -231,6 +238,19 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 			}
 			if matched.Level != tc.wantLevel {
 				t.Errorf("rule %q level = %v, want %v", tc.wantRuleID, matched.Level, tc.wantLevel)
+			}
+
+			var matchedEvidenceIDs []string
+			for _, ev := range matched.PositiveEvidence {
+				matchedEvidenceIDs = append(matchedEvidenceIDs, ev.Match.EvidenceID)
+				if ev.Match.Signal.Source != analysis.SourceBrowser && tc.wantRuleID != "akamai.bot_manager" {
+					t.Errorf("rule %q evidence %q has source %q, want %q", tc.wantRuleID, ev.Match.EvidenceID, ev.Match.Signal.Source, analysis.SourceBrowser)
+				}
+			}
+			for _, wantEID := range tc.wantEvidenceIDs {
+				if !slices.Contains(matchedEvidenceIDs, wantEID) {
+					t.Errorf("rule %q matched evidence %v does not contain %q", tc.wantRuleID, matchedEvidenceIDs, wantEID)
+				}
 			}
 		})
 	}

@@ -474,23 +474,6 @@
           },
           {
             "signal": {
-              "id": "aws-waf-errortype-header",
-              "group": "response_headers",
-              "description": "AWS WAF error type response header",
-              "type": "response_header",
-              "key": {
-                "exact": "x-amzn-errortype",
-                "case_insensitive": true
-              },
-              "value": {
-                "contains": "WAF",
-                "case_insensitive": true
-              },
-              "weight": 35
-            }
-          },
-          {
-            "signal": {
               "id": "aws-waf-block-page",
               "group": "static_integration",
               "description": "AWS WAF block page content",

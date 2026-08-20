@@ -225,13 +225,6 @@
           "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
           "rationale": "x-amzn-waf-action header emitted on challenge and CAPTCHA mitigation responses."
         },
-        "aws-waf-errortype-header": {
-          "weight": 35,
-          "group": "response_headers",
-          "role": "supporting",
-          "source": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge.html",
-          "rationale": "x-amzn-errortype header containing WAF indicator; supporting diagnostic signal."
-        },
         "aws-waf-block-page": {
           "weight": 75,
           "group": "static_integration",
