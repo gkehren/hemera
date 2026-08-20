@@ -78,7 +78,9 @@ flowchart TD
 
 - **Vendor documentation provenance:** Every signal pattern must trace to
   official vendor documentation, public integration guides, or verified
-  technical specifications.
+  technical specifications. All built-in evidence items are cataloged in
+  `internal/detectors/provenance.json` and validated by CI
+  (`TestBuiltInRulesProvenanceAndRationale`).
 - **Decisive vs. supporting evidence:**
   - **Decisive evidence:** A signal unique and specific enough to prove the
     product's presence (e.g., an official vendor API script URL from a dedicated

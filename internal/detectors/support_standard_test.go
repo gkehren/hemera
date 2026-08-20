@@ -116,12 +116,15 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 	}
 
 	type fixtureCase struct {
-		Name     string              `json:"name"`
-		Fixture  string              `json:"fixture"`
-		Detected []string            `json:"detected"`
-		Scores   map[string]float64  `json:"scores"`
-		Levels   map[string]string   `json:"levels"`
-		Evidence map[string][]string `json:"evidence"`
+		Name            string              `json:"name"`
+		Fixture         string              `json:"fixture"`
+		PositiveFor     []string            `json:"positive_for"`
+		HardNegativeFor []string            `json:"hard_negative_for"`
+		AmbiguousFor    []string            `json:"ambiguous_for"`
+		Detected        []string            `json:"detected"`
+		Scores          map[string]float64  `json:"scores"`
+		Levels          map[string]string   `json:"levels"`
+		Evidence        map[string][]string `json:"evidence"`
 	}
 
 	manifestPath := filepath.Join("..", "scanner", "testdata", "cases.json")
@@ -135,39 +138,90 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ruleMap := make(map[string]rules.Rule, len(ruleSet.Rules))
+	for _, rule := range ruleSet.Rules {
+		ruleMap[rule.ID] = rule
+	}
+
+	// Verify each case satisfies its declared intent.
+	for _, c := range cases {
+		for _, posRuleID := range c.PositiveFor {
+			rule, exists := ruleMap[posRuleID]
+			if !exists {
+				t.Errorf("case %q declares unknown positive_for rule %q", c.Name, posRuleID)
+				continue
+			}
+			score := c.Scores[posRuleID]
+			if score < rule.MinimumScore {
+				t.Errorf("case %q positive_for rule %q score = %v, want >= %v", c.Name, posRuleID, score, rule.MinimumScore)
+			}
+			if !slices.Contains(c.Detected, posRuleID) {
+				t.Errorf("case %q positive_for rule %q is not in detected list %v", c.Name, posRuleID, c.Detected)
+			}
+		}
+
+		for _, negRuleID := range c.HardNegativeFor {
+			_, exists := ruleMap[negRuleID]
+			if !exists {
+				t.Errorf("case %q declares unknown hard_negative_for rule %q", c.Name, negRuleID)
+				continue
+			}
+			score := c.Scores[negRuleID]
+			if score != 0 {
+				t.Errorf("case %q hard_negative_for rule %q score = %v, want 0", c.Name, negRuleID, score)
+			}
+			if slices.Contains(c.Detected, negRuleID) {
+				t.Errorf("case %q hard_negative_for rule %q should not be in detected list %v", c.Name, negRuleID, c.Detected)
+			}
+		}
+
+		for _, ambRuleID := range c.AmbiguousFor {
+			rule, exists := ruleMap[ambRuleID]
+			if !exists {
+				t.Errorf("case %q declares unknown ambiguous_for rule %q", c.Name, ambRuleID)
+				continue
+			}
+			score := c.Scores[ambRuleID]
+			if score <= 0 || score >= rule.MinimumScore {
+				t.Errorf("case %q ambiguous_for rule %q score = %v, want 0 < score < %v", c.Name, ambRuleID, score, rule.MinimumScore)
+			}
+			if slices.Contains(c.Detected, ambRuleID) {
+				t.Errorf("case %q ambiguous_for rule %q should not be in detected list %v", c.Name, ambRuleID, c.Detected)
+			}
+		}
+	}
+
+	// Verify each supported rule has intentional coverage across all three dimensions.
 	for _, rule := range ruleSet.Rules {
 		rule := rule
 		t.Run(rule.ID, func(t *testing.T) {
 			t.Parallel()
 			var (
-				hasPositive            bool
-				hasNegative            bool
-				hasAmbiguityRegression bool
+				hasPositiveIntent     bool
+				hasHardNegativeIntent bool
+				hasAmbiguityIntent    bool
 			)
 
 			for _, c := range cases {
-				isDetected := slices.Contains(c.Detected, rule.ID)
-				score := c.Scores[rule.ID]
-
-				if isDetected && score >= rule.MinimumScore {
-					hasPositive = true
+				if slices.Contains(c.PositiveFor, rule.ID) {
+					hasPositiveIntent = true
 				}
-				if !isDetected && score == 0 {
-					hasNegative = true
+				if slices.Contains(c.HardNegativeFor, rule.ID) {
+					hasHardNegativeIntent = true
 				}
-				if !isDetected && score > 0 && score < rule.MinimumScore {
-					hasAmbiguityRegression = true
+				if slices.Contains(c.AmbiguousFor, rule.ID) {
+					hasAmbiguityIntent = true
 				}
 			}
 
-			if !hasPositive {
-				t.Errorf("rule %q lacks a positive fixture case with score >= %v", rule.ID, rule.MinimumScore)
+			if !hasPositiveIntent {
+				t.Errorf("rule %q lacks an explicit positive_for fixture case", rule.ID)
 			}
-			if !hasNegative {
-				t.Errorf("rule %q lacks a negative fixture case with score == 0", rule.ID)
+			if !hasHardNegativeIntent {
+				t.Errorf("rule %q lacks an explicit hard_negative_for fixture case", rule.ID)
 			}
-			if !hasAmbiguityRegression {
-				t.Errorf("rule %q lacks an ambiguity/regression fixture case with 0 < score < %v", rule.ID, rule.MinimumScore)
+			if !hasAmbiguityIntent {
+				t.Errorf("rule %q lacks an explicit ambiguous_for fixture case", rule.ID)
 			}
 		})
 	}
@@ -379,6 +433,128 @@ func TestBuiltInRulesHaveDocumentedLimitations(t *testing.T) {
 	for _, rule := range ruleSet.Rules {
 		if !strings.Contains(docContent, rule.ID) {
 			t.Errorf("rule %q is not mentioned in %s", rule.ID, docPath)
+		}
+	}
+}
+
+func TestBuiltInRulesProvenanceAndRationale(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type evidenceProvenance struct {
+		Role      string `json:"role"`
+		Group     string `json:"group"`
+		Source    string `json:"source"`
+		Rationale string `json:"rationale"`
+	}
+
+	type ruleProvenance struct {
+		ScoringRationale string                        `json:"scoring_rationale"`
+		Evidence         map[string]evidenceProvenance `json:"evidence"`
+	}
+
+	type provenanceManifest struct {
+		SchemaVersion int                       `json:"schema_version"`
+		Rules         map[string]ruleProvenance `json:"rules"`
+	}
+
+	manifestPath := filepath.Join("provenance.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read provenance manifest: %v", err)
+	}
+
+	var prov provenanceManifest
+	if err := json.Unmarshal(data, &prov); err != nil {
+		t.Fatalf("unmarshal provenance manifest: %v", err)
+	}
+
+	if prov.SchemaVersion != 1 {
+		t.Errorf("provenance manifest schema_version = %d, want 1", prov.SchemaVersion)
+	}
+
+	var collectEvidence func(rules.Condition) []*rules.Evidence
+	collectEvidence = func(c rules.Condition) []*rules.Evidence {
+		var list []*rules.Evidence
+		if c.Signal != nil {
+			list = append(list, c.Signal)
+		}
+		for _, child := range c.All {
+			list = append(list, collectEvidence(child)...)
+		}
+		for _, child := range c.Any {
+			list = append(list, collectEvidence(child)...)
+		}
+		return list
+	}
+
+	for _, rule := range ruleSet.Rules {
+		rule := rule
+		t.Run(rule.ID, func(t *testing.T) {
+			t.Parallel()
+			ruleProv, exists := prov.Rules[rule.ID]
+			if !exists {
+				t.Fatalf("rule %q is missing from provenance manifest", rule.ID)
+			}
+			if strings.TrimSpace(ruleProv.ScoringRationale) == "" {
+				t.Errorf("rule %q has empty scoring_rationale in provenance manifest", rule.ID)
+			}
+
+			ruleEvList := collectEvidence(rule.Match)
+			ruleEvMap := make(map[string]*rules.Evidence, len(ruleEvList))
+			for _, ev := range ruleEvList {
+				ruleEvMap[ev.ID] = ev
+			}
+
+			for _, ev := range ruleEvList {
+				evProv, ok := ruleProv.Evidence[ev.ID]
+				if !ok {
+					t.Errorf("rule %q evidence %q is missing from provenance manifest", rule.ID, ev.ID)
+					continue
+				}
+
+				wantRole := "supporting"
+				if ev.Weight >= rule.MinimumScore {
+					wantRole = "decisive"
+				}
+				if evProv.Role != wantRole {
+					t.Errorf("rule %q evidence %q role = %q, want %q (weight: %v, min_score: %v)", rule.ID, ev.ID, evProv.Role, wantRole, ev.Weight, rule.MinimumScore)
+				}
+
+				if evProv.Group != ev.Group {
+					t.Errorf("rule %q evidence %q group = %q, want %q", rule.ID, ev.ID, evProv.Group, ev.Group)
+				}
+
+				if !strings.HasPrefix(evProv.Source, "https://") {
+					t.Errorf("rule %q evidence %q source %q is not a valid https URL", rule.ID, ev.ID, evProv.Source)
+				}
+
+				if strings.TrimSpace(evProv.Rationale) == "" {
+					t.Errorf("rule %q evidence %q has empty rationale", rule.ID, ev.ID)
+				}
+			}
+
+			for provEvID := range ruleProv.Evidence {
+				if _, ok := ruleEvMap[provEvID]; !ok {
+					t.Errorf("provenance manifest declares evidence %q not found in rule %q", provEvID, rule.ID)
+				}
+			}
+		})
+	}
+
+	for provRuleID := range prov.Rules {
+		found := false
+		for _, r := range ruleSet.Rules {
+			if r.ID == provRuleID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("provenance manifest declares rule %q not found in rules.json", provRuleID)
 		}
 	}
 }

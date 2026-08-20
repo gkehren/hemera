@@ -3,11 +3,11 @@
 This document defines the methodology, synthetic fixture corpus, accuracy metrics,
 and catalog of known false positives and false negatives for Hemera's detector rules.
 
-## 1. Methodology & Accuracy Guarantees
+## 1. Synthetic Regression Corpus Methodology & Baseline
 
 Hemera prioritizes detection accuracy and explainability above broad but unreliable
-heuristics. To enforce this, every supported detector rule is measured against a
-versioned regression corpus comprising:
+heuristics. To prevent regressions as rules evolve, every supported detector rule is
+measured against a versioned synthetic regression corpus comprising:
 
 - **Decisive positive fixtures** representing official, documented client SDKs, response headers, and challenge interstitials;
 - **Adversarial lookalike fixtures** designed to trigger naive substring or domain matches;
@@ -16,9 +16,12 @@ versioned regression corpus comprising:
 - **Commented-out and dormant fixtures** verifying that inert templates and script comments are ignored;
 - **Multi-protection coexistence scenarios** verifying that multiple concurrent services (e.g. CloudFront + AWS WAF + reCAPTCHA) are detected independently without cross-talk.
 
-### Measured Accuracy Metrics (Corpus Baseline)
+### Synthetic Regression Corpus Baseline Metrics
 
-The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 29-scenario corpus across all 12 built-in rules:
+The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 29-scenario synthetic regression corpus across all 12 built-in rules.
+
+> [!WARNING]
+> These metrics measure the versioned synthetic regression corpus only and are not estimates of real-world precision, recall, FPR, or FNR.
 
 $$\text{False Positive Rate (FPR)} = \frac{\text{FP}}{\text{FP} + \text{TN}} = 0.0\%$$
 
@@ -103,3 +106,31 @@ The regression suite in `internal/scanner/testdata/cases.json` contains 29 synth
 27. `adversarial lookalike domains` &mdash; `adversarial-lookalike-domains.html` (phishing lookalikes)
 28. `commented and dormant scripts` &mdash; `commented-and-dormant-scripts.html` (HTML comments & JSON-LD)
 29. `multi-protection coexistence` &mdash; `multi-protection-coexistence.html` (CloudFront + AWS WAF + reCAPTCHA)
+
+---
+
+## 5. Future Real-World Validation Path
+
+The current 29-scenario synthetic regression corpus is designed for fast, hermetic,
+deterministic continuous integration to prevent regressions in rule semantics and
+scoring logic. It does not replace empirical real-world validation.
+
+A planned future validation benchmark (targeted for Milestone 3) will evaluate
+Hemera against independently captured real-world targets:
+
+```text
+independently captured live samples
+-> manually labelled ground-truth annotations
+-> sanitized & redistributable dataset
+-> isolated from rule-authoring synthetic fixtures
+-> versioned empirical validation corpus
+```
+
+Key objectives for the future empirical validation dataset include:
+
+- **100–300 labelled samples** covering top enterprise websites, public APIs, and government/e-commerce portals across all supported detector families;
+- **Dedicated negative baselines** from unmanaged origins, non-protected cloud instances, and unrelated CDN/security infrastructure;
+- **Custom and legacy enterprise deployments**, including first-party reverse-proxy script aliases and non-standard header topologies;
+- **Independent capture isolation**, ensuring test targets were not authored specifically to satisfy internal rule regexes.
+
+This empirical benchmark will remain separate from the hermetic CI regression corpus to ensure continuous integration tests remain fast, reproducible, and offline.
