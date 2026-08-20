@@ -573,3 +573,181 @@ func TestNavigationBudgetErrorPrioritization(t *testing.T) {
 		}
 	})
 }
+
+func TestSafeProxyConnectionClosureAndCancellation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("real upstream reset during active navigation is recorded as infra failure", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", http.StatusInternalServerError)
+				return
+			}
+			conn, _, _ := hijacker.Hijack()
+			_ = conn.Close()
+		}))
+		defer server.Close()
+
+		config, target, _ := proxyTestConfig(t, server, nil)
+		proxy, err := newSafeProxy(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer proxy.Close()
+
+		budget, normalized, err := proxy.begin(context.Background(), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer proxy.end(budget)
+
+		client := proxyClient(t, proxy)
+		resp, err := client.Get(normalized)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if failure := budget.failure(); failure == nil {
+			t.Fatal("expected infrastructure failure for real upstream connection reset, got nil")
+		}
+	})
+
+	t.Run("client context canceled does not record infra failure", func(t *testing.T) {
+		t.Parallel()
+		handlerStarted := make(chan struct{})
+		releaseHandler := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(handlerStarted)
+			<-releaseHandler
+			_, _ = io.WriteString(w, "delayed")
+		}))
+		defer server.Close()
+		defer close(releaseHandler)
+
+		config, target, _ := proxyTestConfig(t, server, nil)
+		proxy, err := newSafeProxy(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer proxy.Close()
+
+		budget, normalized, err := proxy.begin(context.Background(), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer proxy.end(budget)
+
+		reqCtx, cancelReq := context.WithCancel(context.Background())
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, normalized, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		client := proxyClient(t, proxy)
+		done := make(chan error, 1)
+		go func() {
+			resp, reqErr := client.Do(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			done <- reqErr
+		}()
+
+		<-handlerStarted
+		cancelReq()
+		<-done
+
+		if failure := budget.failure(); failure != nil {
+			t.Fatalf("expected no budget failure for canceled client request, got %v", failure)
+		}
+	})
+
+	t.Run("budget stopped before transport error does not record infra failure", func(t *testing.T) {
+		t.Parallel()
+		handlerStarted := make(chan struct{})
+		releaseHandler := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(handlerStarted)
+			<-releaseHandler
+			hijacker, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hijacker.Hijack()
+				_ = conn.Close()
+			}
+		}))
+		defer server.Close()
+
+		config, target, _ := proxyTestConfig(t, server, nil)
+		proxy, err := newSafeProxy(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer proxy.Close()
+
+		budget, normalized, err := proxy.begin(context.Background(), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		client := proxyClient(t, proxy)
+		done := make(chan struct{})
+		go func() {
+			resp, _ := client.Get(normalized)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			close(done)
+		}()
+
+		<-handlerStarted
+		budget.stop()
+		close(releaseHandler)
+		<-done
+
+		if failure := budget.failure(); failure != nil {
+			t.Fatalf("expected no budget failure after budget stopped, got %v", failure)
+		}
+	})
+
+	t.Run("proxy closed during active request does not record infra failure", func(t *testing.T) {
+		t.Parallel()
+		handlerStarted := make(chan struct{})
+		releaseHandler := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(handlerStarted)
+			<-releaseHandler
+		}))
+		defer server.Close()
+		defer close(releaseHandler)
+
+		config, target, _ := proxyTestConfig(t, server, nil)
+		proxy, err := newSafeProxy(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		budget, normalized, err := proxy.begin(context.Background(), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		client := proxyClient(t, proxy)
+		done := make(chan struct{})
+		go func() {
+			resp, _ := client.Get(normalized)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			close(done)
+		}()
+
+		<-handlerStarted
+		_ = proxy.Close()
+		<-done
+
+		if failure := budget.failure(); failure != nil {
+			t.Fatalf("expected no budget failure when proxy closed, got %v", failure)
+		}
+	})
+}

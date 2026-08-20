@@ -10,15 +10,19 @@
   <script>
     window.addEventListener("load", () => {
       setTimeout(async () => {
-        await fetch("/delayed/api");
-        document.cookie = "late_browser_cookie=synthetic-value; SameSite=Lax";
-        const script = document.createElement("script");
-        script.src = "/delayed/injected.js";
-        document.head.appendChild(script);
-        const marker = document.createElement("div");
-        marker.id = "late-browser-marker";
-        document.body.appendChild(marker);
-      }, 100);
+        try {
+          await fetch("/delayed/api");
+          const script = document.createElement("script");
+          script.src = "/delayed/injected.js";
+          script.onload = () => {
+            document.cookie = "late_browser_cookie=synthetic-value; SameSite=Lax";
+            const marker = document.createElement("div");
+            marker.id = "late-browser-marker";
+            document.body.appendChild(marker);
+          };
+          document.head.appendChild(script);
+        } catch (_) {}
+      }, 50);
     });
   </script>
 </body>
