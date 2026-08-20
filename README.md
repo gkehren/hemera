@@ -45,6 +45,46 @@ Detections:
     = group static_integration: 75.0 (105.0 raw; selected turnstile-client-script)
 ```
 
+## Installation
+
+### Using Go install (Go 1.26+)
+
+```sh
+go install github.com/gkehren/hemera/cmd/hemera@latest
+```
+
+### From source
+
+```sh
+git clone https://github.com/gkehren/hemera.git
+cd hemera
+go build -o hemera ./cmd/hemera
+```
+
+See the [Installation and usage guide](docs/installation-and-usage.md) for
+detailed setup instructions, Chromium configuration, and troubleshooting.
+
+## Quick start
+
+Run a human-readable scan against a target:
+
+```sh
+hemera scan https://example.com/
+```
+
+Generate a machine-readable JSON V5 report for automation:
+
+```sh
+hemera scan --format json https://example.com/
+```
+
+Filter active detections with `jq`:
+
+```sh
+hemera scan --format json https://example.com/ \
+  | jq '.detections[] | select(.detected == true) | {rule_id, name, score, level}'
+```
+
 ## Project principles
 
 1. **Explainability first.** Every detection must be tied to observable evidence.
@@ -256,13 +296,16 @@ The repository roadmap is the authoritative source for implementation order and
 status
 
 - [Documentation index](docs/README.md)
+- [Installation and usage guide](docs/installation-and-usage.md)
 - [Vision, direction, and objectives](docs/vision-and-goals.md)
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Security and ethical boundaries](docs/security-and-ethics.md)
+- [Detector rule schema V2](docs/detector-rules.md)
 - [Detector family support standard](docs/detector-support-standard.md)
 - [Regression corpus and accuracy standards](docs/regression-and-accuracy.md)
 - [Detector limitations and operational boundaries](docs/detector-limitations.md)
+- [JSON report schema V5](docs/report-schema.md)
 
 ## Contributing
 

@@ -123,7 +123,7 @@ The detector schema is already documented. This milestone adds the contributor
 and release guarantees needed for a public project; baseline CI belongs to
 Milestone 0.5 rather than this release phase.
 
-- [ ] Publish installation and usage examples.
+- [x] Publish installation and usage examples.
 - [ ] Document the detector contribution workflow.
 - [ ] Add a contribution guide and code of conduct.
 - [ ] Publish a private security-reporting process.
