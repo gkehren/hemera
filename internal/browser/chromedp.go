@@ -887,7 +887,10 @@ const boundedDOMSerializer = `(() => {
   const maxResources = %d;
   const maxURLBytes = %d;
   const encoder = new TextEncoder();
+  const encodeScratch = new Uint8Array(Math.min(maxBytes, 65536));
+  const urlScratch = new Uint8Array(maxURLBytes + 1);
   const chunks = [];
+  let currentChunk = "";
   const scripts = [];
   const iframes = [];
   const voidElements = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
@@ -907,15 +910,19 @@ const boundedDOMSerializer = `(() => {
     const value = String(input);
     let offset = 0;
     while (offset < value.length && bytes < maxBytes) {
-      const capacity = Math.min(maxBytes - bytes, 65536);
+      const capacity = Math.min(maxBytes - bytes, encodeScratch.length);
       const candidate = value.slice(offset, offset + capacity);
-      const buffer = new Uint8Array(capacity);
+      const buffer = encodeScratch.subarray(0, capacity);
       const progress = encoder.encodeInto(candidate, buffer);
       if (progress.read === 0) {
         domTruncated = true;
         break;
       }
-      chunks.push(candidate.slice(0, progress.read));
+      currentChunk += candidate.slice(0, progress.read);
+      if (currentChunk.length >= 16384) {
+        chunks.push(currentChunk);
+        currentChunk = "";
+      }
       offset += progress.read;
       bytes += progress.written;
     }
@@ -945,8 +952,7 @@ const boundedDOMSerializer = `(() => {
 
   function fitsURL(value) {
     if (value.length > maxURLBytes) return false;
-    const buffer = new Uint8Array(maxURLBytes + 1);
-    return encoder.encodeInto(value, buffer).read === value.length;
+    return encoder.encodeInto(value, urlScratch).read === value.length;
   }
 
   function collectResource(kind, rawURL) {
@@ -1056,6 +1062,9 @@ const boundedDOMSerializer = `(() => {
     stack.pop();
   }
   if (traversalTruncated) domTruncated = true;
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
   return {
     dom: chunks.join(""),
     script_urls: scripts,
