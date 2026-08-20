@@ -1,10 +1,15 @@
 <!doctype html>
 <html lang="en"><body><script>
-window.addEventListener("load", () => setTimeout(() => {
-  const fragment = document.createDocumentFragment();
-  for (let index = 0; index < 110000; index++) {
-    fragment.appendChild(document.createElement("span"));
-  }
-  document.body.appendChild(fragment);
-}, 50));
+window.addEventListener("load", () => {
+  fetch("/limits/large-postload-dom-barrier").catch(() => {});
+  setTimeout(() => {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 110000; index++) {
+      fragment.appendChild(document.createElement("span"));
+    }
+    document.body.appendChild(fragment);
+    document.body.dataset.mutationComplete = "true";
+    fetch("/limits/large-postload-dom-complete").catch(() => {});
+  }, 50);
+});
 </script></body></html>

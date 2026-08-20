@@ -171,6 +171,15 @@ remains in memory and is not persisted or passed to a reporter; like all page
 content, it must still be treated as sensitive and untrusted. Limit warnings are
 generic and contain no page-controlled text.
 
+DOM finalization verifies a stable main-frame loader around isolated-world
+evaluation. One retry is permitted only for an explicit CDP execution-context
+invalidation accompanied by an observed main-document transition; arbitrary
+protocol errors and serializer exceptions are never retried. Serializer
+exception diagnostics are bounded and omit page/stack URLs, execution-context
+identifiers, and captured values. They retain sanitized exception text,
+description, line/column location, and at most three function frames so CI
+failures remain actionable without exposing raw browser evidence.
+
 `hemera scan` uses this capability after the fatal HTTP analyzer and the
 non-fatal DNS/TLS analyzer. Chromium receives a per-session
 loopback proxy and is configured without proxy bypass, direct hostname
@@ -221,7 +230,12 @@ references, and serves only declared routes for `fixture.test`. Fake query
 values, authorization data, fragments, and cookie values exercise minimization
 without containing live credentials or personal data. Loopback remains
 forbidden under the production policy, and no public DNS or third-party
-destination is contacted.
+destination is contacted. Traffic expectations declare an exact unique route
+set plus explicit partial-order dependencies: missing, extra, duplicate, and
+dependency-violating requests fail, while unrelated asynchronous requests may
+arrive in either order. Dynamic fixtures use request/response completion
+handshakes so test success never depends on a JavaScript timer beating the
+post-load idle interval.
 
 Browser observations are not reported as a raw inventory. The browser adapter
 emits only normalized requests, responses, final DOM, script and iframe URLs,

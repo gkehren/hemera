@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,7 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <body>
 <div id="target"></div>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = 'https://js.hcaptcha.com/1/api.js';
@@ -53,6 +55,7 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
     container.className = 'h-captcha';
     container.setAttribute('data-sitekey', '10000000-ffff-ffff-ffff-000000000001');
     document.getElementById('target').appendChild(container);
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -70,6 +73,7 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <head><title>Arkose Dynamic Test</title></head>
 <body>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = 'https://client-api.arkoselabs.com/v2/api.js';
@@ -77,6 +81,7 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
     const f = document.createElement('iframe');
     f.src = 'https://client-api.arkoselabs.com/fc/api/?token=synthetic_arkose_token';
     document.body.appendChild(f);
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -95,11 +100,13 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <body>
 <script>
   window.datadomeOptions = { version: "4.6.0" };
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const f = document.createElement('iframe');
     f.src = 'https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAAAAAMAx_example_interstitial';
     document.body.appendChild(f);
     document.cookie = 'datadome=AHrlqAAAAAMAx_example_token; path=/';
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -120,11 +127,13 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <head><title>Akamai Bot Manager Test</title></head>
 <body>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = '/akam/13/sensor.js';
     document.head.appendChild(s);
     document.cookie = '_abck=synthetic_abck_token~0~YAAQ; path=/';
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -148,10 +157,12 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
   <div id="cf-error-details"></div>
 </div>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1/flow.js';
     document.head.appendChild(s);
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -172,11 +183,13 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <head><title>Cloudflare Bot Protection Dynamic Test</title></head>
 <body>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = '/cdn-cgi/challenge-platform/scripts/jsd/main.js';
     document.head.appendChild(s);
     document.cookie = '__cf_bm=synthetic_cf_bm_token; path=/';
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -195,11 +208,13 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <body>
 <div id="aws-waf-container"></div>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     const s = document.createElement('script');
     s.src = 'https://123456abcdef.awswaf.com/sdk.js';
     document.head.appendChild(s);
     document.cookie = 'aws-waf-token=synthetic_token; path=/';
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -217,8 +232,10 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 <head><title>Cloudflare Proxy Clearance Cookie Test</title></head>
 <body>
 <script>
+  fetch('/__hemera_dynamic_barrier').catch(() => {});
   setTimeout(() => {
     document.cookie = 'cf_clearance=synthetic_clearance_token; path=/';
+    fetch('/__hemera_dynamic_complete').catch(() => {});
   }, 50);
 </script>
 </body>
@@ -234,7 +251,30 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			barrierStarted := make(chan struct{}, 1)
+			barrierDone := make(chan bool, 1)
+			barrierRelease := make(chan struct{})
+			var releaseBarrier sync.Once
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/__hemera_dynamic_barrier":
+					barrierStarted <- struct{}{}
+					select {
+					case <-barrierRelease:
+						_, _ = w.Write([]byte("released"))
+						barrierDone <- true
+					case <-r.Context().Done():
+						barrierDone <- false
+					case <-time.After(5 * time.Second):
+						barrierDone <- false
+						http.Error(w, "dynamic completion signal was not received", http.StatusGatewayTimeout)
+					}
+					return
+				case "/__hemera_dynamic_complete":
+					releaseBarrier.Do(func() { close(barrierRelease) })
+					_, _ = w.Write([]byte("complete"))
+					return
+				}
 				for k, v := range tc.headers {
 					w.Header().Set(k, v)
 				}
@@ -305,6 +345,19 @@ func TestBrowserAnalyzerDynamicInjectionBuiltInRules(t *testing.T) {
 			result, err := engine.Scan(ctx, "http://fixture.example:"+port+"/")
 			if err != nil {
 				t.Fatal(err)
+			}
+			select {
+			case <-barrierStarted:
+			default:
+				t.Fatal("dynamic browser completion barrier was not requested")
+			}
+			select {
+			case completed := <-barrierDone:
+				if !completed {
+					t.Fatal("dynamic browser completion barrier ended before its completion signal")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("dynamic browser completion barrier did not quiesce before scan completion")
 			}
 
 			if len(result.Analyzers) != 2 {

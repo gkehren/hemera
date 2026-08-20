@@ -48,7 +48,8 @@ Hemera is in early development. The repository currently contains:
   resource-bounded navigation, fail-closed child targets, normalized browser
   signals, and scanner integration;
 - a versioned, synthetic browser fixture corpus with hermetic dynamic, negative,
-  delayed post-load, adversarial security, and resource-limit coverage;
+  delayed post-load, adversarial security, and resource-limit coverage, using
+  partial-order traffic contracts and explicit completion barriers;
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
 - deterministic multi-analyzer orchestration and typed HTTP metadata;

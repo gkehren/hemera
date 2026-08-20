@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
+	cdproto "github.com/chromedp/cdproto"
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
@@ -24,9 +27,12 @@ import (
 )
 
 const (
-	profilePrefix        = "hemera-chromium-"
-	gracefulCloseTimeout = 2 * time.Second
-	browserCloseTimeout  = 5 * time.Second
+	profilePrefix              = "hemera-chromium-"
+	gracefulCloseTimeout       = 2 * time.Second
+	browserCloseTimeout        = 5 * time.Second
+	maxDOMDiagnosticBytes      = 1024
+	maxDOMDiagnosticFieldBytes = 192
+	maxDOMDiagnosticFrames     = 3
 )
 
 type chromedpBackend struct {
@@ -685,39 +691,155 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 }
 
 func captureBoundedDOM(ctx context.Context, snapshot *boundedDOMSnapshot) error {
+	expression := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
+	ops := boundedDOMCaptureOps{
+		mainFrame: currentMainFrame,
+		createIsolatedWorld: func(ctx context.Context, frameID cdp.FrameID) (cdpruntime.ExecutionContextID, error) {
+			return page.CreateIsolatedWorld(frameID).
+				WithWorldName("hemera-bounded-capture").
+				Do(ctx)
+		},
+		evaluate: func(ctx context.Context, contextID cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error) {
+			return cdpruntime.Evaluate(expression).
+				WithContextID(contextID).
+				WithReturnByValue(true).
+				WithSilent(true).
+				WithDisableBreaks(true).
+				Do(ctx)
+		},
+	}
+	return captureBoundedDOMWithOps(ctx, snapshot, ops)
+}
+
+type mainFrameIdentity struct {
+	frameID  cdp.FrameID
+	loaderID cdp.LoaderID
+}
+
+type boundedDOMCaptureOps struct {
+	mainFrame           func(context.Context) (mainFrameIdentity, error)
+	createIsolatedWorld func(context.Context, cdp.FrameID) (cdpruntime.ExecutionContextID, error)
+	evaluate            func(context.Context, cdpruntime.ExecutionContextID) (*cdpruntime.RemoteObject, *cdpruntime.ExceptionDetails, error)
+}
+
+func currentMainFrame(ctx context.Context) (mainFrameIdentity, error) {
 	frameTree, err := page.GetFrameTree().Do(ctx)
 	if err != nil {
-		return fmt.Errorf("Page.getFrameTree: %w", err)
+		return mainFrameIdentity{}, fmt.Errorf("Page.getFrameTree: %w", err)
 	}
 	if frameTree == nil || frameTree.Frame == nil {
-		return errors.New("Page.getFrameTree returned no main frame")
+		return mainFrameIdentity{}, errors.New("Page.getFrameTree returned no main frame")
 	}
-	executionContextID, err := page.CreateIsolatedWorld(frameTree.Frame.ID).
-		WithWorldName("hemera-bounded-capture").
-		Do(ctx)
-	if err != nil {
-		return fmt.Errorf("Page.createIsolatedWorld: %w", err)
+	return mainFrameIdentity{frameID: frameTree.Frame.ID, loaderID: frameTree.Frame.LoaderID}, nil
+}
+
+func captureBoundedDOMWithOps(ctx context.Context, snapshot *boundedDOMSnapshot, ops boundedDOMCaptureOps) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		before, err := ops.mainFrame(ctx)
+		if err != nil {
+			return err
+		}
+		candidate, captureErr := captureBoundedDOMAttempt(ctx, before.frameID, ops)
+		after, frameErr := ops.mainFrame(ctx)
+		if frameErr != nil {
+			return errors.Join(captureErr, fmt.Errorf("verify main frame after bounded DOM capture: %w", frameErr))
+		}
+		transitioned := before != after
+		if captureErr == nil && !transitioned {
+			*snapshot = candidate
+			return nil
+		}
+		if attempt == 0 && transitioned && (captureErr == nil || isTransientDOMContextError(captureErr)) {
+			continue
+		}
+		if captureErr != nil {
+			return captureErr
+		}
+		return errors.New("bounded DOM capture main frame changed during isolated-world evaluation")
 	}
-	expression := fmt.Sprintf(boundedDOMSerializer, maxDOMBytes, maxDOMWorkItems, maxCaptureItems, maxBrowserURLBytes)
-	value, exception, err := cdpruntime.Evaluate(expression).
-		WithContextID(executionContextID).
-		WithReturnByValue(true).
-		WithSilent(true).
-		WithDisableBreaks(true).
-		Do(ctx)
+	return errors.New("bounded DOM capture could not acquire a stable main-frame execution context")
+}
+
+func captureBoundedDOMAttempt(ctx context.Context, frameID cdp.FrameID, ops boundedDOMCaptureOps) (boundedDOMSnapshot, error) {
+	contextID, err := ops.createIsolatedWorld(ctx, frameID)
 	if err != nil {
-		return fmt.Errorf("Runtime.evaluate bounded DOM serializer: %w", err)
+		return boundedDOMSnapshot{}, fmt.Errorf("Page.createIsolatedWorld: %w", err)
+	}
+	value, exception, err := ops.evaluate(ctx, contextID)
+	if err != nil {
+		return boundedDOMSnapshot{}, fmt.Errorf("Runtime.evaluate bounded DOM serializer: %w", err)
 	}
 	if exception != nil {
-		return errors.New("bounded DOM serializer failed in the isolated world")
+		return boundedDOMSnapshot{}, formatBoundedDOMException(exception)
 	}
 	if value == nil || len(value.Value) == 0 {
-		return errors.New("bounded DOM serializer returned no value")
+		return boundedDOMSnapshot{}, errors.New("bounded DOM serializer returned no value")
 	}
-	if err := json.Unmarshal(value.Value, snapshot); err != nil {
-		return fmt.Errorf("decode bounded DOM snapshot: %w", err)
+	var snapshot boundedDOMSnapshot
+	if err := json.Unmarshal(value.Value, &snapshot); err != nil {
+		return boundedDOMSnapshot{}, fmt.Errorf("decode bounded DOM snapshot: %w", err)
 	}
-	return nil
+	return snapshot, nil
+}
+
+func isTransientDOMContextError(err error) bool {
+	var protocolErr *cdproto.Error
+	if !errors.As(err, &protocolErr) || protocolErr.Code != -32000 {
+		return false
+	}
+	message := strings.TrimSuffix(strings.TrimSpace(protocolErr.Message), ".")
+	switch message {
+	case "Execution context was destroyed",
+		"Cannot find context with specified id",
+		"Inspected target navigated or closed",
+		"No frame with given id found":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatBoundedDOMException(details *cdpruntime.ExceptionDetails) error {
+	if details == nil {
+		return errors.New("bounded DOM serializer returned empty exception details")
+	}
+	parts := []string{"bounded DOM serializer exception"}
+	if text := sanitizeDOMDiagnosticField(details.Text); text != "" {
+		parts = append(parts, "text="+strconv.Quote(text))
+	}
+	if details.Exception != nil {
+		if description := sanitizeDOMDiagnosticField(details.Exception.Description); description != "" {
+			parts = append(parts, "description="+strconv.Quote(description))
+		}
+	}
+	parts = append(parts, fmt.Sprintf("location=%d:%d", details.LineNumber, details.ColumnNumber))
+	if details.StackTrace != nil {
+		frames := make([]string, 0, maxDOMDiagnosticFrames)
+		for _, frame := range details.StackTrace.CallFrames {
+			if frame == nil || len(frames) == maxDOMDiagnosticFrames {
+				continue
+			}
+			name := sanitizeDOMDiagnosticField(frame.FunctionName)
+			if name == "" {
+				name = "<anonymous>"
+			}
+			frames = append(frames, fmt.Sprintf("%s@%d:%d", name, frame.LineNumber, frame.ColumnNumber))
+		}
+		if len(frames) > 0 {
+			parts = append(parts, "stack="+strings.Join(frames, ","))
+		}
+	}
+	return errors.New(truncateUTF8(strings.Join(parts, " "), maxDOMDiagnosticBytes))
+}
+
+func sanitizeDOMDiagnosticField(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	return truncateUTF8(strings.Join(strings.Fields(value), " "), maxDOMDiagnosticFieldBytes)
 }
 
 const boundedDOMSerializer = `(() => {
