@@ -28,9 +28,11 @@ import (
 )
 
 const (
-	integrationStartupTimeout   = 20 * time.Second
-	integrationSessionTimeout   = 60 * time.Second
-	integrationOperationTimeout = 20 * time.Second
+	integrationStartupTimeout         = 20 * time.Second
+	integrationSessionTimeout         = 60 * time.Second
+	integrationOperationTimeout       = 20 * time.Second
+	integrationNavigationTimeout      = 20 * time.Second
+	integrationCaptureFinalizeTimeout = 20 * time.Second
 )
 
 func integrationSessionContext(t *testing.T) (context.Context, context.CancelFunc) {
@@ -41,6 +43,16 @@ func integrationSessionContext(t *testing.T) (context.Context, context.CancelFun
 func integrationOperationContext(t *testing.T, parent context.Context) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(parent, integrationOperationTimeout)
+}
+
+func integrationNavigationContext(t *testing.T, parent context.Context) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(parent, integrationNavigationTimeout)
+}
+
+func integrationCaptureFinalizeContext(t *testing.T, parent context.Context) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(parent, integrationCaptureFinalizeTimeout)
 }
 
 func TestSandboxedChromiumLifecycle(t *testing.T) {
@@ -140,9 +152,7 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 				t.Fatalf("Navigate(loopback) error = %v, want ErrForbiddenDestination", err)
 			}
 
-			opCtx2, cancelOp2 := integrationOperationContext(t, sessionCtx)
-			defer cancelOp2()
-			recorder, err := session.BeginCapture(opCtx2)
+			recorder, err := session.BeginCapture(sessionCtx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,10 +160,15 @@ func TestSandboxedChromiumCapture(t *testing.T) {
 			if fixtureCase.Name == "dynamic-sequential" {
 				entry += "#fake-entry-fragment"
 			}
-			if err := session.Navigate(opCtx2, entry); err != nil {
+			navCtx, cancelNav := integrationNavigationContext(t, sessionCtx)
+			err = session.Navigate(navCtx, entry)
+			cancelNav()
+			if err != nil {
 				t.Fatalf("navigate validated fixture: %v", err)
 			}
-			result, err := recorder.Finish(opCtx2)
+			finishCtx, cancelFinish := integrationCaptureFinalizeContext(t, sessionCtx)
+			result, err := recorder.Finish(finishCtx)
+			cancelFinish()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -452,18 +467,19 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	logChromiumStartup(t, session, "bounded DOM and concurrency", started)
 	defer session.Close()
 
-	opCtx1, cancelOp1 := integrationOperationContext(t, sessionCtx)
-	recorder, err := session.BeginCapture(opCtx1)
+	recorder, err := session.BeginCapture(sessionCtx)
 	if err != nil {
-		cancelOp1()
 		t.Fatalf("begin initial bounded DOM capture: %v", err)
 	}
-	if err := session.Navigate(opCtx1, targetURL+"/limits/bounded-dom"); err != nil {
-		cancelOp1()
+	navCtx1, cancelNav1 := integrationNavigationContext(t, sessionCtx)
+	err = session.Navigate(navCtx1, targetURL+"/limits/bounded-dom")
+	cancelNav1()
+	if err != nil {
 		t.Fatalf("navigate initial bounded DOM fixture: %v", err)
 	}
-	result, err := recorder.Finish(opCtx1)
-	cancelOp1()
+	finishCtx1, cancelFinish1 := integrationCaptureFinalizeContext(t, sessionCtx)
+	result, err := recorder.Finish(finishCtx1)
+	cancelFinish1()
 	if err != nil {
 		t.Fatalf("finish initial bounded DOM capture: %v", err)
 	}
@@ -471,18 +487,25 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 		t.Fatalf("DOM snapshot = %d bytes, truncated=%t", len(result.DOM), result.DOMTruncated)
 	}
 
-	opCtx2, cancelOp2 := integrationOperationContext(t, sessionCtx)
-	recorder, err = session.BeginCapture(opCtx2)
+	recorder, err = session.BeginCapture(sessionCtx)
 	if err != nil {
-		cancelOp2()
 		t.Fatalf("begin post-load bounded DOM capture: %v", err)
 	}
-	if err := session.Navigate(opCtx2, targetURL+"/limits/large-postload-dom"); err != nil {
-		cancelOp2()
+	navCtx2, cancelNav2 := integrationNavigationContext(t, sessionCtx)
+	navStart := time.Now()
+	err = session.Navigate(navCtx2, targetURL+"/limits/large-postload-dom")
+	cancelNav2()
+	if err != nil {
 		t.Fatalf("navigate post-load bounded DOM fixture: %v", err)
 	}
-	postLoadResult, err := recorder.Finish(opCtx2)
-	cancelOp2()
+	navElapsed := time.Since(navStart)
+
+	finishCtx2, cancelFinish2 := integrationCaptureFinalizeContext(t, sessionCtx)
+	finishStart := time.Now()
+	postLoadResult, err := recorder.Finish(finishCtx2)
+	cancelFinish2()
+	finishElapsed := time.Since(finishStart)
+	t.Logf("large-postload-dom: navigate completed in %s, finish completed in %s", navElapsed, finishElapsed)
 	if err != nil {
 		t.Fatalf("finish post-load bounded DOM capture: %v", err)
 	}

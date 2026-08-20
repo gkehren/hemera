@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	cdproto "github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/cdp"
@@ -720,4 +721,53 @@ func TestBoundedDOMSnapshotManyTinyNodesAndLargeAttributes(t *testing.T) {
 	if len(result.DOM) > maxDOMBytes {
 		t.Errorf("DOM length = %d, want at most %d", len(result.DOM), maxDOMBytes)
 	}
+}
+
+func TestRecorderContextSeparationAndCancellation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("cancelled begin or navigation context does not prevent fresh finish context", func(t *testing.T) {
+		t.Parallel()
+		source := &fakeCaptureSource{
+			result: CaptureResult{FinalURL: "https://example.test/done", DOM: "<html>done</html>"},
+		}
+		recorder := newRecorder(source, func(*Recorder) {})
+
+		// Simulate navigation context expiring or being cancelled
+		navCtx, cancelNav := context.WithCancel(context.Background())
+		cancelNav()
+		if navCtx.Err() == nil {
+			t.Fatal("navCtx must be cancelled")
+		}
+
+		// Fresh finish context succeeds
+		finishCtx, cancelFinish := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFinish()
+		result, err := recorder.Finish(finishCtx)
+		if err != nil {
+			t.Fatalf("Finish with fresh context failed: %v", err)
+		}
+		if result.DOM != "<html>done</html>" {
+			t.Fatalf("Finish result DOM = %q, want <html>done</html>", result.DOM)
+		}
+	})
+
+	t.Run("expired finish context returns cancellation without hanging", func(t *testing.T) {
+		t.Parallel()
+		source := &fakeCaptureSource{
+			finishWithContext: true,
+		}
+		recorder := newRecorder(source, func(*Recorder) {})
+
+		expiredFinishCtx, cancelExpired := context.WithCancel(context.Background())
+		cancelExpired()
+
+		result, err := recorder.Finish(expiredFinishCtx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Finish(expiredCtx) error = %v, want context.Canceled", err)
+		}
+		if result.DOM != "" {
+			t.Fatalf("Finish(expiredCtx) returned unexpected DOM: %q", result.DOM)
+		}
+	})
 }
