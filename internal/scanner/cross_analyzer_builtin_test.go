@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -78,6 +79,9 @@ func TestDNSTLSAnalyzerBuiltInDetections(t *testing.T) {
 				if d.Detected {
 					t.Errorf("cloudflare.proxy detected = true from supporting DNS+TLS alone, want false")
 				}
+				if d.Level != scoring.LevelMedium {
+					t.Errorf("cloudflare.proxy level = %v, want medium", d.Level)
+				}
 			}
 		}
 	})
@@ -125,6 +129,21 @@ func TestDNSTLSAnalyzerBuiltInDetections(t *testing.T) {
 		if akamai.Score != 95 {
 			t.Errorf("akamai.edge score = %v, want 95 (75 CNAME + 20 TLS)", akamai.Score)
 		}
+		if akamai.Level != scoring.LevelVeryHigh {
+			t.Errorf("akamai.edge level = %v, want very_high", akamai.Level)
+		}
+
+		// Verify specific evidence IDs and sources
+		var matchedIDs []string
+		for _, ev := range akamai.PositiveEvidence {
+			matchedIDs = append(matchedIDs, ev.Match.EvidenceID)
+			if ev.Match.Signal.Source != analysis.SourceDNSTLS {
+				t.Errorf("evidence %q has source %q, want %q", ev.Match.EvidenceID, ev.Match.Signal.Source, analysis.SourceDNSTLS)
+			}
+		}
+		if !slices.Contains(matchedIDs, "akamai-cname") || !slices.Contains(matchedIDs, "akamai-cert-issuer") {
+			t.Errorf("akamai.edge matched evidence = %v, want [akamai-cname, akamai-cert-issuer]", matchedIDs)
+		}
 	})
 }
 
@@ -136,46 +155,50 @@ func TestHTTPAndDNSTLSScannerPipelineBuiltInDetections(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		headers      map[string]string
-		cname        string
-		wantRuleID   string
-		wantScore    float64
-		wantDetected bool
-		wantLevel    scoring.Level
+		name            string
+		headers         map[string]string
+		cname           string
+		wantRuleID      string
+		wantScore       float64
+		wantDetected    bool
+		wantLevel       scoring.Level
+		wantEvidenceIDs []string
 	}{
 		{
 			name: "Cloudflare HTTP Server + DNS CNAME correlation",
 			headers: map[string]string{
 				"Server": "cloudflare",
 			},
-			cname:        "origin.cdn.cloudflare.net.",
-			wantRuleID:   "cloudflare.proxy",
-			wantScore:    100,
-			wantDetected: true,
-			wantLevel:    scoring.LevelVeryHigh,
+			cname:           "origin.cdn.cloudflare.net.",
+			wantRuleID:      "cloudflare.proxy",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"cloudflare-server-header", "cloudflare-cname"},
 		},
 		{
 			name: "Amazon CloudFront HTTP header + DNS CNAME correlation",
 			headers: map[string]string{
 				"x-amz-cf-id": "sample-transaction-id",
 			},
-			cname:        "d123456abcdef8.cloudfront.net.",
-			wantRuleID:   "aws.cloudfront",
-			wantScore:    100,
-			wantDetected: true,
-			wantLevel:    scoring.LevelVeryHigh,
+			cname:           "d123456abcdef8.cloudfront.net.",
+			wantRuleID:      "aws.cloudfront",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"aws-cf-id-header", "aws-cf-cname"},
 		},
 		{
 			name: "Akamai Edge HTTP Server + DNS CNAME correlation",
 			headers: map[string]string{
 				"Server": "AkamaiGHost",
 			},
-			cname:        "e1234.dscg.akamaiedge.net.",
-			wantRuleID:   "akamai.edge",
-			wantScore:    100,
-			wantDetected: true,
-			wantLevel:    scoring.LevelVeryHigh,
+			cname:           "e1234.dscg.akamaiedge.net.",
+			wantRuleID:      "akamai.edge",
+			wantScore:       100,
+			wantDetected:    true,
+			wantLevel:       scoring.LevelVeryHigh,
+			wantEvidenceIDs: []string{"akamai-ghost-server-header", "akamai-cname"},
 		},
 	}
 
@@ -254,6 +277,16 @@ func TestHTTPAndDNSTLSScannerPipelineBuiltInDetections(t *testing.T) {
 			}
 			if matched.Level != tc.wantLevel {
 				t.Errorf("rule %q level = %v, want %v", tc.wantRuleID, matched.Level, tc.wantLevel)
+			}
+
+			var matchedEvidenceIDs []string
+			for _, ev := range matched.PositiveEvidence {
+				matchedEvidenceIDs = append(matchedEvidenceIDs, ev.Match.EvidenceID)
+			}
+			for _, wantEID := range tc.wantEvidenceIDs {
+				if !slices.Contains(matchedEvidenceIDs, wantEID) {
+					t.Errorf("rule %q matched evidence %v does not contain %q", tc.wantRuleID, matchedEvidenceIDs, wantEID)
+				}
 			}
 		})
 	}
@@ -353,6 +386,134 @@ func TestRequiresDependenciesEnforcementInBuiltInRules(t *testing.T) {
 				}
 				if d.Score != 0 {
 					t.Errorf("cloudflare.challenge_page score = %v, want 0 when prerequisite unmet", d.Score)
+				}
+			}
+		}
+	})
+}
+
+func TestIncompleteCoverageEvaluationWithBuiltInRules(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := detectors.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("HTTP only on clean page marks browser-capable rules as insufficient_coverage", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<html><body>Clean Page</body></html>"))
+		}))
+		defer server.Close()
+
+		local, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		httpConfig := httpanalyzer.DefaultConfig()
+		httpConfig.Resolver = fixtureResolver(func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+		})
+		httpConfig.Dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, local.Host)
+		}
+		httpAnalyzer, err := httpanalyzer.New(httpConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: httpAnalyzer, FailurePolicy: FailurePolicyAbort},
+			},
+			RuleSet: ruleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := engine.Scan(context.Background(), "http://fixture.example/")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		coverageMap := make(map[string]DetectionCoverage, len(result.Coverage))
+		for _, cov := range result.Coverage {
+			coverageMap[cov.RuleID] = cov
+		}
+
+		// hCaptcha supports browser analyzer; with browser analyzer missing on clean page, status is insufficient_coverage
+		if cov, ok := coverageMap["hcaptcha.challenge"]; !ok {
+			t.Fatal("hcaptcha.challenge missing from coverage")
+		} else if cov.Status != DetectionStatusInsufficientCoverage {
+			t.Errorf("hcaptcha.challenge coverage status = %q, want %q", cov.Status, DetectionStatusInsufficientCoverage)
+		} else if !slices.Contains(cov.IncompleteSources, analysis.SourceBrowser) {
+			t.Errorf("hcaptcha.challenge incomplete sources = %v, want to contain %q", cov.IncompleteSources, analysis.SourceBrowser)
+		}
+
+		// Cloudflare Turnstile requires exact: "http_analyzer" in Milestone 1 rules; with HTTP complete, status is not_detected
+		if cov, ok := coverageMap["cloudflare.turnstile"]; !ok {
+			t.Fatal("cloudflare.turnstile missing from coverage")
+		} else if cov.Status != DetectionStatusNotDetected {
+			t.Errorf("cloudflare.turnstile coverage status = %q, want %q", cov.Status, DetectionStatusNotDetected)
+		}
+
+		// Akamai Bot Manager requires akamai.edge; since akamai.edge has insufficient_coverage (missing dnstls), akamai.bot_manager is also insufficient_coverage
+		if cov, ok := coverageMap["akamai.bot_manager"]; !ok {
+			t.Fatal("akamai.bot_manager missing from coverage")
+		} else if cov.Status != DetectionStatusInsufficientCoverage {
+			t.Errorf("akamai.bot_manager coverage status = %q, want %q when prerequisite coverage is incomplete", cov.Status, DetectionStatusInsufficientCoverage)
+		} else if !slices.Contains(cov.IncompleteSources, analysis.SourceBrowser) || !slices.Contains(cov.IncompleteSources, analysis.SourceDNSTLS) {
+			t.Errorf("akamai.bot_manager incomplete sources = %v, want to contain browser and dnstls", cov.IncompleteSources)
+		}
+	})
+
+	t.Run("HTTP decisive evidence marks rule as detected regardless of missing secondary analyzers", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Server", "cloudflare")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		local, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		httpConfig := httpanalyzer.DefaultConfig()
+		httpConfig.Resolver = fixtureResolver(func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+		})
+		httpConfig.Dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, local.Host)
+		}
+		httpAnalyzer, err := httpanalyzer.New(httpConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: httpAnalyzer, FailurePolicy: FailurePolicyAbort},
+			},
+			RuleSet: ruleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := engine.Scan(context.Background(), "http://fixture.example/")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, cov := range result.Coverage {
+			if cov.RuleID == "cloudflare.proxy" {
+				if cov.Status != DetectionStatusDetected {
+					t.Errorf("cloudflare.proxy coverage status = %q, want %q", cov.Status, DetectionStatusDetected)
 				}
 			}
 		}
