@@ -1,6 +1,10 @@
 <!doctype html>
 <html lang="en"><body><script>
-window.addEventListener("load", () => setTimeout(() => {
-  window.location.assign("/limits/redirect-loop");
-}, 50));
+window.addEventListener("load", () => {
+  fetch("/limits/postload-redirect-barrier").then(() => {
+    window.location.assign("/limits/redirect-loop");
+  }).catch(() => {
+    window.location.assign("/limits/redirect-loop");
+  });
+});
 </script></body></html>

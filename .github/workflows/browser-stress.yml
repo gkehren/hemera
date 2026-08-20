@@ -1,0 +1,72 @@
+name: Browser Stress
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-stress:
+    name: Sandboxed Chromium stress suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Locate Google Chrome
+        shell: bash
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            chromium_path="$(command -v google-chrome)"
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            chromium_path="$(command -v google-chrome-stable)"
+          else
+            printf 'Google Chrome is required for browser integration tests.\n' >&2
+            exit 1
+          fi
+
+          "${chromium_path}" --version
+          printf 'HEMERA_CHROMIUM_PATH=%s\n' "${chromium_path}" >> "${GITHUB_ENV}"
+
+      - name: Stress TestSandboxedChromiumCapture (50x -race)
+        run: |
+          go test -p=1 -race -count=50 -timeout=20m -tags=browser_integration \
+            -run '^TestSandboxedChromiumCapture$' \
+            ./internal/browser
+
+      - name: Stress TestSandboxedChromiumBoundedDOMAndRequestConcurrency (50x -race)
+        run: |
+          go test -p=1 -race -count=50 -timeout=20m -tags=browser_integration \
+            -run '^TestSandboxedChromiumBoundedDOMAndRequestConcurrency$' \
+            ./internal/browser
+
+      - name: Stress post-load redirect budget (100x -race)
+        run: |
+          go test -p=1 -race -count=100 -timeout=20m -tags=browser_integration \
+            -run '^TestSandboxedChromiumNavigationLimits/post-load_redirect_budget$' \
+            ./internal/browser
+
+      - name: Full browser suite (10x)
+        run: |
+          go test -p=1 -count=10 -timeout=20m -tags=browser_integration \
+            ./internal/browser ./internal/scanner
+
+      - name: Full browser suite with race detector (10x -race)
+        run: |
+          go test -p=1 -race -count=10 -timeout=30m -tags=browser_integration \
+            ./internal/browser ./internal/scanner

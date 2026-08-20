@@ -193,6 +193,20 @@ preserves a typed error for the caller. Downloads are denied, cache reuse and
 service workers are bypassed, and the proxy is inactive outside an authorized
 navigation.
 
+Policy violations dominate infrastructure failures belonging to the same
+navigation. Transport cancellation caused by enforcing a browser policy must
+never replace the originating policy error in the public result.
+
+```mermaid
+flowchart TD
+    Navigate[Navigate] --> Activity[CDP + proxy activity]
+    Activity --> Terminal[Terminal condition]
+    Terminal --> StopWork[Stop new work]
+    StopWork --> Quiescence[Bounded event/worker quiescence]
+    Quiescence --> Classify[Final error classification: Policy > Infra]
+    Classify --> Return[Return result]
+```
+
 After the load event, navigation remains active for a bounded observation phase.
 The default phase ends after 250 ms with no meaningful HTTP(S) activity and no
 active request, or unconditionally after 1.5 seconds. Configuration may lower

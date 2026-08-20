@@ -27,19 +27,20 @@ const (
 )
 
 var allowedFixtureBehaviors = map[string]struct{}{
-	"completion-barrier":     {},
-	"compressed-response":    {},
-	"redirect-loop":          {},
-	"credential-redirect":    {},
-	"large-response":         {},
-	"large-worker-script":    {},
-	"long-poll":              {},
-	"held-resource":          {},
-	"dom-completion-barrier": {},
-	"dom-completion-signal":  {},
-	"slow-response":          {},
-	"private-subresource":    {},
-	"private-trap":           {},
+	"completion-barrier":        {},
+	"compressed-response":       {},
+	"redirect-loop":             {},
+	"credential-redirect":       {},
+	"large-response":            {},
+	"large-worker-script":       {},
+	"long-poll":                 {},
+	"held-resource":             {},
+	"dom-completion-barrier":    {},
+	"dom-completion-signal":     {},
+	"slow-response":             {},
+	"private-subresource":       {},
+	"private-trap":              {},
+	"postload-redirect-barrier": {},
 }
 
 type fixtureManifest struct {
@@ -240,6 +241,11 @@ func TestFixtureTrafficPartialOrder(t *testing.T) {
 			wantErr:  `route "page" must be observed before "frame"`,
 		},
 		{
+			name:     "transitive dependency violation",
+			observed: []string{"start", "page", "api", "barrier", "frame"},
+			wantErr:  `route "frame" must be observed before "api"`,
+		},
+		{
 			name:     "missing route",
 			observed: []string{"start", "page", "frame", "api"},
 			wantErr:  `expected route "barrier" was not observed`,
@@ -280,6 +286,43 @@ func TestFixtureTrafficDefinitionRejectsAmbiguity(t *testing.T) {
 		wantErr      string
 	}{
 		{
+			name:     "empty traffic list",
+			expected: []string{},
+			wantErr:  "at least one expected route",
+		},
+		{
+			name:     "empty route name",
+			expected: []string{"page", ""},
+			wantErr:  "empty route name",
+		},
+		{
+			name:         "dependency with empty before",
+			expected:     []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{{Before: "", After: "script"}},
+			wantErr:      "empty before route",
+		},
+		{
+			name:         "dependency with empty after",
+			expected:     []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{{Before: "page", After: ""}},
+			wantErr:      "empty after route",
+		},
+		{
+			name:     "duplicate dependency",
+			expected: []string{"page", "script"},
+			dependencies: []fixtureTrafficDependency{
+				{Before: "page", After: "script"},
+				{Before: "page", After: "script"},
+			},
+			wantErr: "is duplicated",
+		},
+		{
+			name:         "self dependency",
+			expected:     []string{"page"},
+			dependencies: []fixtureTrafficDependency{{Before: "page", After: "page"}},
+			wantErr:      "self-referential",
+		},
+		{
 			name:     "duplicate expected route",
 			expected: []string{"page", "page"},
 			wantErr:  "more than once",
@@ -291,11 +334,21 @@ func TestFixtureTrafficDefinitionRejectsAmbiguity(t *testing.T) {
 			wantErr:      "undeclared route",
 		},
 		{
-			name:     "cycle",
+			name:     "2-node cycle",
 			expected: []string{"page", "script"},
 			dependencies: []fixtureTrafficDependency{
 				{Before: "page", After: "script"},
 				{Before: "script", After: "page"},
+			},
+			wantErr: "contain a cycle",
+		},
+		{
+			name:     "3-node cycle",
+			expected: []string{"page", "script", "frame"},
+			dependencies: []fixtureTrafficDependency{
+				{Before: "page", After: "script"},
+				{Before: "script", After: "frame"},
+				{Before: "frame", After: "page"},
 			},
 			wantErr: "contain a cycle",
 		},
@@ -484,6 +537,9 @@ func (c *fixtureCorpus) validateCases() error {
 }
 
 func validateFixtureTrafficDefinition(expected []string, dependencies []fixtureTrafficDependency) error {
+	if len(expected) == 0 {
+		return errors.New("traffic must declare at least one expected route")
+	}
 	declared := make(map[string]struct{}, len(expected))
 	for _, routeName := range expected {
 		if routeName == "" {
@@ -502,6 +558,12 @@ func validateFixtureTrafficDefinition(expected []string, dependencies []fixtureT
 		indegree[routeName] = 0
 	}
 	for _, dependency := range dependencies {
+		if dependency.Before == "" {
+			return errors.New("traffic dependency has an empty before route")
+		}
+		if dependency.After == "" {
+			return errors.New("traffic dependency has an empty after route")
+		}
 		if dependency.Before == dependency.After {
 			return fmt.Errorf("traffic dependency for %q is self-referential", dependency.Before)
 		}
