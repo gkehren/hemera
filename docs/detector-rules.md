@@ -386,8 +386,10 @@ state (for example HTTP body or resource-extraction truncation, and browser DOM,
 request, response, script, iframe, or cookie ceilings). Absence of a matching
 value is conclusive only when every capable source observed that predicate's
 signal capability completely; an analyzer-wide success never implies this on its
-own. Incomplete capabilities unrelated to a rule's predicates do not downgrade
-it.
+own. An analyzer that declares any capability coverage is treated as
+capability-aware, so signal types it does not declare are inconclusive by
+construction and can never become conclusive through its execution status.
+Incomplete capabilities unrelated to a rule's predicates do not downgrade it.
 
 Each selected signal field contains exactly one text operation:
 

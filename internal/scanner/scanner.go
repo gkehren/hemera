@@ -442,17 +442,23 @@ func deduplicateSorted(items []string) []string {
 
 // buildCapabilityCompleter combines declared per-capability coverage with
 // analyzer execution status into the capability lookup consumed by rule
-// coverage evaluation. Declared capability state wins per source and signal
-// type; capabilities an analyzer did not declare fall back to its execution
-// status so analyzers without bounded evidence channels keep their previous
-// semantics. Analyzer-wide success therefore no longer implies that every
-// detector-relevant signal capability is complete.
+// coverage evaluation. An analyzer that declared any capability coverage is
+// treated as capability-aware: only its explicit declarations can report
+// completeness, and an undeclared capability is never complete because
+// analyzer-wide success must not imply that an unobserved channel was
+// conclusively evaluated. Analyzers without declarations keep their previous
+// analyzer-status semantics so analyzers without bounded evidence channels
+// remain usable.
 func buildCapabilityCompleter(analyzers []AnalyzerResult) rules.CapabilityCompleter {
 	declared := make(map[model.SignalType]map[string]bool)
 	statuses := make(map[string]bool, len(analyzers))
+	capabilityAware := make(map[string]bool, len(analyzers))
 	for _, analyzer := range analyzers {
 		source := analyzer.Observation.Source
 		statuses[source] = analyzer.Status == AnalyzerStatusComplete
+		if len(analyzer.Observation.Capabilities) > 0 {
+			capabilityAware[source] = true
+		}
 		for _, capability := range analyzer.Observation.Capabilities {
 			bySource, ok := declared[capability.SignalType]
 			if !ok {
@@ -463,10 +469,8 @@ func buildCapabilityCompleter(analyzers []AnalyzerResult) rules.CapabilityComple
 		}
 	}
 	return func(source string, signalType model.SignalType) bool {
-		if bySource, ok := declared[signalType]; ok {
-			if complete, ok := bySource[source]; ok {
-				return complete
-			}
+		if capabilityAware[source] {
+			return declared[signalType][source]
 		}
 		return statuses[source]
 	}

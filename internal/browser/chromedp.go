@@ -688,6 +688,7 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 		var finalURL string
 		var domSnapshot boundedDOMSnapshot
 		var cookies []CaptureCookie
+		var finalURLObserved, cookiesObserved, domObserved bool
 		c.err = c.run(ctx, chromedp.ActionFunc(func(actionCtx context.Context) error {
 			var captureErrors []error
 			chromedpContext := chromedp.FromContext(actionCtx)
@@ -700,6 +701,7 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 					captureErrors = append(captureErrors, fmt.Errorf("Target.getTargetInfo: %w", err))
 				} else if info != nil {
 					finalURL = info.URL
+					finalURLObserved = true
 				}
 				rawCookies, err := storage.GetCookies().Do(browserCtx)
 				if err != nil {
@@ -713,15 +715,29 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 						}
 					}
 					cookies = minimized
+					cookiesObserved = true
 				}
 			}
 
 			if err := captureBoundedDOM(actionCtx, &domSnapshot); err != nil {
 				captureErrors = append(captureErrors, err)
+			} else {
+				domObserved = true
 			}
 			return errors.Join(captureErrors...)
 		}))
 		c.result = c.collector.snapshotBounded(finalURL, domSnapshot, cookies)
+		// Per-channel failures stay scoped to their own capability so an
+		// isolated CDP call failure cannot downgrade unrelated channels.
+		if !finalURLObserved {
+			c.result.FinalURLIncomplete = true
+		}
+		if !cookiesObserved {
+			c.result.CookiesIncomplete = true
+		}
+		if !domObserved {
+			c.result.DOMIncomplete = true
+		}
 		close(c.done)
 	})
 	<-c.done
@@ -955,8 +971,14 @@ const boundedDOMSerializer = `(() => {
     return encoder.encodeInto(value, urlScratch).read === value.length;
   }
 
+  function markResourceURLTruncated(kind) {
+    if (kind === "script") scriptTruncated = true;
+    else iframeTruncated = true;
+  }
+
   function collectResource(kind, rawURL) {
     if (!fitsURL(rawURL)) {
+      markResourceURLTruncated(kind);
       urlTruncated = true;
       return;
     }
@@ -969,6 +991,7 @@ const boundedDOMSerializer = `(() => {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
     const resolved = parsed.href;
     if (!fitsURL(resolved)) {
+      markResourceURLTruncated(kind);
       urlTruncated = true;
       return;
     }

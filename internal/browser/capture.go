@@ -54,8 +54,9 @@ type CaptureCookie struct {
 
 // CaptureResult contains bounded observations from one browser target. It is
 // internal to the browser integration and is not a report or detection model.
-// The truncation fields expose structured completion state per evidence
-// channel so capability-level coverage never has to parse warnings.
+// The truncation and incomplete fields expose structured completion state per
+// evidence channel so capability-level coverage never has to parse warnings
+// or interpret aggregated errors.
 type CaptureResult struct {
 	FinalURL     string
 	DOM          string
@@ -66,6 +67,20 @@ type CaptureResult struct {
 	IframeURLs   []string
 	Cookies      []CaptureCookie
 	Warnings     []string
+	// FinalURLIncomplete reports that the navigation's final URL could not be
+	// sanitized within the capture contract or was never observed, so signals
+	// whose provenance URL would have come from it cannot support conclusive
+	// URL predicates.
+	FinalURLIncomplete bool
+	// NavigationIncomplete reports that navigation did not finish cleanly, so
+	// no browser channel can be treated as conclusively evaluated.
+	NavigationIncomplete bool
+	// DOMIncomplete reports that bounded DOM collection failed before it could
+	// produce a snapshot, so every DOM-derived channel stays inconclusive.
+	DOMIncomplete bool
+	// CookiesIncomplete reports that cookie collection failed outright rather
+	// than merely reaching its ceiling.
+	CookiesIncomplete bool
 	// RequestsTruncated reports that request capture reached its collection
 	// ceiling or omitted an oversized request URL.
 	RequestsTruncated bool
@@ -241,6 +256,8 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 	}
 	if cleaned, ok := c.cleanURL(finalURL); ok {
 		result.FinalURL = cleaned
+	} else {
+		result.FinalURLIncomplete = true
 	}
 	if resourcesCaptured {
 		result.ScriptURLs = c.cleanResourceURLs(snapshot.ScriptURLs, warningScriptLimit, &c.truncated.scripts)
@@ -253,9 +270,10 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 			c.truncated.iframes = true
 			c.warn(warningIframeLimit)
 		}
+		// URLTruncated is a serializer-level diagnostic for oversized resource
+		// URLs. The serializer already attributes each dropped URL to its own
+		// channel, so it must not widen truncation to both resource channels.
 		if snapshot.URLTruncated {
-			c.truncated.scripts = true
-			c.truncated.iframes = true
 			c.warn(warningURLLimit)
 		}
 	} else {

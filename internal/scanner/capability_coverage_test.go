@@ -242,8 +242,6 @@ func TestScanDeclaredCompleteCapabilitiesWithoutEvidenceAreConclusive(t *testing
 			{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeDOMSelector, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeJSGlobal, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityComplete},
@@ -297,15 +295,15 @@ func TestScanBrowserChannelTruncationScopesToRelevantRules(t *testing.T) {
 			},
 		},
 	}
-	// DOM capture was truncated while requests completed cleanly.
+	// DOM capture was truncated while requests completed cleanly. The browser
+	// declares only the capabilities it actually observes, so the DOM selector
+	// predicate is inconclusive because it was never declared.
 	browserPartialDOM := analysis.Observation{
 		Source: analysis.SourceBrowser,
 		Capabilities: []analysis.CapabilityCoverage{
 			{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityIncomplete},
-			{SignalType: model.SignalTypeDOMSelector, Status: analysis.CapabilityIncomplete},
-			{SignalType: model.SignalTypeJSGlobal, Status: analysis.CapabilityIncomplete},
 			{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityIncomplete},
 			{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityIncomplete},
 			{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityComplete},
@@ -380,7 +378,7 @@ func TestScanRejectsInvalidCapabilityDeclarations(t *testing.T) {
 	}
 }
 
-func TestBuildCapabilityCompleterPrefersDeclarationsOverFallback(t *testing.T) {
+func TestBuildCapabilityCompleterScopesFallbackPerAnalyzer(t *testing.T) {
 	t.Parallel()
 	analyzers := []AnalyzerResult{
 		{
@@ -395,6 +393,10 @@ func TestBuildCapabilityCompleterPrefersDeclarationsOverFallback(t *testing.T) {
 		{
 			Status:      AnalyzerStatusFailed,
 			Observation: analysis.Observation{Source: analysis.SourceBrowser},
+		},
+		{
+			Status:      AnalyzerStatusComplete,
+			Observation: analysis.Observation{Source: analysis.SourceDNSTLS},
 		},
 	}
 	completer := buildCapabilityCompleter(analyzers)
@@ -412,13 +414,19 @@ func TestBuildCapabilityCompleterPrefersDeclarationsOverFallback(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "undeclared capability falls back to complete execution status",
+			name:       "undeclared capability on capability-aware analyzer is never complete",
 			source:     analysis.SourceHTTP,
 			signalType: model.SignalTypeResponseHeader,
+			want:       false,
+		},
+		{
+			name:       "legacy analyzer falls back to complete execution status",
+			source:     analysis.SourceDNSTLS,
+			signalType: model.SignalTypeTLSProperty,
 			want:       true,
 		},
 		{
-			name:       "undeclared capability falls back to failed execution status",
+			name:       "legacy analyzer falls back to failed execution status",
 			source:     analysis.SourceBrowser,
 			signalType: model.SignalTypeDOMSelector,
 			want:       false,
@@ -439,4 +447,139 @@ func TestBuildCapabilityCompleterPrefersDeclarationsOverFallback(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestScanUndeclaredCapabilityOnCompleteAnalyzerIsInsufficientCoverage(t *testing.T) {
+	t.Parallel()
+	// Regression: analyzer-wide success must not imply that an undeclared
+	// capability was conclusively evaluated. The browser observation reports
+	// complete execution and complete coverage for every channel it actually
+	// observes, but it can never produce js_global evidence, so a js_global
+	// rule must stay inconclusive instead of returning a conclusive negative.
+	globalKey := "challengeProviderReady"
+	ruleSet := rules.RuleSet{
+		SchemaVersion: rules.CurrentSchemaVersion,
+		Rules: []rules.Rule{{
+			ID: "global.only", Name: "Global Only", Category: rules.CategoryThirdPartySecurity,
+			Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
+			Match: rules.Condition{Signal: &rules.Evidence{
+				ID: "global", Group: "global", Type: model.SignalTypeJSGlobal,
+				Source: &rules.TextPattern{Exact: &[]string{analysis.SourceBrowser}[0]},
+				Key:    &rules.TextPattern{Exact: &globalKey}, Weight: 75,
+			}},
+		}},
+	}
+	browserComplete := analysis.Observation{
+		Source: analysis.SourceBrowser,
+		Capabilities: []analysis.CapabilityCoverage{
+			{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityComplete},
+			{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
+			{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityComplete},
+			{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityComplete},
+			{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityComplete},
+			{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityComplete},
+		},
+	}
+	engine, err := New(Config{
+		Analyzers: []AnalyzerConfig{
+			{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: browserComplete}},
+		},
+		RuleSet: ruleSet,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := engine.Scan(context.Background(), "https://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Analyzers[0].Status; got != AnalyzerStatusComplete {
+		t.Fatalf("analyzer status = %q, want complete", got)
+	}
+	statuses := statusByRule(result.Coverage)
+	if got := statuses["global.only"]; got != DetectionStatusInsufficientCoverage {
+		t.Errorf("global.only status = %s, want insufficient_coverage for undeclared capability", got)
+	}
+}
+
+func TestScanLostFinalURLKeepsURLPredicateInconclusive(t *testing.T) {
+	t.Parallel()
+	contentMarker := "challenge-marker"
+	finalURLPrefix := "https://example.test/final"
+	ruleSet := rules.RuleSet{
+		SchemaVersion: rules.CurrentSchemaVersion,
+		Rules: []rules.Rule{{
+			ID: "content.url", Name: "Content URL", Category: rules.CategoryThirdPartySecurity,
+			Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
+			Match: rules.Condition{Signal: &rules.Evidence{
+				ID: "content", Group: "content", Type: model.SignalTypePageContent,
+				Source: &rules.TextPattern{Exact: &[]string{analysis.SourceBrowser}[0]},
+				Value:  &rules.TextPattern{Contains: &contentMarker},
+				URL:    &rules.TextPattern{Prefix: &finalURLPrefix}, Weight: 75,
+			}},
+		}},
+	}
+	browserSignals := func(signalURL string) analysis.Observation {
+		return analysis.Observation{
+			Source: analysis.SourceBrowser,
+			Signals: []model.Signal{{
+				Type: model.SignalTypePageContent, Source: analysis.SourceBrowser,
+				Key: "dom", Value: "prefix " + contentMarker + " suffix",
+				URL: signalURL, Confidence: 1,
+			}},
+			Capabilities: []analysis.CapabilityCoverage{
+				{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityIncomplete},
+				{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
+				{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityIncomplete},
+				{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityIncomplete},
+				{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityIncomplete},
+				{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityIncomplete},
+			},
+		}
+	}
+
+	t.Run("lost final URL never produces a conclusive negative", func(t *testing.T) {
+		t.Parallel()
+		// The browser derives these declarations when the oversized final URL
+		// was omitted: the page content evidence survives with an empty
+		// provenance URL, so URL-predicate matching is inconclusive.
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: browserSignals("")}},
+			},
+			RuleSet: ruleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := statusByRule(result.Coverage)
+		if got := statuses["content.url"]; got != DetectionStatusInsufficientCoverage {
+			t.Errorf("content.url status = %s, want insufficient_coverage after final URL loss", got)
+		}
+	})
+
+	t.Run("intact final URL still detects decisively", func(t *testing.T) {
+		t.Parallel()
+		engine, err := New(Config{
+			Analyzers: []AnalyzerConfig{
+				{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: browserSignals("https://example.test/final?page")}},
+			},
+			RuleSet: ruleSet,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := engine.Scan(context.Background(), "https://example.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := statusByRule(result.Coverage)
+		if got := statuses["content.url"]; got != DetectionStatusDetected {
+			t.Errorf("content.url status = %s, want detected with intact provenance URL", got)
+		}
+	})
 }

@@ -41,6 +41,7 @@ var allowedFixtureBehaviors = map[string]struct{}{
 	"private-subresource":       {},
 	"private-trap":              {},
 	"postload-redirect-barrier": {},
+	"oversized-script-page":     {},
 }
 
 type fixtureManifest struct {

@@ -74,46 +74,89 @@ func TestCaptureOversizedURLTruncatesOnlyItsOwnChannel(t *testing.T) {
 func TestBrowserCapabilityCoverageDerivation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name               string
-		result             CaptureResult
-		navigationComplete bool
-		wantIncomplete     []model.SignalType
-		wantComplete       []model.SignalType
+		name                string
+		result              CaptureResult
+		normalizationFailed bool
+		wantIncomplete      []model.SignalType
+		wantComplete        []model.SignalType
 	}{
 		{
-			name:               "clean navigation declares every capability complete",
-			result:             CaptureResult{FinalURL: "https://example.test/"},
-			navigationComplete: true,
+			name:   "clean navigation declares every capability complete",
+			result: CaptureResult{FinalURL: "https://example.test/"},
 			wantComplete: []model.SignalType{
 				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
-				model.SignalTypePageContent, model.SignalTypeDOMSelector,
-				model.SignalTypeJSGlobal, model.SignalTypeScriptURL,
+				model.SignalTypePageContent, model.SignalTypeScriptURL,
 				model.SignalTypeIframeURL, model.SignalTypeCookie,
 			},
 		},
 		{
-			name:               "failed navigation leaves every capability inconclusive",
-			result:             CaptureResult{FinalURL: "https://example.test/"},
-			navigationComplete: false,
+			name:   "failed navigation leaves every capability inconclusive",
+			result: CaptureResult{FinalURL: "https://example.test/", NavigationIncomplete: true},
 			wantIncomplete: []model.SignalType{
 				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
-				model.SignalTypePageContent, model.SignalTypeDOMSelector,
-				model.SignalTypeJSGlobal, model.SignalTypeScriptURL,
+				model.SignalTypePageContent, model.SignalTypeScriptURL,
 				model.SignalTypeIframeURL, model.SignalTypeCookie,
 			},
 		},
 		{
-			name: "DOM truncation scopes incompleteness to DOM-derived channels",
+			name:                "signal normalization failure leaves every capability inconclusive",
+			result:              CaptureResult{FinalURL: "https://example.test/"},
+			normalizationFailed: true,
+			wantIncomplete: []model.SignalType{
+				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
+				model.SignalTypePageContent, model.SignalTypeScriptURL,
+				model.SignalTypeIframeURL, model.SignalTypeCookie,
+			},
+		},
+		{
+			name: "DOM truncation scopes incompleteness to page content",
 			result: CaptureResult{
 				FinalURL: "https://example.test/", DOMTruncated: true,
 			},
-			navigationComplete: true,
 			wantIncomplete: []model.SignalType{
-				model.SignalTypePageContent, model.SignalTypeDOMSelector, model.SignalTypeJSGlobal,
+				model.SignalTypePageContent,
 			},
 			wantComplete: []model.SignalType{
 				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
 				model.SignalTypeScriptURL, model.SignalTypeIframeURL, model.SignalTypeCookie,
+			},
+		},
+		{
+			name: "DOM collection failure scopes incompleteness to DOM-derived channels",
+			result: CaptureResult{
+				FinalURL: "https://example.test/", DOMIncomplete: true,
+			},
+			wantIncomplete: []model.SignalType{
+				model.SignalTypePageContent, model.SignalTypeScriptURL, model.SignalTypeIframeURL,
+			},
+			wantComplete: []model.SignalType{
+				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse, model.SignalTypeCookie,
+			},
+		},
+		{
+			name: "lost final URL scopes incompleteness to final-URL provenance",
+			result: CaptureResult{
+				FinalURL: "", FinalURLIncomplete: true,
+			},
+			wantIncomplete: []model.SignalType{
+				model.SignalTypeNetworkRequest, model.SignalTypePageContent,
+				model.SignalTypeScriptURL, model.SignalTypeIframeURL, model.SignalTypeCookie,
+			},
+			wantComplete: []model.SignalType{
+				model.SignalTypeNetworkResponse,
+			},
+		},
+		{
+			name: "cookie collection failure stays scoped to cookies",
+			result: CaptureResult{
+				FinalURL: "https://example.test/", CookiesIncomplete: true,
+			},
+			wantIncomplete: []model.SignalType{
+				model.SignalTypeCookie,
+			},
+			wantComplete: []model.SignalType{
+				model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
+				model.SignalTypePageContent, model.SignalTypeScriptURL, model.SignalTypeIframeURL,
 			},
 		},
 		{
@@ -122,13 +165,11 @@ func TestBrowserCapabilityCoverageDerivation(t *testing.T) {
 				FinalURL:          "https://example.test/",
 				RequestsTruncated: true, CookiesTruncated: true,
 			},
-			navigationComplete: true,
 			wantIncomplete: []model.SignalType{
 				model.SignalTypeNetworkRequest, model.SignalTypeCookie,
 			},
 			wantComplete: []model.SignalType{
 				model.SignalTypeNetworkResponse, model.SignalTypePageContent,
-				model.SignalTypeDOMSelector, model.SignalTypeJSGlobal,
 				model.SignalTypeScriptURL, model.SignalTypeIframeURL,
 			},
 		},
@@ -138,7 +179,7 @@ func TestBrowserCapabilityCoverageDerivation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			statuses := make(map[model.SignalType]analysis.CapabilityStatus)
-			for _, capability := range browserCapabilityCoverage(tt.result, tt.navigationComplete) {
+			for _, capability := range browserCapabilityCoverage(tt.result, tt.normalizationFailed) {
 				if _, duplicate := statuses[capability.SignalType]; duplicate {
 					t.Fatalf("duplicate capability declaration for %q", capability.SignalType)
 				}
@@ -193,6 +234,71 @@ func TestObserveDeclaresCapabilitiesFromCaptureState(t *testing.T) {
 				t.Errorf("capability %q = %q, want complete on clean capture",
 					capability.SignalType, capability.Status)
 			}
+		}
+	})
+
+	t.Run("isolated channel failure does not downgrade unrelated capabilities", func(t *testing.T) {
+		t.Parallel()
+		// Regression: a failed Storage.getCookies call must not mark the
+		// network or DOM channels inconclusive; the aggregated finish error
+		// is an analyzer-status input, not a coverage proxy.
+		source := &fakeCaptureSource{result: CaptureResult{
+			FinalURL:          "https://example.test/",
+			DOM:               "<html><body>ok</body></html>",
+			Requests:          []CaptureRequest{{Method: "GET", URL: "https://example.test/"}},
+			CookiesIncomplete: true,
+		}}
+		analyzer := analyzerForBackend(t, newFakeAnalyzerBackend(source, nil))
+		observation, err := analyzer.Observe(context.Background(), analysis.Target{URL: "https://example.test/"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := make(map[model.SignalType]analysis.CapabilityStatus)
+		for _, capability := range observation.Capabilities {
+			statuses[capability.SignalType] = capability.Status
+		}
+		if got := statuses[model.SignalTypeCookie]; got != analysis.CapabilityIncomplete {
+			t.Errorf("cookie capability = %q, want incomplete after cookie collection failure", got)
+		}
+		for _, signalType := range []model.SignalType{
+			model.SignalTypeNetworkRequest, model.SignalTypeNetworkResponse,
+			model.SignalTypePageContent, model.SignalTypeScriptURL, model.SignalTypeIframeURL,
+		} {
+			if got := statuses[signalType]; got != analysis.CapabilityComplete {
+				t.Errorf("capability %q = %q, want complete despite cookie failure", signalType, got)
+			}
+		}
+	})
+
+	t.Run("lost final URL keeps URL-provenance channels inconclusive", func(t *testing.T) {
+		t.Parallel()
+		longURL := "https://example.test/" + strings.Repeat("x", maxBrowserURLBytes)
+		collector := newCaptureCollector()
+		result := collector.snapshot(longURL, "<html><body>ok</body></html>", []CaptureCookie{
+			{Name: "session", Domain: "example.test"},
+		})
+		if result.FinalURL != "" || !result.FinalURLIncomplete {
+			t.Fatalf("final URL = %q incomplete=%t, want omitted with FinalURLIncomplete", result.FinalURL, result.FinalURLIncomplete)
+		}
+		analyzer := analyzerForBackend(t, newFakeAnalyzerBackend(&fakeCaptureSource{result: result}, nil))
+		observation, err := analyzer.Observe(context.Background(), analysis.Target{URL: longURL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := make(map[model.SignalType]analysis.CapabilityStatus)
+		for _, capability := range observation.Capabilities {
+			statuses[capability.SignalType] = capability.Status
+		}
+		for _, signalType := range []model.SignalType{
+			model.SignalTypeNetworkRequest, model.SignalTypePageContent,
+			model.SignalTypeScriptURL, model.SignalTypeIframeURL, model.SignalTypeCookie,
+		} {
+			if got := statuses[signalType]; got != analysis.CapabilityIncomplete {
+				t.Errorf("capability %q = %q, want incomplete after final URL loss", signalType, got)
+			}
+		}
+		if got := statuses[model.SignalTypeNetworkResponse]; got != analysis.CapabilityComplete {
+			t.Errorf("network response capability = %q, want complete despite final URL loss", got)
 		}
 	})
 

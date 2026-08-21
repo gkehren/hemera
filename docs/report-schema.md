@@ -78,7 +78,10 @@ unavailable coverage.
 Coverage completeness is evaluated per capability, not per analyzer. Analyzers
 declare structured per-`SignalType` observation completeness derived from
 bounded capture state; analyzer-wide success does not imply that every
-detector-relevant signal capability is complete. For example, a response body
+detector-relevant signal capability is complete. An analyzer that declares any
+capability coverage is capability-aware: signal types it does not declare are
+never treated as complete, so an unobserved channel cannot inherit an
+analyzer's execution success. For example, a response body
 truncated at the HTTP ceiling leaves page-content and static-resource
 capabilities incomplete while response headers remain complete, so a rule whose
 decisive marker could sit beyond the truncation point becomes

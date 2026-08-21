@@ -284,12 +284,17 @@ Capability completeness closes this gap: analyzers declare per-`SignalType`
 coverage derived from structured capture state (truncation flags and channel
 ceilings), never from warning strings. The HTTP analyzer marks page-content and
 static-resource capabilities incomplete when the body or decoded HTML was
-bounded or resource extraction stopped early; the browser analyzer tracks
-request, response, DOM, script, iframe, and cookie channels independently.
-Declared capability state wins during coverage evaluation; signal types an
-analyzer did not declare fall back to its execution status so analyzers without
-bounded evidence channels keep their semantics. Warnings remain presentation
-diagnostics only.
+bounded or resource extraction stopped early; the browser tracks
+request, response, DOM, script, iframe, and cookie channels independently, and
+keeps signals whose provenance URL comes from the final URL inconclusive when
+that URL had to be omitted. Coverage evaluation is scoped per analyzer: one
+that declared any capability coverage is capability-aware, and signal types it
+did not declare are never complete because analyzer-wide success cannot vouch
+for channels it never observed. Analyzers without capability declarations keep
+their previous execution-status semantics. An isolated channel failure, such as
+a failed cookie query on an otherwise clean capture, stays scoped to its own
+capability instead of downgrading unrelated channels. Warnings remain
+presentation diagnostics only.
 
 ### Signal model
 

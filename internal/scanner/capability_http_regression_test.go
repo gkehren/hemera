@@ -138,8 +138,6 @@ func TestRealHTTPResourceLimitBeforeDecisiveScriptIsInsufficientCoverage(t *test
 			{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeDOMSelector, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeJSGlobal, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityComplete},
 			{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityComplete},
