@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gkehren/hemera/internal/analysis"
@@ -212,22 +213,102 @@ func newStubEngine(t *testing.T, analyzer stubAnalyzer, policy scanner.FailurePo
 }
 
 // restoreQuietProgressView replaces the live progress view with a fake that
-// drains the message channel until the scan goroutine closes it and returns
-// the final outcome it carried. This mirrors the production ordering in which
-// the view exits only after the outcome is delivered, keeping the deferred
-// cancellation race-free and deterministic.
+// mirrors the production contract: it returns nil only after the scan
+// goroutine delivered its final message and closed the channel, which is the
+// only situation where the real view exits without an error.
 func restoreQuietProgressView(t *testing.T) {
 	t.Helper()
 	original := runProgressView
 	t.Cleanup(func() { runProgressView = original })
-	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, msgs <-chan tui.Msg) (tui.Outcome, error) {
-		var final tui.Outcome
-		for msg := range msgs {
-			if msg.Final {
-				final = msg.Outcome
-			}
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, msgs <-chan tui.Msg) error {
+		for range msgs {
 		}
-		return final, nil
+		return nil
+	}
+}
+
+// TestRunInteractiveScanJoinsScanBeforeReturn proves the cancellation
+// ordering: when the progress view exits early, the scan observes context
+// cancellation and completes its deferred cleanup (for example closing the
+// sandboxed browser session) BEFORE runInteractiveScan returns. os.Exit would
+// otherwise skip that cleanup.
+func TestRunInteractiveScanJoinsScanBeforeReturn(t *testing.T) {
+	started := make(chan struct{})
+	original := runProgressView
+	t.Cleanup(func() { runProgressView = original })
+	// The view "exits" only once the analyzer is mid-flight, exactly like a
+	// Ctrl+C arriving during a live scan: the model quits cleanly, so the
+	// real RunProgress returns the view-canceled sentinel rather than nil.
+	runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+		<-started
+		return tui.ErrViewCanceled
+	}
+
+	var orderMu sync.Mutex
+	var order []string
+	cleanupDone := make(chan struct{})
+	engine := newStubEngine(t, stubAnalyzer{
+		source: analysis.SourceHTTP,
+		observe: func(ctx context.Context, _ analysis.Target) (analysis.Observation, error) {
+			close(started)
+			<-ctx.Done() // analyzer is mid-flight when the view exits
+			orderMu.Lock()
+			order = append(order, "cleanup")
+			orderMu.Unlock()
+			close(cleanupDone)
+			return analysis.Observation{Source: analysis.SourceHTTP}, ctx.Err()
+		},
+	}, scanner.FailurePolicyContinue)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://example.test/"}
+	code := runInteractiveScan(context.Background(), opts, &stdout, &stderr, engine)
+	orderMu.Lock()
+	order = append(order, "returned")
+	defer orderMu.Unlock()
+
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "canceled") {
+		t.Errorf("stderr = %q, want cancellation note", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "scan failed") {
+		t.Errorf("stderr = %q, want no scan-failure report for a user cancel", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want no report", stdout.String())
+	}
+	select {
+	case <-cleanupDone:
+	default:
+		t.Fatal("analyzer cleanup did not complete before runInteractiveScan returned")
+	}
+	if len(order) != 2 || order[0] != "cleanup" || order[1] != "returned" {
+		t.Fatalf("ordering = %#v, want [cleanup returned]", order)
+	}
+}
+
+// TestRunInteractiveScanDetachesProgressCallback proves a Scanner that went
+// through the interactive flow can be scanned again without panicking on the
+// closed progress channel.
+func TestRunInteractiveScanDetachesProgressCallback(t *testing.T) {
+	restoreQuietProgressView(t)
+	engine := newStubEngine(t, stubAnalyzer{
+		source:      analysis.SourceHTTP,
+		observation: analysis.Observation{Source: analysis.SourceHTTP},
+	}, scanner.FailurePolicyContinue)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://example.test/"}
+	if code := runInteractiveScan(context.Background(), opts, &stdout, &stderr, engine); code != 0 {
+		t.Fatalf("runInteractiveScan() code = %d", code)
+	}
+
+	// Reusing the engine must be safe: the observer was detached after the
+	// first run, so no event is sent into the closed channel.
+	if _, err := engine.Scan(context.Background(), "https://example.test/"); err != nil {
+		t.Fatalf("second Scan() error = %v, want nil", err)
 	}
 }
 
@@ -239,7 +320,15 @@ func TestRunInteractiveScanHandlesEarlyViewExit(t *testing.T) {
 		wantStderr string
 	}{
 		{
-			name:       "canceled view renders no report",
+			// The realistic Ctrl+C path: the model quits cleanly, so
+			// RunProgress reports the view-canceled sentinel.
+			name:       "view-canceled sentinel renders no report",
+			runErr:     tui.ErrViewCanceled,
+			wantCode:   0,
+			wantStderr: "canceled",
+		},
+		{
+			name:       "context cancellation renders no report",
 			runErr:     context.Canceled,
 			wantCode:   0,
 			wantStderr: "canceled",
@@ -261,12 +350,8 @@ func TestRunInteractiveScanHandlesEarlyViewExit(t *testing.T) {
 			}, scanner.FailurePolicyContinue)
 			original := runProgressView
 			t.Cleanup(func() { runProgressView = original })
-			runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, msgs <-chan tui.Msg) (tui.Outcome, error) {
-				// Drain so the scan goroutine never leaks; the early exit
-				// discards its outcome exactly like the real view.
-				for range msgs {
-				}
-				return tui.Outcome{}, testCase.runErr
+			runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+				return testCase.runErr
 			}
 
 			var stdout, stderr bytes.Buffer

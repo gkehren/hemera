@@ -450,8 +450,10 @@ remains a later goal.
 When launched without arguments on a terminal (stdin and stdout are both character
 devices), the CLI runs an interactive wizard built with the Charm v2 stack
 (`charm.land/huh/v2`, `bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`) in
-`internal/tui`. The wizard collects the scan mode and target URL — validated
-inline with the same `networkguard.ParseURL` policy used at scan time — then a
+`internal/tui`. The wizard collects the scan mode and target URL — syntactically
+validated with the same canonical URL parser (`networkguard.ParseURL`) the
+scanner uses, while the public-destination policy remains enforced
+authoritatively at scan time — then a
 bubbletea view renders live per-analyzer progress driven by the scanner's
 optional `Progress` callback. On completion it prints the styled report
 produced by `report.WriteStyled`, which presents the same secret-minimized

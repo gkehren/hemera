@@ -8,12 +8,9 @@ type ScanEventKind uint8
 const (
 	// ScanEventStarted is emitted immediately before an analyzer runs.
 	ScanEventStarted ScanEventKind = iota
-	// ScanEventCompleted is emitted after an analyzer returned without an
-	// error, regardless of its failure policy.
-	ScanEventCompleted
-	// ScanEventFailed is emitted when an analyzer returned an error. The scan
-	// may still continue when the analyzer uses FailurePolicyContinue.
-	ScanEventFailed
+	// ScanEventFinished is emitted after an analyzer outcome has been
+	// classified. Status carries the canonical analyzer status.
+	ScanEventFinished
 )
 
 // String returns the stable lowercase name of the event kind.
@@ -21,21 +18,22 @@ func (k ScanEventKind) String() string {
 	switch k {
 	case ScanEventStarted:
 		return "started"
-	case ScanEventCompleted:
-		return "completed"
-	case ScanEventFailed:
-		return "failed"
+	case ScanEventFinished:
+		return "finished"
 	default:
 		return fmt.Sprintf("unknown(%d)", uint8(k))
 	}
 }
 
 // ScanEvent reports one analyzer lifecycle transition. Source matches the
-// analyzer's Source() identity and Err is non-nil only for ScanEventFailed.
+// analyzer's Source() identity and Status is set when Kind is
+// ScanEventFinished. Events carry presentation-safe state only: analyzer error
+// details stay in AnalyzerResult.Err, where reporters decide what is safe to
+// disclose, and never reach progress observers.
 type ScanEvent struct {
 	Source string
 	Kind   ScanEventKind
-	Err    error
+	Status AnalyzerStatus
 }
 
 // ProgressFunc receives analyzer lifecycle events while a scan runs. It is

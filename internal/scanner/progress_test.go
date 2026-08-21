@@ -8,6 +8,7 @@ import (
 
 	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/detectors"
+	"github.com/gkehren/hemera/pkg/model"
 )
 
 func TestScanEmitsProgressEventsInAnalyzerOrder(t *testing.T) {
@@ -39,9 +40,9 @@ func TestScanEmitsProgressEventsInAnalyzerOrder(t *testing.T) {
 
 	want := []ScanEvent{
 		{Source: "first", Kind: ScanEventStarted},
-		{Source: "first", Kind: ScanEventCompleted},
+		{Source: "first", Kind: ScanEventFinished, Status: AnalyzerStatusComplete},
 		{Source: "second", Kind: ScanEventStarted},
-		{Source: "second", Kind: ScanEventCompleted},
+		{Source: "second", Kind: ScanEventFinished, Status: AnalyzerStatusComplete},
 	}
 	if !slices.Equal(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -78,9 +79,61 @@ func TestScanEmitsFailedEventForContinuedAnalyzerError(t *testing.T) {
 
 	want := []ScanEvent{
 		{Source: "failing", Kind: ScanEventStarted},
-		{Source: "failing", Kind: ScanEventFailed, Err: analyzerErr},
+		{Source: "failing", Kind: ScanEventFinished, Status: AnalyzerStatusFailed},
 		{Source: "healthy", Kind: ScanEventStarted},
-		{Source: "healthy", Kind: ScanEventCompleted},
+		{Source: "healthy", Kind: ScanEventFinished, Status: AnalyzerStatusComplete},
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("events = %#v, want %#v", events, want)
+	}
+}
+
+// TestScanEmitsPartialStatusForUsefulObservationWithError covers the review
+// requirement: an analyzer that returns useful signals plus a non-fatal error
+// must report the canonical partial status, not a complete failure.
+func TestScanEmitsPartialStatusForUsefulObservationWithError(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := detectors.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzerErr := errors.New("partial capture budget exceeded")
+	partial := analyzerStub{
+		source: "partial",
+		observation: analysis.Observation{
+			Source: "partial",
+			Signals: []model.Signal{{
+				Type: model.SignalTypeScriptURL, Source: "partial",
+				Key: "script", Value: "https://cdn.test/a.js", Confidence: 1,
+			}},
+		},
+		err: analyzerErr,
+	}
+	var events []ScanEvent
+	scanner, err := New(Config{
+		Progress: func(event ScanEvent) {
+			events = append(events, event)
+		},
+		Analyzers: []AnalyzerConfig{
+			{Analyzer: partial, FailurePolicy: FailurePolicyContinue},
+		},
+		RuleSet: ruleSet,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.Scan(context.Background(), "https://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Analyzers) != 1 || result.Analyzers[0].Status != AnalyzerStatusPartial {
+		t.Fatalf("analyzer status = %#v, want partial", result.Analyzers)
+	}
+
+	want := []ScanEvent{
+		{Source: "partial", Kind: ScanEventStarted},
+		{Source: "partial", Kind: ScanEventFinished, Status: AnalyzerStatusPartial},
 	}
 	if !slices.Equal(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -117,7 +170,7 @@ func TestScanEmitsFailedEventWhenAbortPolicyStopsScan(t *testing.T) {
 
 	want := []ScanEvent{
 		{Source: "fatal", Kind: ScanEventStarted},
-		{Source: "fatal", Kind: ScanEventFailed, Err: analyzerErr},
+		{Source: "fatal", Kind: ScanEventFinished, Status: AnalyzerStatusFailed},
 	}
 	if !slices.Equal(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -158,8 +211,7 @@ func TestScanEventKindString(t *testing.T) {
 		want string
 	}{
 		{ScanEventStarted, "started"},
-		{ScanEventCompleted, "completed"},
-		{ScanEventFailed, "failed"},
+		{ScanEventFinished, "finished"},
 		{ScanEventKind(99), "unknown(99)"},
 	}
 	for _, testCase := range tests {

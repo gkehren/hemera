@@ -20,6 +20,13 @@ func TestValidateTargetURL(t *testing.T) {
 		{name: "unsupported scheme", input: "ftp://example.com", wantErr: true},
 		{name: "missing host", input: "https://", wantErr: true},
 		{name: "embedded credentials", input: "https://user:pass@example.com", wantErr: true},
+		{
+			// Loopback is syntactically valid on purpose: the wizard only
+			// applies the canonical URL parser, while the public-destination
+			// policy stays authoritative at scan time (covered by the
+			// httpanalyzer ErrInitialTarget fixtures).
+			name: "loopback passes syntactic validation", input: "http://127.0.0.1", wantErr: false,
+		},
 	}
 	for _, testCase := range tests {
 		testCase := testCase

@@ -22,6 +22,14 @@ func eventMsg(event scanner.ScanEvent) progressEventMsg {
 	return progressEventMsg(Msg{Event: event})
 }
 
+func startedEvent(source string) progressEventMsg {
+	return eventMsg(scanner.ScanEvent{Source: source, Kind: scanner.ScanEventStarted})
+}
+
+func finishedEvent(source string, status scanner.AnalyzerStatus) progressEventMsg {
+	return eventMsg(scanner.ScanEvent{Source: source, Kind: scanner.ScanEventFinished, Status: status})
+}
+
 func finalMsg(outcome Outcome) progressEventMsg {
 	return progressEventMsg(Msg{Final: true, Outcome: outcome})
 }
@@ -40,17 +48,13 @@ func TestProgressModelTracksStageLifecycle(t *testing.T) {
 	t.Parallel()
 	model := newTestModel()
 
-	model = update(t, model, eventMsg(scanner.ScanEvent{
-		Source: "http_analyzer", Kind: scanner.ScanEventStarted,
-	}))
+	model = update(t, model, startedEvent("http_analyzer"))
 	view := model.View().Content
 	if !strings.Contains(view, "HTTP analysis…") {
 		t.Errorf("running view = %q, want running HTTP stage", view)
 	}
 
-	model = update(t, model, eventMsg(scanner.ScanEvent{
-		Source: "http_analyzer", Kind: scanner.ScanEventCompleted,
-	}))
+	model = update(t, model, finishedEvent("http_analyzer", scanner.AnalyzerStatusComplete))
 	view = model.View().Content
 	if !strings.Contains(view, "✔ HTTP analysis") {
 		t.Errorf("completed view = %q, want completed HTTP stage", view)
@@ -60,32 +64,63 @@ func TestProgressModelTracksStageLifecycle(t *testing.T) {
 	}
 }
 
-func TestProgressModelShowsFailedAnalyzerError(t *testing.T) {
+func TestProgressModelShowsSafeTextForFailedAnalyzer(t *testing.T) {
 	t.Parallel()
 	model := newTestModel()
 
-	model = update(t, model, eventMsg(scanner.ScanEvent{
-		Source: "dns_tls_analyzer", Kind: scanner.ScanEventFailed,
-		Err: errors.New("lookup exploded\nsecond line"),
-	}))
+	model = update(t, model, finishedEvent("dns_tls_analyzer", scanner.AnalyzerStatusFailed))
 	view := model.View().Content
 	if !strings.Contains(view, "✘ DNS/TLS analysis") {
 		t.Errorf("view = %q, want failed DNS/TLS stage", view)
 	}
-	if !strings.Contains(view, "lookup exploded") {
-		t.Errorf("view = %q, want first error line", view)
+	if !strings.Contains(view, failedStageDetail) {
+		t.Errorf("view = %q, want the controlled failure detail", view)
 	}
-	if strings.Contains(view, "second line") {
-		t.Errorf("view = %q, want only the first error line", view)
+}
+
+// TestProgressModelRendersPartialDistinctFromFailed covers the review
+// requirement: an analyzer with useful evidence plus a non-fatal error must
+// render as partial, never as a complete failure.
+func TestProgressModelRendersPartialDistinctFromFailed(t *testing.T) {
+	t.Parallel()
+	model := newTestModel()
+
+	model = update(t, model, startedEvent("browser_analyzer"))
+	model = update(t, model, finishedEvent("browser_analyzer", scanner.AnalyzerStatusPartial))
+	view := model.View().Content
+	if !strings.Contains(view, "◐ Browser analysis") || !strings.Contains(view, "partial") {
+		t.Errorf("view = %q, want a distinct partial stage", view)
+	}
+	if strings.Contains(view, "✘") || strings.Contains(view, failedStageDetail) {
+		t.Errorf("view = %q, want partial not rendered as failure", view)
+	}
+}
+
+func TestProgressModelNeverShowsRawErrors(t *testing.T) {
+	t.Parallel()
+	model := newTestModel()
+	model = update(t, model, eventMsg(scanner.ScanEvent{
+		Source: "browser_analyzer", Kind: scanner.ScanEventStarted,
+	}))
+	model = update(t, model, finalMsg(Outcome{
+		Err: errors.New("navigation failed for https://example.test/?token=secret\nANSI\x1b[31mred"),
+	}))
+
+	view := model.View().Content
+	for _, leaked := range []string{"token=secret", "\x1b[31m", "navigation failed"} {
+		if strings.Contains(view, leaked) {
+			t.Errorf("view leaks analyzer error detail %q:\n%s", leaked, view)
+		}
+	}
+	if !strings.Contains(view, failedStageDetail) {
+		t.Errorf("view = %q, want the controlled failure detail", view)
 	}
 }
 
 func TestProgressModelMarksUnfinishedStagesOnFailure(t *testing.T) {
 	t.Parallel()
 	model := newTestModel()
-	model = update(t, model, eventMsg(scanner.ScanEvent{
-		Source: "http_analyzer", Kind: scanner.ScanEventCompleted,
-	}))
+	model = update(t, model, finishedEvent("http_analyzer", scanner.AnalyzerStatusComplete))
 
 	model = update(t, model, finalMsg(Outcome{Err: errors.New("boom")}))
 	view := model.View().Content
@@ -124,6 +159,9 @@ func TestProgressModelCancelViaCtrlC(t *testing.T) {
 	if !canceled.canceled {
 		t.Fatal("ctrl+c did not set the canceled flag")
 	}
+	if canceled.outcome != nil {
+		t.Fatal("ctrl+c stored an outcome; RunProgress would treat it as completion")
+	}
 	if cmd == nil {
 		t.Fatal("ctrl+c did not return a quit command")
 	}
@@ -159,9 +197,7 @@ func TestProgressModelShowsFullBarOnSuccess(t *testing.T) {
 		model = update(t, model, eventMsg(scanner.ScanEvent{
 			Source: source, Kind: scanner.ScanEventStarted,
 		}))
-		model = update(t, model, eventMsg(scanner.ScanEvent{
-			Source: source, Kind: scanner.ScanEventCompleted,
-		}))
+		model = update(t, model, finishedEvent(source, scanner.AnalyzerStatusComplete))
 	}
 
 	if strings.Contains(model.View().Content, "100%") {

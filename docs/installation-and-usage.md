@@ -107,9 +107,11 @@ Hemera mandates that Chromium's system sandbox remains active:
 
 Run Hemera without arguments in a terminal to start the interactive scan
 wizard. It asks for the scan mode (default or deep) and the target URL —
-validated inline with the same policy the scanner enforces — shows live
-per-analyzer progress, then prints a styled full report in the same visual
-language as the progress view.
+syntactically validated with the same URL parser the scanner uses, while
+destination policy (for example private or loopback addresses) remains
+enforced authoritatively at scan time — shows live per-analyzer progress,
+then prints a styled full report in the same visual language as the progress
+view.
 
 ```text
 Usage:

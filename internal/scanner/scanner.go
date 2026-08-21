@@ -220,24 +220,21 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 			}
 			metadataSources[kind] = configured.source
 		}
-		// Terminal events are emitted only after the observation passes every
-		// contract check so a violating analyzer never reports as completed.
-		if analyzerErr != nil {
-			s.emit(ScanEvent{Source: configured.source, Kind: ScanEventFailed, Err: analyzerErr})
-		} else {
-			s.emit(ScanEvent{Source: configured.source, Kind: ScanEventCompleted})
-		}
-
+		// The canonical status is classified before the terminal event so
+		// progress observers see the same complete/partial/failed semantics
+		// as the report, and only after every contract check passes so a
+		// violating analyzer never reports as finished.
 		observation = observation.Clone()
 		status := AnalyzerStatusComplete
 		if analyzerErr != nil {
-			if configured.policy == FailurePolicyAbort {
-				return Result{}, fmt.Errorf("analyzer %q: %w", configured.source, analyzerErr)
-			}
 			status = AnalyzerStatusFailed
 			if len(observation.Signals) > 0 || !observation.Metadata.Empty() {
 				status = AnalyzerStatusPartial
 			}
+		}
+		s.emit(ScanEvent{Source: configured.source, Kind: ScanEventFinished, Status: status})
+		if analyzerErr != nil && configured.policy == FailurePolicyAbort {
+			return Result{}, fmt.Errorf("analyzer %q: %w", configured.source, analyzerErr)
 		}
 
 		result.Analyzers = append(result.Analyzers, AnalyzerResult{

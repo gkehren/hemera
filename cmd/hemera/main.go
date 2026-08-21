@@ -216,18 +216,25 @@ func runInteractive(ctx context.Context, stdout, stderr io.Writer) int {
 }
 
 // runInteractiveScan executes the wizard-selected scan while rendering the
-// live progress view, then prints the styled summary and text report.
+// live progress view, then prints the styled report.
 func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io.Writer, engine *scanner.Scanner) int {
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// The buffer comfortably exceeds the two events per analyzer that a scan
-	// emits so progress sends never block after the view exits.
+	// emits, and sends are additionally guarded by scanCtx so a vanished view
+	// can never block the scan from finishing and unwinding.
 	msgs := make(chan tui.Msg, 32)
+	sendMsg := func(msg tui.Msg) {
+		select {
+		case msgs <- msg:
+		case <-scanCtx.Done():
+		}
+	}
 	if engine == nil {
 		var err error
 		engine, err = newScannerEngine(opts.Deep, func(event scanner.ScanEvent) {
-			msgs <- tui.Msg{Event: event}
+			sendMsg(tui.Msg{Event: event})
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
@@ -235,22 +242,35 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 		}
 	} else {
 		engine.SetProgress(func(event scanner.ScanEvent) {
-			msgs <- tui.Msg{Event: event}
+			sendMsg(tui.Msg{Event: event})
 		})
 	}
+
+	// Detach the observer once the scan joined so a reused Scanner can never
+	// emit into the closed channel (a send on a closed channel would panic).
+	defer engine.SetProgress(nil)
+
+	// scanDone is independent of the UI channel: runInteractiveScan must not
+	// return while the scan goroutine is alive because os.Exit would skip its
+	// deferred cleanup, notably closing the sandboxed browser session.
+	scanDone := make(chan tui.Outcome, 1)
 	go func() {
 		result, scanErr := engine.Scan(scanCtx, opts.URL)
-		msgs <- tui.Msg{Final: true, Outcome: tui.Outcome{Result: result, Err: scanErr}}
+		sendMsg(tui.Msg{Final: true, Outcome: tui.Outcome{Result: result, Err: scanErr}})
 		close(msgs)
+		scanDone <- tui.Outcome{Result: result, Err: scanErr}
 	}()
 
-	outcome, runErr := runProgressView(scanCtx, stdout, engine.Sources(), opts.URL, msgs)
+	runErr := runProgressView(scanCtx, stdout, engine.Sources(), opts.URL, msgs)
 	cancel()
+	outcome := <-scanDone
 
 	// A non-nil view error means the progress view exited before the scan
-	// outcome was delivered, so there is no report to render.
+	// outcome was delivered, so there is no report to render. Both the
+	// view-canceled sentinel and a context cancellation report a deliberate
+	// user cancellation, not a scan failure.
 	if runErr != nil {
-		if errors.Is(runErr, context.Canceled) {
+		if errors.Is(runErr, tui.ErrViewCanceled) || errors.Is(runErr, context.Canceled) {
 			fmt.Fprintln(stderr, "hemera: canceled")
 			return 0
 		}

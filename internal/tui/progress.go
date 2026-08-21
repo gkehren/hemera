@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -35,6 +36,7 @@ const (
 	stagePending stageState = iota
 	stageRunning
 	stageDone
+	stagePartial
 	stageFailed
 )
 
@@ -42,8 +44,17 @@ type stage struct {
 	source string
 	label  string
 	state  stageState
-	errMsg string
 }
+
+// failedStageDetail is the only text ever shown for a failed stage. Progress
+// events intentionally carry no analyzer error details: they may embed
+// untrusted input (for example request URLs), and minimization is the
+// report's job, not the terminal's.
+const failedStageDetail = "observation unavailable"
+
+// partialStageDetail mirrors the report vocabulary for an analyzer that
+// produced useful evidence plus a non-fatal error.
+const partialStageDetail = "partial observation"
 
 // progressEventMsg wraps one progress update for the bubbletea loop.
 type progressEventMsg Msg
@@ -53,6 +64,7 @@ var (
 	pendingStyle   = lipgloss.NewStyle().Faint(true)
 	runningStyle   = lipgloss.NewStyle()
 	doneStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+	partialStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	failedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	errDetailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Faint(true)
 	titleStyle     = lipgloss.NewStyle().Bold(true).MarginBottom(1)
@@ -166,12 +178,14 @@ func (m *progressModel) applyEvent(event scanner.ScanEvent) {
 		switch event.Kind {
 		case scanner.ScanEventStarted:
 			m.stages[index].state = stageRunning
-		case scanner.ScanEventCompleted:
-			m.stages[index].state = stageDone
-		case scanner.ScanEventFailed:
-			m.stages[index].state = stageFailed
-			if event.Err != nil {
-				m.stages[index].errMsg = event.Err.Error()
+		case scanner.ScanEventFinished:
+			switch event.Status {
+			case scanner.AnalyzerStatusComplete:
+				m.stages[index].state = stageDone
+			case scanner.AnalyzerStatusPartial:
+				m.stages[index].state = stagePartial
+			default:
+				m.stages[index].state = stageFailed
 			}
 		}
 		return
@@ -192,7 +206,7 @@ func (m *progressModel) settledFraction() float64 {
 	}
 	settled := 0.0
 	for _, s := range m.stages {
-		if s.state == stageDone || s.state == stageFailed {
+		if s.state == stageDone || s.state == stagePartial || s.state == stageFailed {
 			settled++
 		}
 	}
@@ -210,8 +224,12 @@ func (m progressModel) View() tea.View {
 	for _, s := range m.stages {
 		b.WriteString(renderStage(s, m.spinner.View()))
 		b.WriteString("\n")
-		if s.errMsg != "" {
-			b.WriteString(errDetailStyle.Render("    " + firstLine(s.errMsg)))
+		switch s.state {
+		case stageFailed:
+			b.WriteString(errDetailStyle.Render("    " + failedStageDetail))
+			b.WriteString("\n")
+		case stagePartial:
+			b.WriteString(pendingStyle.Render("    " + partialStageDetail))
 			b.WriteString("\n")
 		}
 	}
@@ -239,6 +257,9 @@ func renderStage(s stage, spinnerView string) string {
 		return runningStyle.Render(fmt.Sprintf(" %s %s…", spinnerView, s.label))
 	case stageDone:
 		return doneStyle.Render(fmt.Sprintf(" ✔ %s", s.label))
+	case stagePartial:
+		return partialStyle.Render(fmt.Sprintf(" ◐ %s", s.label)) +
+			pendingStyle.Render(" · partial")
 	case stageFailed:
 		return failedStyle.Render(fmt.Sprintf(" ✘ %s", s.label))
 	default:
@@ -246,28 +267,29 @@ func renderStage(s stage, spinnerView string) string {
 	}
 }
 
-func firstLine(text string) string {
-	if index := strings.IndexByte(text, '\n'); index >= 0 {
-		return text[:index]
-	}
-	return text
-}
+// ErrViewCanceled reports that the progress view exited before the scan's
+// final message arrived, typically because the user pressed Ctrl+C. The scan
+// itself observes context cancellation independently through the caller's
+// completion channel.
+var ErrViewCanceled = errors.New("progress view canceled")
 
 // RunProgress renders live analyzer progress until the program exits because
 // the scan finished or the user canceled it. The msgs channel must deliver
 // exactly one final Msg (with Final set) and then be closed by the producer.
-// RunProgress returns the authoritative scan outcome on the normal path; when
-// the view exits early it returns a zero Outcome and an error.
-func RunProgress(ctx context.Context, output io.Writer, sources []string, target string, msgs <-chan Msg) (Outcome, error) {
+// It returns ErrViewCanceled when the view exits early; the authoritative
+// scan outcome stays with the caller's own completion channel.
+func RunProgress(ctx context.Context, output io.Writer, sources []string, target string, msgs <-chan Msg) error {
 	model := newProgressModel(sources, target, msgs)
 	program := tea.NewProgram(model, tea.WithOutput(output), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil {
-		return Outcome{}, fmt.Errorf("run progress view: %w", err)
+		return fmt.Errorf("run progress view: %w", err)
 	}
 	finished, ok := finalModel.(progressModel)
 	if !ok || finished.outcome == nil {
-		return Outcome{}, context.Canceled
+		// A clean quit without the final message means user cancellation:
+		// bubbletea reports no error for a model-initiated tea.Quit.
+		return ErrViewCanceled
 	}
-	return *finished.outcome, nil
+	return nil
 }
