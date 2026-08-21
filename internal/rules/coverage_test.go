@@ -82,8 +82,10 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		Type: model.SignalTypeScriptURL, Source: "http_analyzer", Key: scriptKey, Confidence: 1,
 	}}
 
-	allComplete := map[string]bool{"http_analyzer": true, "browser_analyzer": true, "dns_tls_analyzer": true}
-	httpOnlyComplete := map[string]bool{"http_analyzer": true, "browser_analyzer": false, "dns_tls_analyzer": true}
+	allComplete := CapabilityCompleter(func(string, model.SignalType) bool { return true })
+	httpOnlyComplete := CapabilityCompleter(func(source string, _ model.SignalType) bool {
+		return source != "browser_analyzer"
+	})
 
 	t.Run("single evidence matched", func(t *testing.T) {
 		t.Parallel()
@@ -169,6 +171,80 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		}
 		if res.State != CoverageStateNotMatched {
 			t.Fatalf("State = %v, want CoverageStateNotMatched", res.State)
+		}
+	})
+
+	t.Run("capability completeness is scoped to the predicate signal type", func(t *testing.T) {
+		t.Parallel()
+		// The browser analyzer completed its page_content channel but its
+		// script channel was truncated. A page_content predicate is then
+		// conclusively negative while a script predicate stays unknown.
+		contentKey := "challenge-marker"
+		contentEvidence := &Evidence{
+			ID: "content", Group: "content", Type: model.SignalTypePageContent,
+			Value: &TextPattern{Contains: &contentKey}, Weight: 75,
+		}
+		completer := CapabilityCompleter(func(source string, signalType model.SignalType) bool {
+			if source != "browser_analyzer" {
+				return true
+			}
+			return signalType != model.SignalTypeScriptURL
+		})
+		res, err := EvaluateConditionCoverage(Condition{Signal: contentEvidence}, nil, completer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.State != CoverageStateNotMatched {
+			t.Fatalf("page_content State = %v, want CoverageStateNotMatched", res.State)
+		}
+		scriptRes, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, completer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if scriptRes.State != CoverageStateUnknown {
+			t.Fatalf("script_url State = %v, want CoverageStateUnknown", scriptRes.State)
+		}
+	})
+
+	t.Run("explicit source constraint consults that source's capability", func(t *testing.T) {
+		t.Parallel()
+		browserSource := "browser_analyzer"
+		browserScriptEvidence := &Evidence{
+			ID: "browser-script", Group: "script", Type: model.SignalTypeScriptURL,
+			Source: &TextPattern{Exact: &browserSource},
+			Key:    &TextPattern{Exact: &scriptKey}, Weight: 75,
+		}
+		completer := CapabilityCompleter(func(source string, signalType model.SignalType) bool {
+			return source == "http_analyzer" && signalType == model.SignalTypeScriptURL
+		})
+		res, err := EvaluateConditionCoverage(Condition{Signal: browserScriptEvidence}, nil, completer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.State != CoverageStateUnknown {
+			t.Fatalf("State = %v, want CoverageStateUnknown", res.State)
+		}
+		if !slices.Equal(res.IncompleteSources, []string{"browser_analyzer"}) {
+			t.Fatalf("IncompleteSources = %#v, want [browser_analyzer]", res.IncompleteSources)
+		}
+	})
+
+	t.Run("incomplete unrelated capability does not affect other predicates", func(t *testing.T) {
+		t.Parallel()
+		// HTTP page_content was truncated, but this header predicate does not
+		// depend on that capability and must stay conclusive.
+		completer := CapabilityCompleter(func(source string, signalType model.SignalType) bool {
+			return !(source == "http_analyzer" && signalType == model.SignalTypePageContent)
+		})
+		res, err := EvaluateConditionCoverage(Condition{Signal: headerEvidence}, nil, completer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.State != CoverageStateNotMatched {
+			t.Fatalf("State = %v, want CoverageStateNotMatched", res.State)
+		}
+		if len(res.IncompleteSources) != 0 {
+			t.Fatalf("IncompleteSources = %#v, want empty", res.IncompleteSources)
 		}
 	})
 }

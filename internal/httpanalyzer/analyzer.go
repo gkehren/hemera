@@ -95,15 +95,28 @@ type Redirect struct {
 
 // Result contains observations from one bounded HTTP navigation. URL fields
 // are sanitized before storage so diagnostics cannot disclose query values.
+// Truncation fields expose structured completion state for capability-level
+// coverage evaluation; they must not be inferred from warnings.
 type Result struct {
-	RequestedURL  string
-	FinalURL      string
-	StatusCode    int
-	Redirects     []Redirect
-	Signals       []model.Signal
+	RequestedURL string
+	FinalURL     string
+	StatusCode   int
+	Redirects    []Redirect
+	Signals      []model.Signal
+	// BodyTruncated reports that raw response body bytes were bounded.
 	BodyTruncated bool
-	Warnings      []string
-	TLS           *analysis.TLSMetadata
+	// HTMLTruncated reports that the charset-decoded HTML used for matching
+	// was bounded below the raw body ceiling.
+	HTMLTruncated bool
+	// PageContentIncomplete reports that HTML decoding failed before page
+	// content evidence could be produced completely.
+	PageContentIncomplete bool
+	// ResourcesIncomplete reports that static-resource extraction did not run
+	// to completion because the resource ceiling was reached or parsing
+	// stopped early.
+	ResourcesIncomplete bool
+	Warnings            []string
+	TLS                 *analysis.TLSMetadata
 }
 
 // Analyzer performs one safe HTTP navigation.
@@ -134,7 +147,11 @@ func (*Analyzer) Source() string {
 }
 
 // Observe adapts one HTTP navigation to the analyzer-agnostic observation
-// contract consumed by scan orchestration.
+// contract consumed by scan orchestration. On success it declares
+// capability-level coverage derived from structured completion state so that
+// bounded evidence channels cannot produce false conclusive negatives. Failed
+// navigations return an undeclared capability set; scan orchestration then
+// falls back to the analyzer execution status.
 func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
 	observation := analysis.Observation{Source: source}
 	result, err := a.Analyze(ctx, target.URL)
@@ -150,12 +167,36 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 	}
 	observation.Signals = append([]model.Signal{}, result.Signals...)
 	observation.Warnings = append([]string{}, result.Warnings...)
+	observation.Capabilities = capabilityCoverage(result)
 	observation.Metadata.HTTP = &analysis.HTTPMetadata{
 		RequestedURL: result.RequestedURL, FinalURL: result.FinalURL,
 		StatusCode: result.StatusCode, Redirects: redirects,
 		BodyTruncated: result.BodyTruncated, TLS: cloneTLSMetadata(result.TLS),
 	}
 	return observation, nil
+}
+
+// capabilityCoverage derives per-signal-type coverage from the structured
+// completion state of one successful HTTP navigation.
+func capabilityCoverage(result Result) []analysis.CapabilityCoverage {
+	contentTruncated := result.BodyTruncated || result.HTMLTruncated || result.PageContentIncomplete
+	resourcesTruncated := contentTruncated || result.ResourcesIncomplete
+	status := func(incomplete bool) analysis.CapabilityStatus {
+		if incomplete {
+			return analysis.CapabilityIncomplete
+		}
+		return analysis.CapabilityComplete
+	}
+	return []analysis.CapabilityCoverage{
+		{SignalType: model.SignalTypeRedirect, Status: status(false)},
+		{SignalType: model.SignalTypeNetworkResponse, Status: status(false)},
+		{SignalType: model.SignalTypeResponseHeader, Status: status(false)},
+		{SignalType: model.SignalTypeCookie, Status: status(false)},
+		{SignalType: model.SignalTypePageContent, Status: status(contentTruncated)},
+		{SignalType: model.SignalTypeScriptURL, Status: status(resourcesTruncated)},
+		{SignalType: model.SignalTypeIframeURL, Status: status(resourcesTruncated)},
+		{SignalType: model.SignalTypeResourceHost, Status: status(resourcesTruncated)},
+	}
 }
 
 // Analyze performs a single GET navigation and returns normalized observations.
@@ -464,16 +505,22 @@ func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL 
 	if _, params, err := mime.ParseMediaType(contentType); err == nil {
 		if label := params["charset"]; label != "" {
 			if encoding, _ := charset.Lookup(label); encoding == nil {
+				result.PageContentIncomplete = true
+				result.ResourcesIncomplete = true
 				return fmt.Errorf("decode HTML charset: unsupported charset %q", label)
 			}
 		}
 	}
 	reader, err := charset.NewReader(bytes.NewReader(body), contentType)
 	if err != nil {
+		result.PageContentIncomplete = true
+		result.ResourcesIncomplete = true
 		return fmt.Errorf("decode HTML charset: %w", err)
 	}
 	utf8Body, err := io.ReadAll(io.LimitReader(contextReader{ctx: ctx, reader: reader}, a.config.MaxBodyBytes+1))
 	if err != nil {
+		result.PageContentIncomplete = true
+		result.ResourcesIncomplete = true
 		return fmt.Errorf("decode HTML charset: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -484,6 +531,7 @@ func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL 
 		for len(utf8Body) > 0 && !utf8.Valid(utf8Body) {
 			utf8Body = utf8Body[:len(utf8Body)-1]
 		}
+		result.HTMLTruncated = true
 		result.Warnings = append(result.Warnings, fmt.Sprintf("decoded HTML was truncated at %d bytes", a.config.MaxBodyBytes))
 	}
 	if err := appendSignal(result, model.Signal{
@@ -495,13 +543,16 @@ func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL 
 
 	baseURL, err := firstBaseURL(ctx, utf8Body, documentURL)
 	if err != nil {
+		result.ResourcesIncomplete = true
 		return err
 	}
 	limited, err := collectHTMLResources(ctx, result, utf8Body, documentURL, baseURL, a.config.MaxHTMLResources)
 	if err != nil {
+		result.ResourcesIncomplete = true
 		return err
 	}
 	if limited {
+		result.ResourcesIncomplete = true
 		appendWarningOnce(result, fmt.Sprintf("HTML resource extraction stopped at %d resources", a.config.MaxHTMLResources))
 	}
 	return ctx.Err()

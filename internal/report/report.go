@@ -18,7 +18,7 @@ import (
 
 const (
 	// SchemaVersion identifies the current experimental JSON report contract.
-	SchemaVersion = 5
+	SchemaVersion = 6
 )
 
 // Report is the deterministic representation shared by text and JSON renderers.

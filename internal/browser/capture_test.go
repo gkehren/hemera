@@ -299,6 +299,12 @@ func TestCaptureCollectionLimits(t *testing.T) {
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Errorf("DOM truncation = %t, %d bytes", result.DOMTruncated, len(result.DOM))
 	}
+	if !result.RequestsTruncated || !result.ResponsesTruncated || !result.ScriptURLsTruncated ||
+		!result.IframeURLsTruncated || !result.CookiesTruncated {
+		t.Errorf("channel truncation flags = requests %t responses %t scripts %t iframes %t cookies %t, want all set",
+			result.RequestsTruncated, result.ResponsesTruncated, result.ScriptURLsTruncated,
+			result.IframeURLsTruncated, result.CookiesTruncated)
+	}
 	wants := []string{warningRequestLimit, warningResponseLimit, warningURLLimit, warningScriptLimit, warningIframeLimit, warningDOMLimit, warningCookieLimit}
 	for _, warning := range wants {
 		if count := countString(result.Warnings, warning); count != 1 {
@@ -324,6 +330,14 @@ func TestBoundedDOMSnapshotPreservesSerializerLimits(t *testing.T) {
 	if fmt.Sprint(result.ScriptURLs) != fmt.Sprint([]string{"https://example.test/app.js?redacted"}) ||
 		fmt.Sprint(result.IframeURLs) != fmt.Sprint([]string{"https://example.test/frame"}) {
 		t.Fatalf("bounded resources were not cleaned: %#v", result)
+	}
+	if !result.ScriptURLsTruncated || !result.IframeURLsTruncated {
+		t.Errorf("script/iframe truncation flags = %t/%t, want both set by serializer limits",
+			result.ScriptURLsTruncated, result.IframeURLsTruncated)
+	}
+	if result.RequestsTruncated || result.ResponsesTruncated || result.CookiesTruncated {
+		t.Errorf("unrelated channel flags = requests %t responses %t cookies %t, want all clear",
+			result.RequestsTruncated, result.ResponsesTruncated, result.CookiesTruncated)
 	}
 	for _, warning := range []string{warningDOMLimit, warningScriptLimit, warningIframeLimit, warningURLLimit} {
 		if count := countString(result.Warnings, warning); count != 1 {

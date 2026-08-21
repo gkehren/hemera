@@ -1,8 +1,8 @@
-# JSON report schema V5
+# JSON report schema V6
 
 `hemera scan --format json <url>` writes one JSON document to stdout. Input and
 scan errors are written to stderr and do not enter the JSON document. The
-top-level `schema_version` is mandatory and is currently `5`.
+top-level `schema_version` is mandatory and is currently `6`.
 
 > **Compatibility status: experimental.** Hemera has not published its first
 > stable release. JSON is the versioned automation interface, but the current
@@ -66,13 +66,25 @@ conflict penalties.
 conclusively prove that the detection criteria (`minimum_score`,
 `minimum_evidence`, and prerequisites) could not be satisfied.
 `insufficient_coverage` means the rule was not detected, but the upper bound of
-potential evidence achievable from incomplete observation channels could have
-satisfied `minimum_score`, `minimum_evidence`, and prerequisites;
-`incomplete_sources` lists those stable source identities. A detected rule
-remains `detected` when retained evidence is sufficient even if another part of
-an analyzer result was partial. The `detected` boolean remains for convenient
-positive-result filtering, but consumers must use `status` to distinguish a
-conclusive negative from unavailable coverage.
+potential evidence achievable from incomplete observation capabilities could
+have satisfied `minimum_score`, `minimum_evidence`, and prerequisites;
+`incomplete_sources` lists the stable source identities of those incomplete
+capabilities. A detected rule remains `detected` when retained evidence is
+sufficient even if another part of an analyzer result was partial. The
+`detected` boolean remains for convenient positive-result filtering, but
+consumers must use `status` to distinguish a conclusive negative from
+unavailable coverage.
+
+Coverage completeness is evaluated per capability, not per analyzer. Analyzers
+declare structured per-`SignalType` observation completeness derived from
+bounded capture state; analyzer-wide success does not imply that every
+detector-relevant signal capability is complete. For example, a response body
+truncated at the HTTP ceiling leaves page-content and static-resource
+capabilities incomplete while response headers remain complete, so a rule whose
+decisive marker could sit beyond the truncation point becomes
+`insufficient_coverage` instead of a false `not_detected`, while a rule that
+depends only on complete headers stays conclusive. Incomplete capabilities that
+a rule does not depend on never downgrade it.
 
 Observation capabilities are derived per `SignalType` and explicit source
 constraints in rule condition trees. Condition trees evaluate tri-state coverage
@@ -154,6 +166,17 @@ changes.
 
 ### Schema history
 
+Report V6 refines `status` and `incomplete_sources` from analyzer-level to
+capability-level coverage. Analyzers now declare structured per-`SignalType`
+observation completeness derived from bounded capture state, so a successful
+analyzer observation with a truncated evidence channel (bounded HTTP body or
+resource extraction, bounded browser DOM, request, response, script, iframe, or
+cookie capture) no longer produces a false conclusive `not_detected` for
+evidence beyond the truncation point; such rules become
+`insufficient_coverage`. Incomplete capabilities that a rule does not depend on
+do not downgrade it, and retained decisive evidence still detects. V5 consumers
+must not interpret V6 as V5.
+
 Report V5 refines detection `status` and `incomplete_sources` with score-aware,
 capability-based condition coverage. An incomplete analyzer no longer causes
 false `not_detected` when supporting evidence is observed alongside unobserved
@@ -179,7 +202,7 @@ value, while V2 exposes zero for a non-selected correlated predicate and retains
 that weighted value in `raw_contribution`. V2 also added positive evidence
 `group` and `positive_evidence_groups`.
 
-Consumers must dispatch on `schema_version`. The current CLI emits V5; it does
+Consumers must dispatch on `schema_version`. The current CLI emits V6; it does
 not offer an older output mode. An incompatible future report requires a new
 `schema_version` even during pre-release development.
 

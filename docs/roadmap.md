@@ -88,6 +88,9 @@ Browser -----┘
 - [x] Eliminate browser integration ordering and post-load fixture races, add
   bounded CDP diagnostics, and verify repeated standard and race runs
   ([issue #15](https://github.com/gkehren/hemera/issues/15)).
+- [x] Track capability-level observation completeness for bounded analyzer
+  channels so truncated HTTP or browser evidence cannot produce a false
+  conclusive `not_detected` ([issue #18](https://github.com/gkehren/hemera/issues/18)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while

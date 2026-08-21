@@ -185,7 +185,7 @@ Detections:
     = group static_integration: 75.0 (105.0 raw; selected turnstile-client-script)
 ```
 
-### 2. Machine-readable scan (JSON V5 report)
+### 2. Machine-readable scan (JSON V6 report)
 
 Generate a deterministic JSON document on stdout (suitable for redirection,
 file storage, or pipe processing):
@@ -194,11 +194,11 @@ file storage, or pipe processing):
 hemera scan --format json https://example.com/ > report.json
 ```
 
-The JSON report follows the [JSON report schema V5](report-schema.md) specification:
+The JSON report follows the [JSON report schema V6](report-schema.md) specification:
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "tool_version": "dev",
   "requested_url": "https://example.com/",
   "final_url": "https://example.com/",

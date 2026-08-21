@@ -54,6 +54,8 @@ type CaptureCookie struct {
 
 // CaptureResult contains bounded observations from one browser target. It is
 // internal to the browser integration and is not a report or detection model.
+// The truncation fields expose structured completion state per evidence
+// channel so capability-level coverage never has to parse warnings.
 type CaptureResult struct {
 	FinalURL     string
 	DOM          string
@@ -64,6 +66,22 @@ type CaptureResult struct {
 	IframeURLs   []string
 	Cookies      []CaptureCookie
 	Warnings     []string
+	// RequestsTruncated reports that request capture reached its collection
+	// ceiling or omitted an oversized request URL.
+	RequestsTruncated bool
+	// ResponsesTruncated reports that response capture reached its collection
+	// ceiling or omitted an oversized response URL.
+	ResponsesTruncated bool
+	// ScriptURLsTruncated reports that script URL collection reached its
+	// ceiling, was cut off by traversal truncation, or omitted an oversized
+	// script URL.
+	ScriptURLsTruncated bool
+	// IframeURLsTruncated reports that iframe URL collection reached its
+	// ceiling, was cut off by traversal truncation, or omitted an oversized
+	// iframe URL.
+	IframeURLsTruncated bool
+	// CookiesTruncated reports that cookie collection exceeded its ceiling.
+	CookiesTruncated bool
 }
 
 type boundedDOMSnapshot struct {
@@ -147,8 +165,20 @@ type captureCollector struct {
 	mu        sync.Mutex
 	requests  []CaptureRequest
 	responses []CaptureResponse
+	truncated channelTruncation
 	warnings  []string
 	warned    map[string]struct{}
+}
+
+// channelTruncation records which bounded capture channels did not run to
+// completion. It is structured state; warning strings remain presentation
+// diagnostics only.
+type channelTruncation struct {
+	requests  bool
+	responses bool
+	scripts   bool
+	iframes   bool
+	cookies   bool
 }
 
 func newCaptureCollector() *captureCollector {
@@ -158,11 +188,15 @@ func newCaptureCollector() *captureCollector {
 func (c *captureCollector) addRequest(method, rawURL, resourceType string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cleanURL, ok := c.cleanURL(rawURL)
-	if !ok {
+	cleanURL, status := c.classifyURL(rawURL)
+	if status == urlOversizedDropped {
+		c.truncated.requests = true
+	}
+	if status != urlAccepted {
 		return
 	}
 	if len(c.requests) >= maxCaptureItems {
+		c.truncated.requests = true
 		c.warn(warningRequestLimit)
 		return
 	}
@@ -174,11 +208,15 @@ func (c *captureCollector) addRequest(method, rawURL, resourceType string) {
 func (c *captureCollector) addResponse(rawURL string, status int64, mimeType, resourceType string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cleanURL, ok := c.cleanURL(rawURL)
-	if !ok {
+	cleanURL, urlStatus := c.classifyURL(rawURL)
+	if urlStatus == urlOversizedDropped {
+		c.truncated.responses = true
+	}
+	if urlStatus != urlAccepted {
 		return
 	}
 	if len(c.responses) >= maxCaptureItems {
+		c.truncated.responses = true
 		c.warn(warningResponseLimit)
 		return
 	}
@@ -205,15 +243,19 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 		result.FinalURL = cleaned
 	}
 	if resourcesCaptured {
-		result.ScriptURLs = c.cleanResourceURLs(snapshot.ScriptURLs, warningScriptLimit)
-		result.IframeURLs = c.cleanResourceURLs(snapshot.IframeURLs, warningIframeLimit)
+		result.ScriptURLs = c.cleanResourceURLs(snapshot.ScriptURLs, warningScriptLimit, &c.truncated.scripts)
+		result.IframeURLs = c.cleanResourceURLs(snapshot.IframeURLs, warningIframeLimit, &c.truncated.iframes)
 		if snapshot.ScriptTruncated || snapshot.TraversalTruncated {
+			c.truncated.scripts = true
 			c.warn(warningScriptLimit)
 		}
 		if snapshot.IframeTruncated || snapshot.TraversalTruncated {
+			c.truncated.iframes = true
 			c.warn(warningIframeLimit)
 		}
 		if snapshot.URLTruncated {
+			c.truncated.scripts = true
+			c.truncated.iframes = true
 			c.warn(warningURLLimit)
 		}
 	} else {
@@ -231,18 +273,29 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 		}
 	}
 	result.Cookies = c.cleanCookies(cookies)
+	result.RequestsTruncated = c.truncated.requests
+	result.ResponsesTruncated = c.truncated.responses
+	result.ScriptURLsTruncated = c.truncated.scripts
+	result.IframeURLsTruncated = c.truncated.iframes
+	result.CookiesTruncated = c.truncated.cookies
 	result.Warnings = slices.Clone(c.warnings)
 	return result
 }
 
-func (c *captureCollector) cleanResourceURLs(rawURLs []string, limitWarning string) []string {
+func (c *captureCollector) cleanResourceURLs(rawURLs []string, limitWarning string, truncated *bool) []string {
 	cleaned := make([]string, 0, min(len(rawURLs), maxCaptureItems))
 	for _, rawURL := range rawURLs {
-		url, ok := c.cleanURL(rawURL)
-		if !ok {
+		url, status := c.classifyURL(rawURL)
+		if status == urlOversizedDropped && truncated != nil {
+			*truncated = true
+		}
+		if status != urlAccepted {
 			continue
 		}
 		if len(cleaned) == maxCaptureItems {
+			if truncated != nil {
+				*truncated = true
+			}
 			c.warn(limitWarning)
 			continue
 		}
@@ -251,21 +304,38 @@ func (c *captureCollector) cleanResourceURLs(rawURLs []string, limitWarning stri
 	return cleaned
 }
 
+const (
+	urlAccepted = iota
+	urlRejected
+	urlOversizedDropped
+)
+
+// cleanURL sanitizes one raw URL, reporting whether it was accepted.
 func (c *captureCollector) cleanURL(raw string) (string, bool) {
-	if len(raw) > maxBrowserURLBytes {
-		c.warn(warningURLLimit)
+	cleaned, status := c.classifyURL(raw)
+	if status != urlAccepted {
 		return "", false
 	}
+	return cleaned, true
+}
+
+// classifyURL sanitizes one raw URL and reports whether it was accepted,
+// rejected by validation, or dropped for exceeding the URL size ceiling.
+func (c *captureCollector) classifyURL(raw string) (string, int) {
+	if len(raw) > maxBrowserURLBytes {
+		c.warn(warningURLLimit)
+		return "", urlOversizedDropped
+	}
 	if raw == "" || !utf8.ValidString(raw) || hasUnsafeText(raw) {
-		return "", false
+		return "", urlRejected
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
-		return "", false
+		return "", urlRejected
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", false
+		return "", urlRejected
 	}
 	parsed.User = nil
 	parsed.Fragment = ""
@@ -277,9 +347,9 @@ func (c *captureCollector) cleanURL(raw string) (string, bool) {
 	cleaned := parsed.String()
 	if len(cleaned) > maxBrowserURLBytes {
 		c.warn(warningURLLimit)
-		return "", false
+		return "", urlOversizedDropped
 	}
-	return cleaned, true
+	return cleaned, urlAccepted
 }
 
 func (c *captureCollector) extractResourceURLs(dom, finalURL string) ([]string, []string) {
@@ -313,18 +383,29 @@ func (c *captureCollector) extractResourceURLs(dom, finalURL string) ([]string, 
 		if base != nil {
 			ref = base.ResolveReference(ref)
 		}
-		cleaned, ok := c.cleanURL(ref.String())
-		if !ok {
-			continue
-		}
+		cleaned, status := c.classifyURL(ref.String())
 		if token.Data == "script" {
+			if status == urlOversizedDropped {
+				c.truncated.scripts = true
+			}
+			if status != urlAccepted {
+				continue
+			}
 			if len(scripts) == maxCaptureItems {
+				c.truncated.scripts = true
 				c.warn(warningScriptLimit)
 				continue
 			}
 			scripts = append(scripts, cleaned)
 		} else {
+			if status == urlOversizedDropped {
+				c.truncated.iframes = true
+			}
+			if status != urlAccepted {
+				continue
+			}
 			if len(iframes) == maxCaptureItems {
+				c.truncated.iframes = true
 				c.warn(warningIframeLimit)
 				continue
 			}
@@ -394,6 +475,7 @@ func (c *captureCollector) cleanCookies(cookies []CaptureCookie) []CaptureCookie
 	})
 	if len(cleaned) > maxCaptureItems {
 		cleaned = cleaned[:maxCaptureItems]
+		c.truncated.cookies = true
 		c.warn(warningCookieLimit)
 	}
 	return cleaned

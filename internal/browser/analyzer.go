@@ -50,7 +50,10 @@ func (*Analyzer) Source() string {
 
 // Observe performs one sandboxed, bounded browser navigation and returns only
 // normalized, minimized evidence. Browser-local failures may retain a partial
-// capture for scanner failure-policy handling.
+// capture for scanner failure-policy handling. Successful captures declare
+// capability-level coverage derived from structured per-channel truncation
+// state so bounded evidence channels cannot produce false conclusive
+// negatives; failed navigations mark every browser capability incomplete.
 func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
 	observation := analysis.Observation{Source: analysis.SourceBrowser}
 	if a == nil || a.client == nil {
@@ -63,6 +66,7 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 	signals, signalErr := normalizeCapture(result)
 	observation.Signals = signals
 	combinedErr := errors.Join(observeErr, signalErr)
+	observation.Capabilities = browserCapabilityCoverage(result, combinedErr == nil)
 	if combinedErr != nil {
 		warning := warningBrowserUnavailable
 		if len(observation.Signals) > 0 {
@@ -71,6 +75,30 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 		observation.Warnings = appendWarning(observation.Warnings, warning)
 	}
 	return observation, combinedErr
+}
+
+// browserCapabilityCoverage derives per-signal-type coverage from structured
+// capture completion state. A navigation that did not finish cleanly leaves no
+// browser channel conclusively evaluated. DOM-derived selector and global
+// predicates follow final-DOM completeness because their evidence is observed
+// within the same bounded snapshot.
+func browserCapabilityCoverage(result CaptureResult, navigationComplete bool) []analysis.CapabilityCoverage {
+	status := func(incomplete bool) analysis.CapabilityStatus {
+		if incomplete || !navigationComplete {
+			return analysis.CapabilityIncomplete
+		}
+		return analysis.CapabilityComplete
+	}
+	return []analysis.CapabilityCoverage{
+		{SignalType: model.SignalTypeNetworkRequest, Status: status(result.RequestsTruncated)},
+		{SignalType: model.SignalTypeNetworkResponse, Status: status(result.ResponsesTruncated)},
+		{SignalType: model.SignalTypePageContent, Status: status(result.DOMTruncated)},
+		{SignalType: model.SignalTypeDOMSelector, Status: status(result.DOMTruncated)},
+		{SignalType: model.SignalTypeJSGlobal, Status: status(result.DOMTruncated)},
+		{SignalType: model.SignalTypeScriptURL, Status: status(result.ScriptURLsTruncated)},
+		{SignalType: model.SignalTypeIframeURL, Status: status(result.IframeURLsTruncated)},
+		{SignalType: model.SignalTypeCookie, Status: status(result.CookiesTruncated)},
+	}
 }
 
 func (a *Analyzer) capture(ctx context.Context, rawURL string) (result CaptureResult, resultErr error) {
