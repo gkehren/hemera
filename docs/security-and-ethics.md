@@ -285,6 +285,16 @@ analyzer error details because those errors can contain attacker-controlled URLs
 or other untrusted data. Analyzer warnings must never include raw attacker input
 or secrets.
 
+Terminal output is part of the same trust boundary. Raw analyzer errors and raw
+target URLs are never written directly to stderr or to the interactive view.
+CLI diagnostics and interactive target displays pass through bounded
+sanitization (`internal/safeoutput`): query strings, credentials, fragments,
+and terminal control sequences are not exposed, unparseable values become
+controlled placeholders, and exit-code classification uses the original error
+independently of presentation. Network execution uses the exact user target;
+detection and reporting use minimized observations; terminal presentation uses
+sanitized display strings.
+
 Detector documents are also treated as untrusted local input. JSON decoding
 rejects unknown fields and unsupported versions and bounds document size, rule
 count, condition depth, evidence count, and pattern length. Regular expressions

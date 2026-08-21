@@ -12,6 +12,7 @@ import (
 	"charm.land/huh/v2"
 
 	"github.com/gkehren/hemera/internal/networkguard"
+	"github.com/gkehren/hemera/internal/safeoutput"
 )
 
 // Options holds the scan configuration collected by the interactive wizard.
@@ -66,7 +67,10 @@ func validateTargetURL(raw string) error {
 		return fmt.Errorf("a target URL is required")
 	}
 	if _, err := networkguard.ParseURL(raw); err != nil {
-		return err
+		// net/url parse failures can embed fragments of the raw input in
+		// their message text. Render only bounded, control-free text; the
+		// static policy wording passes through unchanged.
+		return errors.New(safeoutput.SanitizeDiagnostic(err))
 	}
 	return nil
 }

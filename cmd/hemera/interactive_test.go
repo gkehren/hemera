@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -175,6 +176,73 @@ func TestRunInteractiveScanClassifiesFailures(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", stderr.String(), testCase.wantStderr)
 			}
 		})
+	}
+}
+
+// TestRunInteractiveScanSanitizesScanFailure proves the interactive path
+// renders the same bounded, secret-free diagnostic as the classic scan.
+func TestRunInteractiveScanSanitizesScanFailure(t *testing.T) {
+	restoreQuietProgressView(t)
+	engine := newStubEngine(t, stubAnalyzer{
+		source:      analysis.SourceHTTP,
+		observation: analysis.Observation{Source: analysis.SourceHTTP},
+		err:         fmt.Errorf("request to https://example.test/api?token=SUPER_SECRET failed"),
+	}, scanner.FailurePolicyAbort)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://example.test/"}
+	if code := runInteractiveScan(context.Background(), opts, &stdout, &stderr, engine); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	stderrText := stderr.String()
+	if strings.Contains(stderrText, "SUPER_SECRET") || strings.Contains(stderrText, "token=") {
+		t.Errorf("stderr leaks the secret: %q", stderrText)
+	}
+	if !strings.Contains(stderrText, "?redacted") || !strings.Contains(stderrText, "scan failed") {
+		t.Errorf("stderr = %q, want sanitized scan-failure diagnostic", stderrText)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want no report", stdout.String())
+	}
+}
+
+// TestRunInteractiveScanSeparatesScanURLFromDisplayURL proves the
+// data-flow separation: the analyzer observes the exact user target while
+// the progress view receives only the minimized display copy.
+func TestRunInteractiveScanSeparatesScanURLFromDisplayURL(t *testing.T) {
+	restoreQuietProgressView(t)
+	rawTarget := "https://example.test/api?token=SUPER_SECRET"
+
+	var observedURLs []string
+	engine := newStubEngine(t, stubAnalyzer{
+		source:      analysis.SourceHTTP,
+		observation: analysis.Observation{Source: analysis.SourceHTTP},
+		observe: func(_ context.Context, target analysis.Target) (analysis.Observation, error) {
+			observedURLs = append(observedURLs, target.URL)
+			return analysis.Observation{Source: analysis.SourceHTTP}, nil
+		},
+	}, scanner.FailurePolicyContinue)
+
+	var viewTargets []string
+	original := runProgressView
+	t.Cleanup(func() { runProgressView = original })
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, target string, msgs <-chan tui.Msg) error {
+		viewTargets = append(viewTargets, target)
+		for range msgs {
+		}
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: rawTarget}
+	if code := runInteractiveScan(context.Background(), opts, &stdout, &stderr, engine); code != 0 {
+		t.Fatalf("runInteractiveScan() code = %d, stderr = %q", code, stderr.String())
+	}
+	if len(observedURLs) != 1 || observedURLs[0] != rawTarget {
+		t.Errorf("analyzer observed %q, want the exact original target", observedURLs)
+	}
+	if len(viewTargets) != 1 || viewTargets[0] != "https://example.test/api?redacted" {
+		t.Errorf("view received %q, want the minimized display copy", viewTargets)
 	}
 }
 

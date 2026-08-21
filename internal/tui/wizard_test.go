@@ -46,6 +46,53 @@ func TestValidateTargetURL(t *testing.T) {
 	}
 }
 
+// TestValidateTargetURLSanitizesEmbeddedInput proves validation messages
+// stay presentation-safe even when net/url embeds fragments of the raw input
+// in its parse errors: no control, escape, or bidi-override characters may
+// reach the form's error rendering.
+func TestValidateTargetURLSanitizesEmbeddedInput(t *testing.T) {
+	t.Parallel()
+	// The percent-escape is invalid so url.Parse fails and echoes the raw
+	// input; the bidi override rides along inside that echoed fragment.
+	input := "https://exa\u202emple.test/%zz"
+	err := validateTargetURL(input)
+	if err == nil {
+		t.Fatalf("validateTargetURL(%q) error = nil, want error", input)
+	}
+	message := err.Error()
+	for _, unsafe := range []string{"\x1b", "\r", "\n", "\u202e"} {
+		if strings.Contains(message, unsafe) {
+			t.Errorf("validation message contains %q: %q", unsafe, message)
+		}
+	}
+	if !strings.HasPrefix(message, "invalid target URL") {
+		t.Errorf("validation message lost policy wording: %q", message)
+	}
+}
+
+// TestProgressModelNeutralizesUnknownSourceLabels proves the stage-label
+// default branch cannot pass control bytes through to Lip Gloss even if a
+// future analyzer registers an unexpected source identifier. The assertion
+// targets the label value: the surrounding frame intentionally contains
+// Lip Gloss's own Hemera-controlled styling sequences.
+func TestProgressModelNeutralizesUnknownSourceLabels(t *testing.T) {
+	t.Parallel()
+	label := stageLabel("weird\x1b[31m_analyzer\r")
+	for _, r := range label {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("stageLabel contains control rune %#04x: %q", r, label)
+		}
+	}
+	if label != "weird analyzer" && label != "weird analyzer " {
+		t.Fatalf("stageLabel = %q, want readable label", label)
+	}
+
+	model := newProgressModel([]string{"weird\x1b[31m_analyzer\r"}, "https://example.test/", nil)
+	if content := model.View().Content; !strings.Contains(content, "weird analyzer") {
+		t.Errorf("view lost sanitized label: %q", content)
+	}
+}
+
 func TestAccessibleModeEnvironmentVariable(t *testing.T) {
 	t.Setenv("HEMERA_ACCESSIBLE", "")
 	if accessibleMode() {

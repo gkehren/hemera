@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/gkehren/hemera/internal/safeoutput"
 	"github.com/gkehren/hemera/internal/scanner"
 )
 
@@ -79,7 +80,10 @@ func stageLabel(source string) string {
 	case "browser_analyzer":
 		return "Browser analysis"
 	default:
-		return strings.NewReplacer("_", " ").Replace(source)
+		// Source identifiers are registered by Hemera code, so this branch
+		// is expected to stay Hemera-controlled; unknown values still
+		// render inert if they ever carry control bytes.
+		return safeoutput.PlainText(strings.NewReplacer("_", " ").Replace(source))
 	}
 }
 
@@ -100,8 +104,11 @@ func newProgressModel(sources []string, target string, msgs <-chan Msg) progress
 		stages = append(stages, stage{source: source, label: stageLabel(source)})
 	}
 	return progressModel{
-		stages:   stages,
-		target:   target,
+		stages: stages,
+		// Defense in depth: the view renders only the minimized display
+		// form, even if a caller passes a raw target. Network execution
+		// keeps the exact original URL; this copy is presentation-only.
+		target:   safeoutput.DisplayURL(target),
 		spinner:  spinner.New(spinner.WithSpinner(spinner.Dot)),
 		progress: progress.New(progress.WithWidth(40)),
 		msgs:     msgs,
@@ -274,10 +281,12 @@ func renderStage(s stage, spinnerView string) string {
 var ErrViewCanceled = errors.New("progress view canceled")
 
 // RunProgress renders live analyzer progress until the program exits because
-// the scan finished or the user canceled it. The msgs channel must deliver
-// exactly one final Msg (with Final set) and then be closed by the producer.
-// It returns ErrViewCanceled when the view exits early; the authoritative
-// scan outcome stays with the caller's own completion channel.
+// the scan finished or the user canceled it. The target is display-only and
+// is minimized before rendering; the scanner's exact target never passes
+// through here. The msgs channel must deliver exactly one final Msg (with
+// Final set) and then be closed by the producer. It returns ErrViewCanceled
+// when the view exits early; the authoritative scan outcome stays with the
+// caller's own completion channel.
 func RunProgress(ctx context.Context, output io.Writer, sources []string, target string, msgs <-chan Msg) error {
 	model := newProgressModel(sources, target, msgs)
 	program := tea.NewProgram(model, tea.WithOutput(output), tea.WithContext(ctx))

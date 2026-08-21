@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/rules"
+	"github.com/gkehren/hemera/internal/safeoutput"
 	"github.com/gkehren/hemera/internal/scanner"
 	"github.com/gkehren/hemera/internal/scoring"
 	"github.com/gkehren/hemera/pkg/model"
@@ -119,7 +119,7 @@ type ConflictReport struct {
 // Build converts internal scan state into a secret-minimized report.
 func Build(toolVersion string, result scanner.Result) Report {
 	var httpMetadata *HTTP
-	requestedURL := sanitizeURL(result.Target.URL)
+	requestedURL := safeoutput.SanitizeURL(result.Target.URL)
 	var finalURL *string
 	analyzers := make([]AnalyzerReport, 0, len(result.Analyzers))
 	for _, analyzerResult := range result.Analyzers {
@@ -132,8 +132,8 @@ func Build(toolVersion string, result scanner.Result) Report {
 			continue
 		}
 		metadata := observation.Metadata.HTTP
-		requestedURL = sanitizeURL(metadata.RequestedURL)
-		if sanitizedFinalURL := sanitizeURL(metadata.FinalURL); sanitizedFinalURL != "" {
+		requestedURL = safeoutput.SanitizeURL(metadata.RequestedURL)
+		if sanitizedFinalURL := safeoutput.SanitizeURL(metadata.FinalURL); sanitizedFinalURL != "" {
 			finalURL = &sanitizedFinalURL
 		}
 		httpMetadata = &HTTP{
@@ -143,7 +143,7 @@ func Build(toolVersion string, result scanner.Result) Report {
 		}
 		for _, redirect := range metadata.Redirects {
 			httpMetadata.Redirects = append(httpMetadata.Redirects, Redirect{
-				From: sanitizeURL(redirect.From), To: sanitizeURL(redirect.To), Status: redirect.Status,
+				From: safeoutput.SanitizeURL(redirect.From), To: safeoutput.SanitizeURL(redirect.To), Status: redirect.Status,
 			})
 		}
 	}
@@ -316,7 +316,7 @@ func buildEvidence(scored []scoring.ScoredEvidence, includeGroup bool) []Evidenc
 			ID: match.EvidenceID, Group: group,
 			Description: match.Description, Type: match.Signal.Type,
 			Source: match.Signal.Source, Key: match.Signal.Key,
-			Value: safeValue(match.Signal), URL: sanitizeURL(match.Signal.URL),
+			Value: safeValue(match.Signal), URL: safeoutput.SanitizeURL(match.Signal.URL),
 			Confidence: match.Signal.Confidence, Weight: match.Weight,
 			RawContribution: scoredEvidence.RawContribution,
 			Contribution:    scoredEvidence.Contribution,
@@ -342,7 +342,7 @@ func safeValue(signal model.Signal) string {
 	switch signal.Type {
 	case model.SignalTypeScriptURL, model.SignalTypeIframeURL,
 		model.SignalTypeNetworkRequest, model.SignalTypeRedirect:
-		return sanitizeURL(signal.Value)
+		return safeoutput.SanitizeURL(signal.Value)
 	case model.SignalTypeResourceHost:
 		return signal.Value
 	case model.SignalTypeDNSRecord, model.SignalTypeTLSProperty:
@@ -362,24 +362,6 @@ func safePlainValue(value string) string {
 		}
 	}
 	return value
-}
-
-func sanitizeURL(rawURL string) string {
-	if rawURL == "" {
-		return ""
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return ""
-	}
-	parsed.User = nil
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-	if parsed.RawQuery != "" {
-		parsed.RawQuery = "redacted"
-		parsed.ForceQuery = false
-	}
-	return parsed.String()
 }
 
 func writeEvidence(output *strings.Builder, detection DetectionReport) {

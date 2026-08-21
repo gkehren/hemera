@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gkehren/hemera/internal/safeoutput"
 	"github.com/gkehren/hemera/internal/scanner"
 )
 
@@ -214,5 +215,57 @@ func TestStageLabelFallback(t *testing.T) {
 	t.Parallel()
 	if got := stageLabel("custom_source"); got != "custom source" {
 		t.Errorf("stageLabel() = %q, want %q", got, "custom source")
+	}
+}
+
+// TestProgressModelRedactsTargetQuery proves the view never echoes a raw
+// target query string, even when constructed with one.
+func TestProgressModelRedactsTargetQuery(t *testing.T) {
+	t.Parallel()
+	model := newProgressModel([]string{"http_analyzer"},
+		"https://example.test/api?token=SUPER_SECRET", nil)
+	content := model.View().Content
+	if strings.Contains(content, "SUPER_SECRET") || strings.Contains(content, "token=") {
+		t.Errorf("view leaks the target query: %q", content)
+	}
+	if !strings.Contains(content, "https://example.test/api?redacted") {
+		t.Errorf("view lacks minimized target: %q", content)
+	}
+}
+
+func TestProgressModelRemovesCredentialsAndFragments(t *testing.T) {
+	t.Parallel()
+	model := newProgressModel([]string{"http_analyzer"},
+		"https://user:password@example.test/path?x=y#fragment", nil)
+	content := model.View().Content
+	for _, leaked := range []string{"user:", "password", "x=y", "#fragment", "fragment"} {
+		if strings.Contains(content, leaked) {
+			t.Errorf("view leaks %q: %q", leaked, content)
+		}
+	}
+	if !strings.Contains(content, "https://example.test/path?redacted") {
+		t.Errorf("view lacks minimized target: %q", content)
+	}
+}
+
+func TestProgressModelKeepsPlainTargetsReadable(t *testing.T) {
+	t.Parallel()
+	model := newProgressModel([]string{"http_analyzer"}, "https://example.test/path", nil)
+	if content := model.View().Content; !strings.Contains(content, "https://example.test/path") {
+		t.Errorf("view over-redacted plain target: %q", content)
+	}
+}
+
+func TestProgressModelReplacesUnparseableTarget(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"not a url", "", "ftp://example.test/"} {
+		model := newProgressModel([]string{"http_analyzer"}, raw, nil)
+		content := model.View().Content
+		if !strings.Contains(content, safeoutput.InvalidTargetPlaceholder) {
+			t.Errorf("view for %q lacks placeholder: %q", raw, content)
+		}
+		if strings.Contains(content, raw) && raw != "" {
+			t.Errorf("view echoed unparseable target %q: %q", raw, content)
+		}
 	}
 }

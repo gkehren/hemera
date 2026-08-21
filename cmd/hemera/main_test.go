@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -286,6 +287,51 @@ func TestRunScanClassifiesFailures(t *testing.T) {
 			}
 			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "scan failed") {
 				t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+// TestRunScanSanitizesDiagnosticsAndPreservesClassification proves the
+// privacy boundary never changes control flow: exit codes are classified from
+// the original wrapped error while the rendered text is minimized.
+func TestRunScanSanitizesDiagnosticsAndPreservesClassification(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		code int
+	}{
+		{
+			name: "invalid initial target with sensitive URL exits 2",
+			err: fmt.Errorf("fetch https://example.test/api?token=SUPER_SECRET failed: %w",
+				httpanalyzer.ErrInitialTarget),
+			code: 2,
+		},
+		{
+			name: "runtime failure with sensitive URL exits 1",
+			err:  errors.New("dial https://user:pw@example.test/api?token=SUPER_SECRET#frag refused"),
+			code: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			if code := runScan(context.Background(), []string{"https://example.test"}, &stdout, &stderr, fakeScanner{err: tt.err}); code != tt.code {
+				t.Fatalf("code = %d, want %d", code, tt.code)
+			}
+			stderrText := stderr.String()
+			for _, leaked := range []string{"SUPER_SECRET", "token=", "user:", "pw@", "#frag"} {
+				if strings.Contains(stderrText, leaked) {
+					t.Errorf("stderr leaks %q: %q", leaked, stderrText)
+				}
+			}
+			if !strings.Contains(stderrText, "?redacted") || !strings.Contains(stderrText, "scan failed") {
+				t.Errorf("stderr = %q, want sanitized scan-failure diagnostic", stderrText)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout.String())
 			}
 		})
 	}

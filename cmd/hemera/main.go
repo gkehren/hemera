@@ -14,6 +14,7 @@ import (
 	"github.com/gkehren/hemera/internal/dnstls"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
 	"github.com/gkehren/hemera/internal/report"
+	"github.com/gkehren/hemera/internal/safeoutput"
 	"github.com/gkehren/hemera/internal/scanner"
 	"github.com/gkehren/hemera/internal/tui"
 )
@@ -74,6 +75,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// Stderr classification: every analyzer-, scanner-, report-, wizard-,
+	// and view-derived error renders through safeoutput.SanitizeDiagnostic.
+	// The remaining dynamic writes echo command-line arguments with %q,
+	// which escapes control characters by construction; everything else is
+	// static usage text. Raw errors cannot bypass the sanitizer here.
 	if flags.NArg() > 0 {
 		fmt.Fprintf(stderr, "hemera: unexpected argument %q\n\n", flags.Arg(0))
 		printUsage(stderr)
@@ -139,14 +145,14 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 		var err error
 		engine, err = newScannerEngine(isDeep, nil)
 		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
+			fmt.Fprintf(stderr, "hemera: configure scanner: %s\n", safeoutput.SanitizeDiagnostic(err))
 			return 1
 		}
 	}
 
 	result, err := engine.Scan(ctx, flags.Arg(0))
 	if err != nil {
-		fmt.Fprintf(stderr, "hemera: scan failed: %v\n", err)
+		fmt.Fprintf(stderr, "hemera: scan failed: %s\n", safeoutput.SanitizeDiagnostic(err))
 		if errors.Is(err, httpanalyzer.ErrInitialTarget) {
 			return 2
 		}
@@ -159,7 +165,7 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 		err = report.WriteText(stdout, scanReport)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "hemera: write report: %v\n", err)
+		fmt.Fprintf(stderr, "hemera: write report: %s\n", safeoutput.SanitizeDiagnostic(err))
 		return 1
 	}
 	return 0
@@ -209,7 +215,7 @@ func runInteractive(ctx context.Context, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "hemera: canceled")
 			return 0
 		}
-		fmt.Fprintf(stderr, "hemera: %v\n", err)
+		fmt.Fprintf(stderr, "hemera: %s\n", safeoutput.SanitizeDiagnostic(err))
 		return 1
 	}
 	return runInteractiveScan(ctx, opts, stdout, stderr, nil)
@@ -237,7 +243,7 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 			sendMsg(tui.Msg{Event: event})
 		})
 		if err != nil {
-			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
+			fmt.Fprintf(stderr, "hemera: configure scanner: %s\n", safeoutput.SanitizeDiagnostic(err))
 			return 1
 		}
 	} else {
@@ -261,7 +267,10 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 		scanDone <- tui.Outcome{Result: result, Err: scanErr}
 	}()
 
-	runErr := runProgressView(scanCtx, stdout, engine.Sources(), opts.URL, msgs)
+	// Data-flow separation: the scan goroutine uses the exact user target;
+	// only the presentation copy handed to the view is minimized.
+	displayTarget := safeoutput.DisplayURL(opts.URL)
+	runErr := runProgressView(scanCtx, stdout, engine.Sources(), displayTarget, msgs)
 	cancel()
 	outcome := <-scanDone
 
@@ -274,12 +283,12 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 			fmt.Fprintln(stderr, "hemera: canceled")
 			return 0
 		}
-		fmt.Fprintf(stderr, "hemera: %v\n", runErr)
+		fmt.Fprintf(stderr, "hemera: %s\n", safeoutput.SanitizeDiagnostic(runErr))
 		return 1
 	}
 
 	if outcome.Err != nil {
-		fmt.Fprintf(stderr, "hemera: scan failed: %v\n", outcome.Err)
+		fmt.Fprintf(stderr, "hemera: scan failed: %s\n", safeoutput.SanitizeDiagnostic(outcome.Err))
 		if errors.Is(outcome.Err, httpanalyzer.ErrInitialTarget) {
 			return 2
 		}
@@ -291,7 +300,7 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 	// background does not visually overlap it.
 	fmt.Fprintln(stdout)
 	if err := report.WriteStyled(stdout, scanReport); err != nil {
-		fmt.Fprintf(stderr, "hemera: write report: %v\n", err)
+		fmt.Fprintf(stderr, "hemera: write report: %s\n", safeoutput.SanitizeDiagnostic(err))
 		return 1
 	}
 	return 0

@@ -442,8 +442,28 @@ HTML, header/cookie values, and analyzer error details and sanitize every emitte
 URL. The JSON schema is experimental until the first stable release; breaking
 pre-release changes still require a documented schema-version increment. The
 contract and text-output expectations are documented in
-[JSON report schema V5](report-schema.md). An exportable local HTML report
-remains a later goal.
+[JSON report schema V5](report-schema.md).
+
+Terminal presentation follows one explicit invariant: raw analyzer errors and
+raw target URLs are never written directly to terminal output. CLI diagnostics
+and interactive target displays pass through `internal/safeoutput`, a shared
+boundary that applies the canonical URL-minimization policy, strips terminal
+control sequences, bounds output length, and fails closed to controlled
+placeholders for unparseable values. Exit-code classification always uses the
+original wrapped error; sanitization only shapes the rendered text. The data
+flows stay separated:
+
+- Network execution uses the exact user target.
+- Detection and reporting use minimized observations.
+- Terminal presentation uses sanitized display strings.
+
+Future interface features must consume the safe representations instead of raw
+internal data. An exportable local HTML report remains a later goal.
+
+The interactive view follows the same rule: every value it renders is either a
+compile-time constant, a minimized target, or a control-stripped label.
+Validation messages surfaced by the wizard pass through the same sanitization
+because URL parse failures can embed fragments of pasted input.
 
 ### Interactive terminal experience
 
@@ -479,6 +499,7 @@ internal/signals/         normalization
 internal/rules/           rule loading and matching
 internal/scoring/         confidence calculation
 internal/report/          safe text and JSON renderers
+internal/safeoutput/      canonical URL minimization and bounded, escape-free CLI diagnostics
 internal/tui/             interactive wizard, progress view, and styled summary
 pkg/model/                intentionally public models, if needed
 detectors/                data-driven signatures
