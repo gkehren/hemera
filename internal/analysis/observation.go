@@ -2,7 +2,11 @@
 // and scan orchestration.
 package analysis
 
-import "github.com/gkehren/hemera/pkg/model"
+import (
+	"fmt"
+
+	"github.com/gkehren/hemera/pkg/model"
+)
 
 const (
 	// SourceHTTP identifies observations produced by the bounded HTTP analyzer.
@@ -22,14 +26,55 @@ type Target struct {
 	Prior []Observation
 }
 
-// Observation contains one analyzer's normalized signals, local warnings, and
-// bounded source-specific metadata. Warnings must be safe diagnostic summaries
-// and must not contain raw attacker-controlled input or secrets.
+// CapabilityStatus expresses whether one analyzer signal capability was
+// observed completely within its bounded contract.
+type CapabilityStatus string
+
+const (
+	// CapabilityComplete means the channel was fully observed under the
+	// analyzer's bounded collection contract, so absence of a matching value is
+	// conclusive evidence for that capability.
+	CapabilityComplete CapabilityStatus = "complete"
+	// CapabilityIncomplete means the channel may hold unobserved
+	// detector-relevant evidence because a resource ceiling was reached,
+	// evidence was truncated, or collection did not finish. Absence of a
+	// matching value is inconclusive for this capability.
+	CapabilityIncomplete CapabilityStatus = "incomplete"
+)
+
+// CapabilityCoverage reports the observation completeness of one normalized
+// signal capability. Analyzers declare coverage per signal type so that
+// detection status can distinguish a conclusive negative from bounded
+// observation; analyzer execution status alone cannot express this distinction.
+type CapabilityCoverage struct {
+	SignalType model.SignalType
+	Status     CapabilityStatus
+}
+
+// Validate checks that a declared capability names a known signal type and an
+// exact capability status.
+func (c CapabilityCoverage) Validate() error {
+	if !c.SignalType.Valid() {
+		return fmt.Errorf("capability coverage declares invalid signal type %q", c.SignalType)
+	}
+	switch c.Status {
+	case CapabilityComplete, CapabilityIncomplete:
+		return nil
+	default:
+		return fmt.Errorf("capability %q has unsupported status %q", c.SignalType, c.Status)
+	}
+}
+
+// Observation contains one analyzer's normalized signals, local warnings,
+// declared per-capability coverage, and bounded source-specific metadata.
+// Warnings must be safe diagnostic summaries and must not contain raw
+// attacker-controlled input or secrets.
 type Observation struct {
-	Source   string
-	Signals  []model.Signal
-	Warnings []string
-	Metadata Metadata
+	Source       string
+	Signals      []model.Signal
+	Warnings     []string
+	Capabilities []CapabilityCoverage
+	Metadata     Metadata
 }
 
 // Clone returns an observation whose slices and typed metadata can be retained
@@ -37,7 +82,8 @@ type Observation struct {
 func (o Observation) Clone() Observation {
 	cloned := Observation{
 		Source: o.Source, Signals: append([]model.Signal{}, o.Signals...),
-		Warnings: append([]string{}, o.Warnings...),
+		Warnings:     append([]string{}, o.Warnings...),
+		Capabilities: append([]CapabilityCoverage{}, o.Capabilities...),
 	}
 	if o.Metadata.HTTP != nil {
 		httpMetadata := *o.Metadata.HTTP

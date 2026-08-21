@@ -25,7 +25,7 @@ and future contributor documentation.
    the synthetic fixture corpus, accuracy metrics, and false-positive/negative rates.
 9. [Detector limitations and operational boundaries](detector-limitations.md) details
    the known limitations, blind spots, and evasion profiles for all built-in rules.
-10. [JSON report schema V5](report-schema.md) documents the versioned,
+10. [JSON report schema V6](report-schema.md) documents the versioned,
     experimental pre-release automation output from
     `hemera scan --format json`.
 

@@ -272,9 +272,29 @@ coverage entry. The scanner validates all three observations, aggregates their
 signals in configured order, and invokes the analyzer-independent scoring engine
 once. For a negative rule result, the scanner evaluates tri-state condition
 coverage and scoring upper bounds across capable sources and dependencies. When
-an incomplete source could have allowed a rule to reach detection gates, report
-V5 emits `insufficient_coverage` instead of a definitive `not_detected`; rules
-never import or name a Go analyzer type.
+an incomplete capability could have allowed a rule to reach detection gates,
+report V6 emits `insufficient_coverage` instead of a definitive `not_detected`;
+rules never import or name a Go analyzer type.
+
+Analyzer execution status and capability observation completeness are distinct
+concepts. Execution status (`complete`, `partial`, `failed`) describes whether
+an analyzer returned without an error; it cannot express that one bounded
+evidence channel inside an otherwise successful observation was truncated.
+Capability completeness closes this gap: analyzers declare per-`SignalType`
+coverage derived from structured capture state (truncation flags and channel
+ceilings), never from warning strings. The HTTP analyzer marks page-content and
+static-resource capabilities incomplete when the body or decoded HTML was
+bounded or resource extraction stopped early; the browser tracks
+request, response, DOM, script, iframe, and cookie channels independently, and
+keeps signals whose provenance URL comes from the final URL inconclusive when
+that URL had to be omitted. Coverage evaluation is scoped per analyzer: one
+that declared any capability coverage is capability-aware, and signal types it
+did not declare are never complete because analyzer-wide success cannot vouch
+for channels it never observed. Analyzers without capability declarations keep
+their previous execution-status semantics. An isolated channel failure, such as
+a failed cookie query on an otherwise clean capture, stays scoped to its own
+capability instead of downgrading unrelated channels. Warnings remain
+presentation diagnostics only.
 
 ### Signal model
 
@@ -310,12 +330,18 @@ The rule engine must depend on this model, not directly on Chromium or
 
 ```go
 type Observation struct {
-    Source   string
-    Signals  []model.Signal
-    Warnings []string
-    Metadata Metadata
+    Source       string
+    Signals      []model.Signal
+    Warnings     []string
+    Capabilities []CapabilityCoverage
+    Metadata     Metadata
 }
 ```
+
+`Capabilities` declares per-signal-type observation completeness (`complete` or
+`incomplete`) derived from structured analyzer state. It drives coverage
+evaluation so a bounded evidence channel cannot produce a false conclusive
+negative; it is not part of the JSON report contract.
 
 `Metadata` currently has an optional `HTTPMetadata` member for the requested and
 final URLs, status, redirects, body-truncation state, and a bounded TLS snapshot
@@ -436,13 +462,13 @@ dependencies or mutable aliasing. The current CLI configures HTTP first with
 The CLI renders that model as human-oriented text by default or as versioned,
 deterministic JSON with `--format json`. Both formats explain detected and
 non-detected rules, including raw positive evidence, its correlation group, the
-selected maximum contribution, and later penalties. JSON V5 also records each
+selected maximum contribution, and later penalties. JSON V6 also records each
 analyzer's source, coverage status, and producer-sanitized warnings. They omit
 HTML, header/cookie values, and analyzer error details and sanitize every emitted
 URL. The JSON schema is experimental until the first stable release; breaking
 pre-release changes still require a documented schema-version increment. The
 contract and text-output expectations are documented in
-[JSON report schema V5](report-schema.md).
+[JSON report schema V6](report-schema.md).
 
 Terminal presentation follows one explicit invariant: raw analyzer errors and
 raw target URLs are never written directly to terminal output. CLI diagnostics

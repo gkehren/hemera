@@ -375,10 +375,21 @@ tri-state condition coverage and scoring potential across capable observation
 channels. In `all` conditions, a conclusively false branch proves the conjunction
 false regardless of unknown branches. In `any` conditions, potential evidence
 from unknown branches is preserved; when a rule is not detected and an incomplete
-channel could have allowed the rule to reach its detection score or evidence
-gates, report V5 emits `insufficient_coverage` instead of `not_detected`. A
+capability could have allowed the rule to reach its detection score or evidence
+gates, report V6 emits `insufficient_coverage` instead of `not_detected`. A
 partial source can still produce a positive detection when its retained signals
 satisfy the rule.
+
+Coverage completeness is per capability rather than per analyzer: analyzers
+declare structured per-signal-type completeness derived from bounded capture
+state (for example HTTP body or resource-extraction truncation, and browser DOM,
+request, response, script, iframe, or cookie ceilings). Absence of a matching
+value is conclusive only when every capable source observed that predicate's
+signal capability completely; an analyzer-wide success never implies this on its
+own. An analyzer that declares any capability coverage is treated as
+capability-aware, so signal types it does not declare are inconclusive by
+construction and can never become conclusive through its execution status.
+Incomplete capabilities unrelated to a rule's predicates do not downgrade it.
 
 Each selected signal field contains exactly one text operation:
 

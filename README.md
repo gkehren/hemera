@@ -80,7 +80,7 @@ Run a human-readable scan against a target directly:
 hemera scan https://example.com/
 ```
 
-Generate a machine-readable JSON V5 report for automation:
+Generate a machine-readable JSON V6 report for automation:
 
 ```sh
 hemera scan --format json https://example.com/
@@ -190,12 +190,14 @@ preserving HTTP and DNS/TLS results. An unsafe initial HTTP target remains fatal
 and stops the pipeline before Chromium starts.
 
 Detection results distinguish `not_detected` from `insufficient_coverage` when
-a source required by a rule predicate was partial, failed, or absent. Rules
-remain coupled only to normalized source names, not analyzer implementations.
+a signal capability required by a rule predicate was incompletely observed —
+because its analyzer was partial, failed, absent, or hit a bounded-capture
+ceiling such as a truncated response body or DOM snapshot. Rules remain coupled
+only to normalized source names and signal types, not analyzer implementations.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is
-documented in [JSON report schema V5](docs/report-schema.md). The JSON schema is
+documented in [JSON report schema V6](docs/report-schema.md). The JSON schema is
 experimental while Hemera is pre-release: intentional breaking changes require
 a documented `schema_version` increment, but historical schemas are not yet
 promised long-term support. Text output is intended for people and may evolve
@@ -318,7 +320,7 @@ status
 - [Detector family support standard](docs/detector-support-standard.md)
 - [Regression corpus and accuracy standards](docs/regression-and-accuracy.md)
 - [Detector limitations and operational boundaries](docs/detector-limitations.md)
-- [JSON report schema V5](docs/report-schema.md)
+- [JSON report schema V6](docs/report-schema.md)
 
 ## Contributing
 

@@ -244,10 +244,13 @@ never emits cookie values, and uses generic warnings for incomplete or
 unavailable coverage. Page
 content remains bounded and in memory for rule matching, while reporters
 suppress its value even when a rule selects it as evidence. Raw analyzer errors
-are retained only internally. Report V5 distinguishes `insufficient_coverage`
+are retained only internally. Report V6 distinguishes `insufficient_coverage`
 from `not_detected` when a rule could reach its detection threshold if missing
-observation channels had completed, preventing browser failure from masquerading
-as evidence absence.
+observation capabilities had completed, preventing bounded observation or
+browser failure from masquerading as evidence absence. Coverage decisions use
+structured per-channel truncation state, never warning strings, so a truncated
+evidence channel cannot turn into an unqualified negative assertion about a
+protected target.
 
 The browser analyzer uses a continue policy so local Chromium absence or a
 browser-local resource failure cannot erase valid HTTP and DNS/TLS results.

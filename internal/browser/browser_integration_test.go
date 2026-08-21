@@ -554,6 +554,75 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	}
 }
 
+func TestSandboxedChromiumBoundedDOMURLTruncationIsPerChannel(t *testing.T) {
+	corpus, err := loadFixtureCorpus(fixtureManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
+		"oversized-script-page": func(writer http.ResponseWriter, _ *http.Request) {
+			// The oversized script src exceeds the shared URL ceiling, so the
+			// proxy rejects the request before it reaches the fixture. The
+			// bounded serializer must still attribute the dropped URL to the
+			// script channel only; the valid iframe stays conclusive.
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			writer.WriteHeader(http.StatusOK)
+			oversized := "/limits/ping?oversized=" + strings.Repeat("x", maxBrowserURLBytes)
+			_, _ = fmt.Fprintf(writer,
+				"<html><body><script src=%q></script><iframe src=\"/limits/ping\"></iframe></body></html>",
+				oversized)
+		},
+	})
+	config, explicit := integrationConfig(t)
+	targetURL := configureIntegrationFixture(t, &config, fixture.server)
+	client, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionCtx, cancelSession := integrationSessionContext(t)
+	defer cancelSession()
+
+	started := time.Now()
+	session, err := client.Start(sessionCtx)
+	if err != nil {
+		if !explicit {
+			t.Skipf("sandboxed Chromium is unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	logChromiumStartup(t, session, "per-channel URL truncation", started)
+	defer session.Close()
+
+	recorder, err := session.BeginCapture(sessionCtx)
+	if err != nil {
+		t.Fatalf("begin per-channel URL truncation capture: %v", err)
+	}
+	opCtx, cancelOp := integrationOperationContext(t, sessionCtx)
+	navErr := session.Navigate(opCtx, targetURL+"/limits/oversized-script")
+	cancelOp()
+	if !errors.Is(navErr, networkguard.ErrInvalidURL) {
+		t.Fatalf("Navigate() error = %v, want invalid URL policy failure for oversized script request", navErr)
+	}
+	finishCtx, cancelFinish := integrationCaptureFinalizeContext(t, sessionCtx)
+	result, err := recorder.Finish(finishCtx)
+	cancelFinish()
+	if err != nil {
+		t.Fatalf("finish per-channel URL truncation capture: %v", err)
+	}
+	if !result.ScriptURLsTruncated {
+		t.Error("ScriptURLsTruncated = false, want true after oversized serializer script URL")
+	}
+	if result.IframeURLsTruncated {
+		t.Error("IframeURLsTruncated = true, want clear for valid iframe URL")
+	}
+	if len(result.ScriptURLs) != 0 {
+		t.Errorf("script URLs = %#v, want the oversized URL omitted", result.ScriptURLs)
+	}
+	if len(result.IframeURLs) != 1 || !strings.HasSuffix(result.IframeURLs[0], "/limits/ping") {
+		t.Errorf("iframe URLs = %#v, want the valid iframe retained", result.IframeURLs)
+	}
+}
+
 func TestSandboxedChromiumNavigationLimits(t *testing.T) {
 	corpus, err := loadFixtureCorpus(fixtureManifestPath)
 	if err != nil {

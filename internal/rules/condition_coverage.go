@@ -88,24 +88,34 @@ type ConditionCoverageResult struct {
 	RequiredSources   []string
 }
 
-// EvaluateConditionCoverage evaluates a condition against normalized signals and complete
-// source statuses, returning a tri-state result with potential evidence and required sources.
+// CapabilityCompleter reports whether one observation source completely
+// observed a normalized signal capability. It operates only on stable source
+// identities and shared signal types so rule evaluation stays independent of
+// analyzer implementation packages.
+//
+// A source whose channel did not run to completion reports false for its
+// capabilities; absence of matching evidence for such a capability is then
+// inconclusive rather than conclusive.
+type CapabilityCompleter func(source string, signalType model.SignalType) bool
+
+// EvaluateConditionCoverage evaluates a condition against normalized signals and per-capability
+// completion state, returning a tri-state result with potential evidence and required sources.
 func EvaluateConditionCoverage(
 	condition Condition,
 	signals []model.Signal,
-	completeSources map[string]bool,
+	complete CapabilityCompleter,
 ) (ConditionCoverageResult, error) {
 	cached := make([]cachedSignal, len(signals))
 	for i, s := range signals {
 		cached[i].signal = s
 	}
-	return evaluateConditionCoverageCached(condition, cached, completeSources)
+	return evaluateConditionCoverageCached(condition, cached, complete)
 }
 
 func evaluateConditionCoverageCached(
 	condition Condition,
 	signals []cachedSignal,
-	completeSources map[string]bool,
+	complete CapabilityCompleter,
 ) (ConditionCoverageResult, error) {
 	if condition.Signal != nil {
 		evidence := *condition.Signal
@@ -130,7 +140,7 @@ func evaluateConditionCoverageCached(
 		}
 		incomplete := make([]string, 0, len(capable))
 		for _, src := range capable {
-			if !completeSources[src] {
+			if !complete(src, evidence.Type) {
 				incomplete = append(incomplete, src)
 			}
 		}
@@ -170,7 +180,7 @@ func evaluateConditionCoverageCached(
 		var requiredSources []string
 		hasUnknown := false
 		for _, child := range children {
-			childRes, err := evaluateConditionCoverageCached(child, signals, completeSources)
+			childRes, err := evaluateConditionCoverageCached(child, signals, complete)
 			if err != nil {
 				return ConditionCoverageResult{}, err
 			}
@@ -211,7 +221,7 @@ func evaluateConditionCoverageCached(
 	atLeastOneSatisfiable := false
 
 	for _, child := range children {
-		childRes, err := evaluateConditionCoverageCached(child, signals, completeSources)
+		childRes, err := evaluateConditionCoverageCached(child, signals, complete)
 		if err != nil {
 			return ConditionCoverageResult{}, err
 		}

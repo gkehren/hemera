@@ -52,8 +52,9 @@ Hemera is in early development. The repository currently contains:
   partial-order traffic contracts and explicit completion barriers;
 - the normalized signal model, detector rule matching, and confidence scoring;
 - built-in Cloudflare Turnstile and Google reCAPTCHA rules;
-- deterministic multi-analyzer orchestration and typed HTTP metadata;
-- human-readable reports and versioned, deterministic, experimental JSON V5
+- deterministic multi-analyzer orchestration, typed HTTP metadata, and
+  capability-level coverage tracking for bounded analyzer observations;
+- human-readable reports and versioned, deterministic, experimental JSON V6
   reports;
 - deterministic unit, integration, security, and detector fixture tests;
 - baseline GitHub Actions checks on Linux, macOS, and Windows, plus hermetic

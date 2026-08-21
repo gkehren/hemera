@@ -46,3 +46,62 @@ func TestEmptyMetadataHasNoKinds(t *testing.T) {
 		t.Errorf("empty metadata kinds/empty = %v/%t", metadata.Kinds(), metadata.Empty())
 	}
 }
+
+func TestObservationCloneOwnsCapabilities(t *testing.T) {
+	t.Parallel()
+	original := Observation{
+		Source: "fixture",
+		Capabilities: []CapabilityCoverage{
+			{SignalType: model.SignalTypePageContent, Status: CapabilityComplete},
+		},
+	}
+	cloned := original.Clone()
+	original.Capabilities[0].Status = CapabilityIncomplete
+
+	if cloned.Capabilities[0].Status != CapabilityComplete {
+		t.Fatalf("Clone() retained analyzer-owned capabilities: %#v", cloned.Capabilities)
+	}
+}
+
+func TestCapabilityCoverageValidate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		capability CapabilityCoverage
+		wantError  bool
+	}{
+		{
+			name:       "complete status is valid",
+			capability: CapabilityCoverage{SignalType: model.SignalTypeScriptURL, Status: CapabilityComplete},
+		},
+		{
+			name:       "incomplete status is valid",
+			capability: CapabilityCoverage{SignalType: model.SignalTypeCookie, Status: CapabilityIncomplete},
+		},
+		{
+			name:       "unknown signal type is invalid",
+			capability: CapabilityCoverage{SignalType: "bogus", Status: CapabilityComplete},
+			wantError:  true,
+		},
+		{
+			name:       "missing status is invalid",
+			capability: CapabilityCoverage{SignalType: model.SignalTypeScriptURL},
+			wantError:  true,
+		},
+		{
+			name:       "unsupported status is invalid",
+			capability: CapabilityCoverage{SignalType: model.SignalTypeScriptURL, Status: "partial"},
+			wantError:  true,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.capability.Validate()
+			if (err != nil) != tt.wantError {
+				t.Fatalf("Validate() error = %v, wantError %t", err, tt.wantError)
+			}
+		})
+	}
+}

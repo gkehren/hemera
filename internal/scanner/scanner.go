@@ -268,10 +268,7 @@ func buildDetectionCoverage(
 	analyzers []AnalyzerResult,
 	signals []model.Signal,
 ) ([]DetectionCoverage, error) {
-	completeSources := make(map[string]bool, len(analyzers))
-	for _, analyzer := range analyzers {
-		completeSources[analyzer.Observation.Source] = (analyzer.Status == AnalyzerStatusComplete)
-	}
+	completeCapability := buildCapabilityCompleter(analyzers)
 
 	detectionsByID := make(map[string]scoring.Detection, len(detections))
 	for _, det := range detections {
@@ -285,7 +282,7 @@ func buildDetectionCoverage(
 
 	conditionResults := make(map[string]rules.ConditionCoverageResult, len(ruleSet.Rules))
 	for _, rule := range ruleSet.Rules {
-		cRes, err := rules.EvaluateConditionCoverage(rule.Match, signals, completeSources)
+		cRes, err := rules.EvaluateConditionCoverage(rule.Match, signals, completeCapability)
 		if err != nil {
 			return nil, fmt.Errorf("evaluate coverage for rule %q: %w", rule.ID, err)
 		}
@@ -443,6 +440,42 @@ func deduplicateSorted(items []string) []string {
 	return result
 }
 
+// buildCapabilityCompleter combines declared per-capability coverage with
+// analyzer execution status into the capability lookup consumed by rule
+// coverage evaluation. An analyzer that declared any capability coverage is
+// treated as capability-aware: only its explicit declarations can report
+// completeness, and an undeclared capability is never complete because
+// analyzer-wide success must not imply that an unobserved channel was
+// conclusively evaluated. Analyzers without declarations keep their previous
+// analyzer-status semantics so analyzers without bounded evidence channels
+// remain usable.
+func buildCapabilityCompleter(analyzers []AnalyzerResult) rules.CapabilityCompleter {
+	declared := make(map[model.SignalType]map[string]bool)
+	statuses := make(map[string]bool, len(analyzers))
+	capabilityAware := make(map[string]bool, len(analyzers))
+	for _, analyzer := range analyzers {
+		source := analyzer.Observation.Source
+		statuses[source] = analyzer.Status == AnalyzerStatusComplete
+		if len(analyzer.Observation.Capabilities) > 0 {
+			capabilityAware[source] = true
+		}
+		for _, capability := range analyzer.Observation.Capabilities {
+			bySource, ok := declared[capability.SignalType]
+			if !ok {
+				bySource = make(map[string]bool)
+				declared[capability.SignalType] = bySource
+			}
+			bySource[source] = capability.Status == analysis.CapabilityComplete
+		}
+	}
+	return func(source string, signalType model.SignalType) bool {
+		if capabilityAware[source] {
+			return declared[signalType][source]
+		}
+		return statuses[source]
+	}
+}
+
 func priorObservations(results []AnalyzerResult) []analysis.Observation {
 	prior := make([]analysis.Observation, 0, len(results))
 	for _, result := range results {
@@ -465,6 +498,19 @@ func validateObservation(source string, observation analysis.Observation) error 
 				ErrInvalidObservation, source, index, signal.Source,
 			)
 		}
+	}
+	declared := make(map[model.SignalType]struct{}, len(observation.Capabilities))
+	for index, capability := range observation.Capabilities {
+		if err := capability.Validate(); err != nil {
+			return fmt.Errorf("%w: analyzer %q capability %d: %w", ErrInvalidObservation, source, index, err)
+		}
+		if _, duplicate := declared[capability.SignalType]; duplicate {
+			return fmt.Errorf(
+				"%w: analyzer %q declared capability %q more than once",
+				ErrInvalidObservation, source, capability.SignalType,
+			)
+		}
+		declared[capability.SignalType] = struct{}{}
 	}
 	return nil
 }

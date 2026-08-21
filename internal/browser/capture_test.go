@@ -299,6 +299,12 @@ func TestCaptureCollectionLimits(t *testing.T) {
 	if !result.DOMTruncated || len(result.DOM) > maxDOMBytes {
 		t.Errorf("DOM truncation = %t, %d bytes", result.DOMTruncated, len(result.DOM))
 	}
+	if !result.RequestsTruncated || !result.ResponsesTruncated || !result.ScriptURLsTruncated ||
+		!result.IframeURLsTruncated || !result.CookiesTruncated {
+		t.Errorf("channel truncation flags = requests %t responses %t scripts %t iframes %t cookies %t, want all set",
+			result.RequestsTruncated, result.ResponsesTruncated, result.ScriptURLsTruncated,
+			result.IframeURLsTruncated, result.CookiesTruncated)
+	}
 	wants := []string{warningRequestLimit, warningResponseLimit, warningURLLimit, warningScriptLimit, warningIframeLimit, warningDOMLimit, warningCookieLimit}
 	for _, warning := range wants {
 		if count := countString(result.Warnings, warning); count != 1 {
@@ -325,11 +331,84 @@ func TestBoundedDOMSnapshotPreservesSerializerLimits(t *testing.T) {
 		fmt.Sprint(result.IframeURLs) != fmt.Sprint([]string{"https://example.test/frame"}) {
 		t.Fatalf("bounded resources were not cleaned: %#v", result)
 	}
+	if !result.ScriptURLsTruncated || !result.IframeURLsTruncated {
+		t.Errorf("script/iframe truncation flags = %t/%t, want both set by serializer limits",
+			result.ScriptURLsTruncated, result.IframeURLsTruncated)
+	}
+	if result.RequestsTruncated || result.ResponsesTruncated || result.CookiesTruncated {
+		t.Errorf("unrelated channel flags = requests %t responses %t cookies %t, want all clear",
+			result.RequestsTruncated, result.ResponsesTruncated, result.CookiesTruncated)
+	}
 	for _, warning := range []string{warningDOMLimit, warningScriptLimit, warningIframeLimit, warningURLLimit} {
 		if count := countString(result.Warnings, warning); count != 1 {
 			t.Errorf("warning %q count = %d, want 1; warnings %#v", warning, count, result.Warnings)
 		}
 	}
+}
+
+func TestBoundedDOMSnapshotURLTruncationIsPerChannel(t *testing.T) {
+	t.Parallel()
+	// The bounded serializer attributes each oversized resource URL to its own
+	// channel. A diagnostic url_truncated flag alone must never widen
+	// incompleteness to both resource channels.
+	longURL := "https://example.test/" + strings.Repeat("x", maxBrowserURLBytes)
+
+	t.Run("oversized serializer script leaves iframes conclusive", func(t *testing.T) {
+		t.Parallel()
+		collector := newCaptureCollector()
+		result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+			DOM:             "<html><body>ok</body></html>",
+			ScriptURLs:      []string{longURL},
+			IframeURLs:      []string{"https://example.test/frame"},
+			URLTruncated:    true,
+			ScriptTruncated: true,
+		}, nil)
+		if !result.ScriptURLsTruncated {
+			t.Error("ScriptURLsTruncated = false, want true after oversized script URL")
+		}
+		if result.IframeURLsTruncated {
+			t.Error("IframeURLsTruncated = true, want clear for valid iframe")
+		}
+		if count := countString(result.Warnings, warningURLLimit); count != 1 {
+			t.Errorf("warning %q count = %d, want 1; warnings %#v", warningURLLimit, count, result.Warnings)
+		}
+	})
+
+	t.Run("oversized serializer iframe leaves scripts conclusive", func(t *testing.T) {
+		t.Parallel()
+		collector := newCaptureCollector()
+		result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+			DOM:             "<html><body>ok</body></html>",
+			ScriptURLs:      []string{"https://example.test/app.js"},
+			IframeURLs:      []string{longURL},
+			URLTruncated:    true,
+			IframeTruncated: true,
+		}, nil)
+		if !result.IframeURLsTruncated {
+			t.Error("IframeURLsTruncated = false, want true after oversized iframe URL")
+		}
+		if result.ScriptURLsTruncated {
+			t.Error("ScriptURLsTruncated = true, want clear for valid script")
+		}
+	})
+
+	t.Run("diagnostic url_truncated alone sets no channel flags", func(t *testing.T) {
+		t.Parallel()
+		collector := newCaptureCollector()
+		result := collector.snapshotBounded("https://example.test/", boundedDOMSnapshot{
+			DOM:          "<html><body>ok</body></html>",
+			URLTruncated: true,
+		}, nil)
+		if result.ScriptURLsTruncated || result.IframeURLsTruncated || result.RequestsTruncated ||
+			result.ResponsesTruncated || result.CookiesTruncated || result.DOMTruncated ||
+			result.FinalURLIncomplete || result.NavigationIncomplete || result.DOMIncomplete ||
+			result.CookiesIncomplete {
+			t.Fatalf("diagnostic url_truncated set structured flags: %#v", result)
+		}
+		if count := countString(result.Warnings, warningURLLimit); count != 1 {
+			t.Errorf("warning %q count = %d, want 1; warnings %#v", warningURLLimit, count, result.Warnings)
+		}
+	})
 }
 
 func TestBoundedDOMCaptureRetriesOnlyClassifiedFrameTransitions(t *testing.T) {
