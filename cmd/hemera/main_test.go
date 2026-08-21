@@ -325,7 +325,7 @@ func TestRunScanSupportsDeepModeAndRejectsInvalidMode(t *testing.T) {
 
 func TestNewScannerEngineDefaultAndDeep(t *testing.T) {
 	t.Parallel()
-	defaultEngine, err := newScannerEngine(false)
+	defaultEngine, err := newScannerEngine(false, nil)
 	if err != nil {
 		t.Fatalf("newScannerEngine(false) error = %v", err)
 	}
@@ -333,7 +333,7 @@ func TestNewScannerEngineDefaultAndDeep(t *testing.T) {
 		t.Fatal("newScannerEngine(false) returned nil")
 	}
 
-	deepEngine, err := newScannerEngine(true)
+	deepEngine, err := newScannerEngine(true, nil)
 	if err != nil {
 		t.Fatalf("newScannerEngine(true) error = %v", err)
 	}

@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/gkehren/hemera/internal/browser"
 	"github.com/gkehren/hemera/internal/detectors"
 	"github.com/gkehren/hemera/internal/dnstls"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
 	"github.com/gkehren/hemera/internal/report"
 	"github.com/gkehren/hemera/internal/scanner"
+	"github.com/gkehren/hemera/internal/tui"
 )
 
 var version = "dev"
@@ -22,9 +24,26 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// stdinIsTTY and stdoutIsTTY are overridable in tests.
+var (
+	stdinIsTTY  = func() bool { return term.IsTerminal(os.Stdin.Fd()) }
+	stdoutIsTTY = func() bool { return term.IsTerminal(os.Stdout.Fd()) }
+)
+
+// runWizard and runProgressView are overridable test seams for the
+// interactive terminal experience.
+var (
+	runWizard       = tui.RunWizard
+	runProgressView = tui.RunProgress
+)
+
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "scan" {
 		return runScan(context.Background(), args[1:], stdout, stderr, nil)
+	}
+
+	if len(args) == 0 && stdinIsTTY() && stdoutIsTTY() {
+		return runInteractive(context.Background(), stdout, stderr)
 	}
 
 	flags := flag.NewFlagSet("hemera", flag.ContinueOnError)
@@ -72,6 +91,8 @@ Usage:
   hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
   hemera [--help] [--version]
 
+Run without arguments in a terminal to start the interactive scan wizard.
+
 Options:
   -h, --help  Show this help message
   --version   Print the Hemera version`)
@@ -116,7 +137,7 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	if engine == nil {
 		isDeep := *deep || *mode == "deep"
 		var err error
-		engine, err = newScannerEngine(isDeep)
+		engine, err = newScannerEngine(isDeep, nil)
 		if err != nil {
 			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
 			return 1
@@ -144,7 +165,7 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	return 0
 }
 
-func newScannerEngine(deep bool) (*scanner.Scanner, error) {
+func newScannerEngine(deep bool, progress scanner.ProgressFunc) (*scanner.Scanner, error) {
 	httpConfig := httpanalyzer.DefaultConfig()
 	dnsConfig := dnstls.DefaultConfig()
 	browserConfig := browser.DefaultConfig()
@@ -173,8 +194,87 @@ func newScannerEngine(deep bool) (*scanner.Scanner, error) {
 			{Analyzer: dnsTLSAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
 			{Analyzer: browserAnalyzer, FailurePolicy: scanner.FailurePolicyContinue},
 		},
-		RuleSet: ruleSet,
+		RuleSet:  ruleSet,
+		Progress: progress,
 	})
+}
+
+// runInteractive drives the terminal experience: wizard, live progress view,
+// styled summary, and the standard text report. It is only reached when both
+// stdin and stdout are terminals.
+func runInteractive(ctx context.Context, stdout, stderr io.Writer) int {
+	opts, err := runWizard()
+	if err != nil {
+		if errors.Is(err, tui.ErrAborted) {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 0
+		}
+		fmt.Fprintf(stderr, "hemera: %v\n", err)
+		return 1
+	}
+	return runInteractiveScan(ctx, opts, stdout, stderr, nil)
+}
+
+// runInteractiveScan executes the wizard-selected scan while rendering the
+// live progress view, then prints the styled summary and text report.
+func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io.Writer, engine *scanner.Scanner) int {
+	scanCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// The buffer comfortably exceeds the two events per analyzer that a scan
+	// emits so progress sends never block after the view exits.
+	msgs := make(chan tui.Msg, 32)
+	if engine == nil {
+		var err error
+		engine, err = newScannerEngine(opts.Deep, func(event scanner.ScanEvent) {
+			msgs <- tui.Msg{Event: event}
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "hemera: configure scanner: %v\n", err)
+			return 1
+		}
+	} else {
+		engine.SetProgress(func(event scanner.ScanEvent) {
+			msgs <- tui.Msg{Event: event}
+		})
+	}
+	go func() {
+		result, scanErr := engine.Scan(scanCtx, opts.URL)
+		msgs <- tui.Msg{Final: true, Outcome: tui.Outcome{Result: result, Err: scanErr}}
+		close(msgs)
+	}()
+
+	outcome, runErr := runProgressView(scanCtx, stdout, engine.Sources(), opts.URL, msgs)
+	cancel()
+
+	// A non-nil view error means the progress view exited before the scan
+	// outcome was delivered, so there is no report to render.
+	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 0
+		}
+		fmt.Fprintf(stderr, "hemera: %v\n", runErr)
+		return 1
+	}
+
+	if outcome.Err != nil {
+		fmt.Fprintf(stderr, "hemera: scan failed: %v\n", outcome.Err)
+		if errors.Is(outcome.Err, httpanalyzer.ErrInitialTarget) {
+			return 2
+		}
+		return 1
+	}
+
+	scanReport := report.Build(version, outcome.Result)
+	// Separate the report from the progress view's final frame so the banner
+	// background does not visually overlap it.
+	fmt.Fprintln(stdout)
+	if err := report.WriteStyled(stdout, scanReport); err != nil {
+		fmt.Fprintf(stderr, "hemera: write report: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func printScanUsage(w io.Writer) {

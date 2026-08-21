@@ -103,6 +103,24 @@ Hemera mandates that Chromium's system sandbox remains active:
 
 ## CLI command reference
 
+### Interactive mode
+
+Run Hemera without arguments in a terminal to start the interactive scan
+wizard. It asks for the scan mode (default or deep) and the target URL —
+validated inline with the same policy the scanner enforces — shows live
+per-analyzer progress, then prints a styled full report in the same visual
+language as the progress view.
+
+```text
+Usage:
+  hemera
+```
+
+The wizard starts only when both stdin and stdout are terminals. Piped or
+scripted invocations print the classic help text instead, so automation is
+never affected. Set `HEMERA_ACCESSIBLE=1` for an accessible, linear prompt
+mode. Press `Ctrl+C` during the progress view to cancel the running scan.
+
 ### Root commands and flags
 
 ```text

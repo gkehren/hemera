@@ -47,10 +47,13 @@ type AnalyzerConfig struct {
 	FailurePolicy FailurePolicy
 }
 
-// Config contains the ordered analyzer pipeline and validated detector rules.
+// Config contains the ordered analyzer pipeline, validated detector rules,
+// and an optional progress observer.
 type Config struct {
 	Analyzers []AnalyzerConfig
 	RuleSet   rules.RuleSet
+	// Progress optionally receives analyzer lifecycle events during Scan.
+	Progress ProgressFunc
 }
 
 // AnalyzerStatus describes the coverage produced by one analyzer run.
@@ -115,6 +118,7 @@ type configuredAnalyzer struct {
 type Scanner struct {
 	analyzers []configuredAnalyzer
 	ruleSet   rules.RuleSet
+	progress  ProgressFunc
 }
 
 // New validates the scanner dependencies and freezes analyzer order and source
@@ -153,7 +157,16 @@ func New(config Config) (*Scanner, error) {
 		})
 	}
 
-	return &Scanner{analyzers: configured, ruleSet: config.RuleSet}, nil
+	return &Scanner{analyzers: configured, ruleSet: config.RuleSet, progress: config.Progress}, nil
+}
+
+// Sources returns the frozen analyzer source identities in scan order.
+func (s *Scanner) Sources() []string {
+	sources := make([]string, 0, len(s.analyzers))
+	for _, configured := range s.analyzers {
+		sources = append(sources, configured.source)
+	}
+	return sources
 }
 
 func analyzerIsNil(analyzer Analyzer) bool {
@@ -162,6 +175,13 @@ func analyzerIsNil(analyzer Analyzer) bool {
 	}
 	value := reflect.ValueOf(analyzer)
 	return value.Kind() == reflect.Pointer && value.IsNil()
+}
+
+// emit invokes the optional progress observer, ignoring nil callbacks.
+func (s *Scanner) emit(event ScanEvent) {
+	if s.progress != nil {
+		s.progress(event)
+	}
 }
 
 // Scan runs configured analyzers sequentially, validates and aggregates every
@@ -183,6 +203,7 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		}
 
 		target := analysis.Target{URL: result.Target.URL, Prior: priorObservations(result.Analyzers)}
+		s.emit(ScanEvent{Source: configured.source, Kind: ScanEventStarted})
 		observation, analyzerErr := configured.analyzer.Observe(ctx, target)
 		if err := ctx.Err(); err != nil {
 			return Result{}, fmt.Errorf("analyzer %q canceled: %w", configured.source, errors.Join(analyzerErr, err))
@@ -198,6 +219,13 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 				)
 			}
 			metadataSources[kind] = configured.source
+		}
+		// Terminal events are emitted only after the observation passes every
+		// contract check so a violating analyzer never reports as completed.
+		if analyzerErr != nil {
+			s.emit(ScanEvent{Source: configured.source, Kind: ScanEventFailed, Err: analyzerErr})
+		} else {
+			s.emit(ScanEvent{Source: configured.source, Kind: ScanEventCompleted})
 		}
 
 		observation = observation.Clone()

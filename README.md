@@ -66,7 +66,15 @@ detailed setup instructions, Chromium configuration, and troubleshooting.
 
 ## Quick start
 
-Run a human-readable scan against a target:
+Launch Hemera without arguments in a terminal for the interactive experience:
+it asks for the scan mode and target URL, shows live analyzer progress, and
+finishes with a styled full report in the same visual language:
+
+```sh
+hemera
+```
+
+Run a human-readable scan against a target directly:
 
 ```sh
 hemera scan https://example.com/
@@ -84,6 +92,11 @@ Filter active detections with `jq`:
 hemera scan --format json https://example.com/ \
   | jq '.detections[] | select(.detected == true) | {rule_id, name, score, level}'
 ```
+
+The interactive wizard requires a terminal on both stdin and stdout. Piped or
+scripted invocations always get the classic non-interactive behavior, so CI and
+automation are unaffected. Set `HEMERA_ACCESSIBLE=1` to run the wizard in
+huh's accessible, screen-reader-friendly mode.
 
 ## Project principles
 

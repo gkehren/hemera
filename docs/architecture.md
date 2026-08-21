@@ -445,6 +445,24 @@ contract and text-output expectations are documented in
 [JSON report schema V5](report-schema.md). An exportable local HTML report
 remains a later goal.
 
+### Interactive terminal experience
+
+When launched without arguments on a terminal (stdin and stdout are both character
+devices), the CLI runs an interactive wizard built with the Charm v2 stack
+(`charm.land/huh/v2`, `bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`) in
+`internal/tui`. The wizard collects the scan mode and target URL — validated
+inline with the same `networkguard.ParseURL` policy used at scan time — then a
+bubbletea view renders live per-analyzer progress driven by the scanner's
+optional `Progress` callback. On completion it prints the styled report
+produced by `report.WriteStyled`, which presents the same secret-minimized
+report model as the plain text renderer with the visual language of the
+progress view. The TUI is presentation only: it performs no detection, adds no
+network behavior, and consumes the same scanner result as the reporters.
+Scripted invocations (`hemera scan <url>`, pipes, CI) never enter the
+interactive path and keep the plain text renderer, so stdout contracts and exit
+codes remain unchanged. `HEMERA_ACCESSIBLE=1` switches the wizard to huh's
+accessible mode.
+
 ## Proposed repository layout
 
 ```text
@@ -459,6 +477,7 @@ internal/signals/         normalization
 internal/rules/           rule loading and matching
 internal/scoring/         confidence calculation
 internal/report/          safe text and JSON renderers
+internal/tui/             interactive wizard, progress view, and styled summary
 pkg/model/                intentionally public models, if needed
 detectors/                data-driven signatures
 testdata/                 fixtures, captures, and expected results
