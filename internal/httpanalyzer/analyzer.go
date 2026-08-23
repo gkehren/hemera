@@ -32,6 +32,15 @@ import (
 const (
 	source = analysis.SourceHTTP
 
+	warningHTMLIncomplete                 = "HTML observation was incomplete"
+	warningHTMLResourcesIncomplete        = "static HTML resource observation was incomplete"
+	warningResponseBodyTruncatedFormat    = "response body was truncated at %d bytes"
+	warningDecodedHTMLTruncatedFormat     = "decoded HTML was truncated at %d bytes"
+	warningHTMLResourceLimitFormat        = "HTML resource extraction stopped at %d resources"
+	warningMalformedCertificateDNSNames   = "malformed TLS certificate DNS names were omitted"
+	warningCertificateDNSNamesLimitFormat = "TLS certificate DNS names were truncated at %d entries"
+	warningMalformedCertificateProperties = "malformed or oversized TLS certificate properties were omitted"
+
 	maxTotalTimeout                  = 15 * time.Second
 	maxConnectTimeout                = 5 * time.Second
 	maxTLSHandshakeTimeout           = 5 * time.Second
@@ -117,6 +126,14 @@ type Result struct {
 	ResourcesIncomplete bool
 	Warnings            []string
 	TLS                 *analysis.TLSMetadata
+	htmlAnalysisErr     error
+}
+
+// HTMLAnalysisError returns the detailed internal error that made HTML
+// observation incomplete. Its text may contain attacker-controlled response
+// data and must never be copied into an Observation warning or report.
+func (r Result) HTMLAnalysisError() error {
+	return r.htmlAnalysisErr
 }
 
 // Analyzer performs one safe HTTP navigation.
@@ -153,18 +170,21 @@ func (*Analyzer) Source() string {
 // navigations return an undeclared capability set; scan orchestration then
 // falls back to the analyzer execution status.
 func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
-	observation := analysis.Observation{Source: source}
 	result, err := a.Analyze(ctx, target.URL)
 	if err != nil {
-		return observation, err
+		return analysis.Observation{Source: source}, err
 	}
+	return observationFromResult(result), nil
+}
 
+func observationFromResult(result Result) analysis.Observation {
 	redirects := make([]analysis.HTTPRedirect, 0, len(result.Redirects))
 	for _, redirect := range result.Redirects {
 		redirects = append(redirects, analysis.HTTPRedirect{
 			From: redirect.From, To: redirect.To, Status: redirect.Status,
 		})
 	}
+	observation := analysis.Observation{Source: source}
 	observation.Signals = append([]model.Signal{}, result.Signals...)
 	observation.Warnings = append([]string{}, result.Warnings...)
 	observation.Capabilities = capabilityCoverage(result)
@@ -173,7 +193,7 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 		StatusCode: result.StatusCode, Redirects: redirects,
 		BodyTruncated: result.BodyTruncated, TLS: cloneTLSMetadata(result.TLS),
 	}
-	return observation, nil
+	return observation
 }
 
 // capabilityCoverage derives per-signal-type coverage from the structured
@@ -291,7 +311,7 @@ func (a *Analyzer) Analyze(ctx context.Context, rawURL string) (Result, error) {
 	if int64(len(body)) > a.config.MaxBodyBytes {
 		body = body[:a.config.MaxBodyBytes]
 		result.BodyTruncated = true
-		result.Warnings = append(result.Warnings, fmt.Sprintf("response body was truncated at %d bytes", a.config.MaxBodyBytes))
+		result.Warnings = append(result.Warnings, fmt.Sprintf(warningResponseBodyTruncatedFormat, a.config.MaxBodyBytes))
 	}
 
 	if isHTML(resp.Header.Get("Content-Type"), body) {
@@ -299,13 +319,25 @@ func (a *Analyzer) Analyze(ctx context.Context, rawURL string) (Result, error) {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return Result{}, fmt.Errorf("analyze HTML: %w", err)
 			}
-			result.Warnings = append(result.Warnings, err.Error())
+			if errors.Is(err, ErrInvalidSignal) {
+				return Result{}, fmt.Errorf("analyze HTML: %w", err)
+			}
+			recordHTMLFailure(&result, err)
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("HTTP analysis: %w", err)
 	}
 	return result, nil
+}
+
+func recordHTMLFailure(result *Result, err error) {
+	result.htmlAnalysisErr = err
+	warning := warningHTMLResourcesIncomplete
+	if result.PageContentIncomplete {
+		warning = warningHTMLIncomplete
+	}
+	appendWarningOnce(result, warning)
 }
 
 func (a *Analyzer) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -410,7 +442,7 @@ func collectTLSMetadata(result *Result, state *tls.ConnectionState) {
 	dnsNames := make([]string, 0, len(leaf.DNSNames))
 	for _, name := range leaf.DNSNames {
 		if !validCertificateDNSName(name) {
-			appendWarningOnce(result, "malformed TLS certificate DNS names were omitted")
+			appendWarningOnce(result, warningMalformedCertificateDNSNames)
 			continue
 		}
 		dnsNames = append(dnsNames, name)
@@ -419,7 +451,7 @@ func collectTLSMetadata(result *Result, state *tls.ConnectionState) {
 	dnsNames = compactStrings(dnsNames)
 	if len(dnsNames) > maxCertificateDNSNames {
 		dnsNames = dnsNames[:maxCertificateDNSNames]
-		appendWarningOnce(result, fmt.Sprintf("TLS certificate DNS names were truncated at %d entries", maxCertificateDNSNames))
+		appendWarningOnce(result, fmt.Sprintf(warningCertificateDNSNamesLimitFormat, maxCertificateDNSNames))
 	}
 	issuer := leaf.Issuer.String()
 	subject := leaf.Subject.String()
@@ -427,7 +459,7 @@ func collectTLSMetadata(result *Result, state *tls.ConnectionState) {
 	boundedIssuer := boundedCertificateText(issuer)
 	boundedSubject := boundedCertificateText(subject)
 	if state.NegotiatedProtocol != protocol || issuer != boundedIssuer || subject != boundedSubject {
-		appendWarningOnce(result, "malformed or oversized TLS certificate properties were omitted")
+		appendWarningOnce(result, warningMalformedCertificateProperties)
 	}
 	result.TLS = &analysis.TLSMetadata{
 		Version: state.Version, NegotiatedProtocol: protocol,
@@ -532,7 +564,7 @@ func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL 
 			utf8Body = utf8Body[:len(utf8Body)-1]
 		}
 		result.HTMLTruncated = true
-		result.Warnings = append(result.Warnings, fmt.Sprintf("decoded HTML was truncated at %d bytes", a.config.MaxBodyBytes))
+		result.Warnings = append(result.Warnings, fmt.Sprintf(warningDecodedHTMLTruncatedFormat, a.config.MaxBodyBytes))
 	}
 	if err := appendSignal(result, model.Signal{
 		Type: model.SignalTypePageContent, Source: source, Key: "body",
@@ -553,7 +585,7 @@ func (a *Analyzer) collectHTML(ctx context.Context, result *Result, documentURL 
 	}
 	if limited {
 		result.ResourcesIncomplete = true
-		appendWarningOnce(result, fmt.Sprintf("HTML resource extraction stopped at %d resources", a.config.MaxHTMLResources))
+		appendWarningOnce(result, fmt.Sprintf(warningHTMLResourceLimitFormat, a.config.MaxHTMLResources))
 	}
 	return ctx.Err()
 }

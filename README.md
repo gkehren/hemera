@@ -207,9 +207,11 @@ documented in [JSON report schema V6](docs/report-schema.md). The JSON schema is
 experimental while Hemera is pre-release: intentional breaking changes require
 a documented `schema_version` increment, but historical schemas are not yet
 promised long-term support. Text output is intended for people and may evolve
-for readability; automation should consume JSON. A non-2xx response and a
-truncated body are successful observations; DNS, connection, TLS, timeout, read,
-and unsafe-redirect failures are reported as scan failures.
+for readability; automation should consume JSON. Analyzer warnings use bounded,
+producer-owned semantic messages; detailed analyzer errors remain internal and
+are never serialized directly. A non-2xx response and a truncated body are
+successful observations; DNS, connection, TLS, timeout, read, and
+unsafe-redirect failures are reported as scan failures.
 
 Only scan public targets that you are authorized to assess.
 

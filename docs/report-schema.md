@@ -18,7 +18,7 @@ top-level `schema_version` is mandatory and is currently `6`.
 | `requested_url` | string | Initial URL with query values masked. |
 | `final_url` | string or null | Final observed HTTP URL with query values masked, or `null` when unavailable. |
 | `http` | object or null | Final HTTP status, truncation, redirects, and warnings, or `null` when unavailable. |
-| `analyzers` | array | Ordered analyzer coverage and sanitized warnings. |
+| `analyzers` | array | Ordered analyzer coverage and producer-safe warnings. |
 | `detections` | array | One explained result for every embedded rule, in rule order. |
 
 When HTTP metadata is available, the `http` object contains `status_code`,
@@ -33,7 +33,7 @@ Each `analyzers` entry contains:
 | --- | --- | --- |
 | `source` | string | Stable analyzer identity. |
 | `status` | string | `complete`, `partial`, or `failed`. |
-| `warnings` | string array | Producer-sanitized source-local warnings. |
+| `warnings` | string array | Bounded source-local warnings from a closed producer-owned vocabulary. |
 
 Analyzer entries retain scanner configuration order. `complete` means the
 analyzer returned without an error, even if it emitted warnings. `partial` means

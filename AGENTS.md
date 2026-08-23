@@ -146,6 +146,11 @@ conflict instead of implementing it.
 - Keep exported APIs minimal. Add Go doc comments to every exported identifier.
 - Return errors instead of logging and continuing. Wrap errors with useful
   context using `%w` when callers may inspect the cause.
+- Keep analyzer errors and warnings separate. Errors may retain untrusted
+  internal detail but must never be serialized directly. Warnings must use a
+  closed, producer-owned vocabulary of bounded semantic summaries because
+  reporters may serialize them as-is; never build a warning from `err.Error()`
+  or raw response, URL, header, body, parser, or browser text.
 - Use sentinel errors only when callers need `errors.Is`; use typed errors only
   when callers need structured details.
 - Pass `context.Context` as the first argument to operations that can block,

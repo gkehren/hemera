@@ -74,14 +74,18 @@ Only the final body is analyzed as HTML. Charset decoding and two streaming
 HTML5 tokenizer passes from `golang.org/x/net` first select the first valid
 HTTP(S) `<base href>`, then extract scripts and iframes in document order. The
 analyzer does not build a DOM tree. Decoding and both passes observe the scan
-context. Cancellation and deadlines remain fatal; non-security HTML decoding or
-tokenization errors become warnings without discarding HTTP signals.
+context. Cancellation, deadlines, and invalid normalized signals remain fatal.
+Non-security HTML decoding or tokenization failures preserve their detailed
+errors only in the internal HTTP result and emit a controlled semantic warning
+without discarding HTTP signals. Warning text never includes the charset,
+parser diagnostic, response value, or other attacker-controlled detail.
 
 The analyzer records cookie names without values and redacts sensitive response
 headers. Stored and displayed URL observations mask query values. A body prefix
 at the size limit remains analyzable and is reported as truncated. Unsupported
-HTML charsets and parser failures become warnings without discarding HTTP
-signals; connection, TLS, timeout, header, and body-read failures remain fatal.
+HTML charsets and parser failures become controlled semantic warnings without
+discarding HTTP signals; connection, TLS, timeout, header, and body-read
+failures remain fatal.
 
 ### DNS / TLS analyzer
 
@@ -458,8 +462,13 @@ Caller cancellation is always fatal, including for an analyzer configured to
 continue. Invalid signals, observation or signal source mismatches, and duplicate
 typed metadata kinds are analyzer contract violations and are also always fatal.
 Successful observations may contain analyzer-local warnings without becoming
-partial. The scanner retains local errors for internal diagnostics, but reporters
-omit their text because it may contain untrusted input.
+partial. Each analyzer owns a closed vocabulary of bounded semantic warnings;
+it must minimize them before they enter `Observation` because reporters copy
+them without analyzer-specific reinterpretation. Analyzer errors remain a
+separate internal channel and may contain untrusted detail. The scanner retains
+those errors for control flow and diagnostics, but reporters never serialize
+their text. Structured capability coverage, rather than warning text, carries
+incomplete-observation semantics.
 
 Before each analyzer runs, the scanner supplies cloned observations from earlier
 analyzers in `analysis.Target.Prior`. This preserves configured ordering and lets
@@ -472,7 +481,7 @@ The CLI renders that model as human-oriented text by default or as versioned,
 deterministic JSON with `--format json`. Both formats explain detected and
 non-detected rules, including raw positive evidence, its correlation group, the
 selected maximum contribution, and later penalties. JSON V6 also records each
-analyzer's source, coverage status, and producer-sanitized warnings. They omit
+analyzer's source, coverage status, and producer-safe warnings. They omit
 HTML, header/cookie values, and analyzer error details and sanitize every emitted
 URL. The JSON schema is experimental until the first stable release; breaking
 pre-release changes still require a documented schema-version increment. The
