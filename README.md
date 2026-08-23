@@ -53,6 +53,9 @@ Detections:
 go install github.com/gkehren/hemera/cmd/hemera@latest
 ```
 
+Versioned module installs report their module version through `hemera --version`
+and JSON `tool_version`; unversioned builds use a bounded development identity.
+
 ### From source
 
 ```sh

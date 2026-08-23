@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/gkehren/hemera/internal/browser"
+	"github.com/gkehren/hemera/internal/buildversion"
 	"github.com/gkehren/hemera/internal/detectors"
 	"github.com/gkehren/hemera/internal/dnstls"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
@@ -21,7 +22,13 @@ import (
 	"github.com/gkehren/hemera/internal/tui"
 )
 
-var version = "dev"
+// version is intentionally left as a string variable so official release
+// builds can override it with -ldflags "-X main.version=<version>".
+var version string
+
+// toolVersion is resolved once so every user-facing provenance field uses the
+// same build identity.
+var toolVersion = buildversion.Resolve(version)
 
 const chromiumPathEnvironment = "HEMERA_CHROMIUM_PATH"
 
@@ -94,7 +101,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *showVersion {
-		fmt.Fprintf(stdout, "hemera %s\n", version)
+		fmt.Fprintf(stdout, "hemera %s\n", toolVersion)
 		return 0
 	}
 
@@ -202,7 +209,7 @@ func runScanWithEnvironment(
 		}
 		return 1
 	}
-	scanReport := report.Build(version, result)
+	scanReport := report.Build(toolVersion, result)
 	if *format == "json" {
 		err = report.WriteJSON(stdout, scanReport)
 	} else {
@@ -375,7 +382,7 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 		return 1
 	}
 
-	scanReport := report.Build(version, outcome.Result)
+	scanReport := report.Build(toolVersion, outcome.Result)
 	// Separate the report from the progress view's final frame so the banner
 	// background does not visually overlap it.
 	fmt.Fprintln(stdout)

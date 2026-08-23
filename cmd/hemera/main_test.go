@@ -47,7 +47,7 @@ func TestRunShowsVersion(t *testing.T) {
 	if code := run(context.Background(), []string{"--version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run() code = %d, want 0", code)
 	}
-	if got, want := stdout.String(), "hemera dev\n"; got != want {
+	if got, want := stdout.String(), "hemera "+toolVersion+"\n"; got != want {
 		t.Errorf("run() stdout = %q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
@@ -93,7 +93,7 @@ func TestRunHelpTakesPriorityOverVersion(t *testing.T) {
 			if code := run(context.Background(), args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run() code = %d, want 0", code)
 			}
-			if !strings.Contains(stdout.String(), "Usage:") || strings.Contains(stdout.String(), "hemera dev") {
+			if !strings.Contains(stdout.String(), "Usage:") || strings.Contains(stdout.String(), "hemera "+toolVersion+"\n") {
 				t.Errorf("run() stdout = %q, want root usage only", stdout.String())
 			}
 			if stderr.Len() != 0 {
@@ -230,7 +230,7 @@ func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	for _, expected := range []string{`"schema_version": 6`, `"status_code": 404`, `"detections": []`} {
+	for _, expected := range []string{`"schema_version": 6`, `"tool_version": "` + toolVersion + `"`, `"status_code": 404`, `"detections": []`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("JSON lacks %q: %s", expected, stdout.String())
 		}

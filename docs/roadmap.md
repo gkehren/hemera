@@ -147,6 +147,9 @@ Milestone 0.5 rather than this release phase.
 - [ ] Adopt and document stable public compatibility guarantees for rules,
   reports, and the CLI before the first stable release, including any supported
   historical-schema lifecycle.
+- [x] Derive trustworthy CLI and report build provenance from explicit release
+  injection, versioned Go module metadata, or bounded development VCS metadata
+  ([issue #24](https://github.com/gkehren/hemera/issues/24)).
 - [ ] Produce reproducible Linux, macOS, and Windows release binaries and a
   multi-platform release pipeline.
 - [ ] Publish a container image if it adds practical value.

@@ -71,6 +71,26 @@ go run ./cmd/hemera --help
 go run ./cmd/hemera scan https://example.com/
 ```
 
+### Version provenance
+
+`hemera --version` and JSON reports use the same build identity. A binary
+installed from a versioned Go module reports that module version (for example,
+`v0.2.0`) without requiring a custom release build. Go may identify a source
+build with a development pseudo-version. When it supplies no version, Hemera
+reports `dev+g<revision>`, adds `.dirty` when Go records modified source, or
+falls back to `dev` when bounded Git metadata is unavailable.
+
+Official release builds can take control of the exact value with:
+
+```sh
+go build -ldflags '-X main.version=v0.2.0' \
+  -o hemera ./cmd/hemera
+```
+
+The injected value has precedence over Go module and development metadata.
+Version derivation does not include repository paths, usernames, environment
+variables, or unrelated Go build settings.
+
 ---
 
 ## Configuring the browser analyzer
