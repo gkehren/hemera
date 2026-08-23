@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +92,46 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 	for _, secret := range []string{"password", "secret", "header-secret", "cookie-secret", "private-body", "fragment"} {
 		if strings.Contains(output.String(), secret) {
 			t.Errorf("JSON disclosed %q: %s", secret, output.String())
+		}
+	}
+}
+
+func TestAutomationDocumentationUsesCurrentReportContract(t *testing.T) {
+	t.Parallel()
+	repositoryRoot := filepath.Join("..", "..")
+	documentPaths := []string{
+		"README.md",
+		filepath.Join("docs", "installation-and-usage.md"),
+	}
+	for _, relativePath := range documentPaths {
+		data, err := os.ReadFile(filepath.Join(repositoryRoot, relativePath))
+		if err != nil {
+			t.Fatalf("read %s: %v", relativePath, err)
+		}
+		content := string(data)
+		if strings.Contains(content, ".rule_id") || strings.Contains(content, "{rule_id,") {
+			t.Errorf("%s queries the conflict-only rule_id field as a detection identifier", relativePath)
+		}
+		if !strings.Contains(content, "{id, name, score, level}") {
+			t.Errorf("%s does not show the current detection ID field", relativePath)
+		}
+	}
+
+	guidePath := filepath.Join(repositoryRoot, "docs", "installation-and-usage.md")
+	guide, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guideText := string(guide)
+	wants := []string{
+		fmt.Sprintf(`if [ "${SCHEMA_VERSION}" -ne %d ]; then`, SchemaVersion),
+		`.level == "high" or .level == "very_high"`,
+		`\(.id)`,
+		`../internal/report/testdata/complete-report.golden.json`,
+	}
+	for _, want := range wants {
+		if !strings.Contains(guideText, want) {
+			t.Errorf("installation guide does not contain current report contract fragment %q", want)
 		}
 	}
 }

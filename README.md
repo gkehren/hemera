@@ -6,13 +6,13 @@ explainable report about the protections that may be present: CDN/reverse proxy,
 WAF, bot management, CAPTCHA/challenge, client-side fingerprinting, and related
 security services.
 
-> Hemera is in early development. Safe HTTP scanning, normalized HTTP signal
-> collection, detector rule matching, correlation-aware confidence scoring,
-> initial Turnstile and reCAPTCHA detectors, text/JSON reports, deterministic
-> multi-analyzer orchestration, bounded DNS/TLS supporting signals, and
-> sandboxed Chromium/CDP navigation are implemented. Browser observations are
-> normalized and included in the same rule and scoring pass as HTTP and DNS/TLS
-> evidence. Broader detector coverage is not available yet.
+> Hemera is in early development. Safe HTTP scanning, bounded DNS/TLS
+> observation, sandboxed Chromium/CDP navigation, deterministic multi-analyzer
+> orchestration, normalized signal matching, correlation-aware confidence
+> scoring, and text/JSON V6 reports are implemented. The built-in rules cover
+> Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs with
+> explicit infrastructure-versus-product separation and fixture-backed
+> limitations.
 
 ## What Hemera aims to provide
 
@@ -86,11 +86,11 @@ Generate a machine-readable JSON V6 report for automation:
 hemera scan --format json https://example.com/
 ```
 
-Filter active detections with `jq`:
+Filter positive detections with `jq`:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.detected == true) | {rule_id, name, score, level}'
+  | jq '.detections[] | select(.detected == true) | {id, name, score, level}'
 ```
 
 The interactive wizard requires a terminal on both stdin and stdout. Piped or
@@ -118,27 +118,28 @@ with exit code `0`.
 
 ## Detector coverage
 
-Hemera ships built-in detector rules with explicit product-level separation across 7 vendor families:
+Hemera ships 12 built-in detector rules with explicit product-level separation
+across 7 vendor families:
 
 - **Cloudflare:**
-  - `cloudflare.proxy` (Reverse Proxy / CDN edge infrastructure);
-  - `cloudflare.challenge_page` (Managed challenge pages, security error codes, and challenge interstitials);
-  - `cloudflare.bot_protection` (Bot Protection / Bot Fight Mode JavaScript detection telemetry);
-  - `cloudflare.turnstile` (Turnstile client challenge widget).
+  - `cloudflare.proxy` (Cloudflare Reverse Proxy);
+  - `cloudflare.challenge_page` (Cloudflare Challenge Page);
+  - `cloudflare.bot_protection` (Cloudflare Bot Protection);
+  - `cloudflare.turnstile` (Cloudflare Turnstile).
 - **Google:**
-  - `google.recaptcha` (Standard and Enterprise reCAPTCHA client integrations).
+  - `google.recaptcha` (Google reCAPTCHA).
 - **Amazon Web Services (AWS):**
-  - `aws.cloudfront` (Amazon CloudFront edge CDN infrastructure);
-  - `aws.waf` (AWS WAF JavaScript SDK, action headers, and block pages).
+  - `aws.cloudfront` (Amazon CloudFront);
+  - `aws.waf` (AWS WAF).
 - **DataDome:**
-  - `datadome.bot_protection` (DataDome bot management client tag, headers, and challenge interstitials).
+  - `datadome.bot_protection` (DataDome).
 - **Akamai:**
-  - `akamai.edge` (Akamai Edge reverse proxy infrastructure);
-  - `akamai.bot_manager` (Akamai Bot Manager JavaScript sensors and telemetry cookies).
+  - `akamai.edge` (Akamai Edge);
+  - `akamai.bot_manager` (Akamai Bot Manager).
 - **hCaptcha:**
-  - `hcaptcha.challenge` (hCaptcha client API script and challenge widget).
+  - `hcaptcha.challenge` (hCaptcha).
 - **Arkose Labs:**
-  - `arkoselabs.matchkey` (Arkose MatchKey / FunCAPTCHA client API script and enforcement challenge).
+  - `arkoselabs.matchkey` (Arkose MatchKey).
 
 Vendor infrastructure alone does not imply that a specific product is enabled.
 For example, detecting `aws.cloudfront` or `akamai.edge` never automatically
@@ -169,13 +170,14 @@ go run ./cmd/hemera scan https://example.com/
 go run ./cmd/hemera scan --format json https://example.com/
 ```
 
-The scan validates the initial destination and every redirect, blocks private
-and special-purpose networks using pinned IANA registry data plus conservative
-local exclusions, ignores environment proxy settings, and does not load page
-subresources. Runtime scans never download registry data. The scan reports HTTP
-status, redirects, response-header names, cookie names, and statically referenced
-scripts, iframes, and third-party hosts. Query values, cookie values, sensitive
-header values, and HTML content are not printed.
+The HTTP pass validates the initial destination and every redirect, blocks
+private and special-purpose networks using pinned IANA registry data plus
+conservative local exclusions, ignores environment proxy settings, and does not
+load page subresources. Runtime scans never download registry data. Reports
+include HTTP status and redirects plus only the minimized observations selected
+as detector evidence; they are not raw header, cookie, resource, or browser
+inventories. Query values, cookie values, sensitive header values, and HTML
+content are not printed.
 
 HTTP configuration can tighten but cannot raise the built-in safety ceilings:
 15 seconds total, 5 seconds for connection, TLS, and response headers, 10
@@ -203,8 +205,8 @@ only to normalized source names and signal types, not analyzer implementations.
 Built-in rules are rejected at load time if an exact source/signal pair has no
 production producer, or if a source-agnostic signal has no implemented source.
 
-The default text report and versioned JSON report contain scored product
-detections with the evidence that contributed to them. The JSON contract is
+The default text report and versioned JSON report contain scored detections with
+the evidence that contributed to them. The JSON contract is
 documented in [JSON report schema V6](docs/report-schema.md). The JSON schema is
 experimental while Hemera is pre-release: intentional breaking changes require
 a documented `schema_version` increment, but historical schemas are not yet
@@ -212,15 +214,16 @@ promised long-term support. Text output is intended for people and may evolve
 for readability; automation should consume JSON. Analyzer warnings use bounded,
 producer-owned semantic messages; detailed analyzer errors remain internal and
 are never serialized directly. A non-2xx response and a truncated body are
-successful observations; DNS, connection, TLS, timeout, read, and
-unsafe-redirect failures are reported as scan failures.
+successful HTTP observations. Fatal HTTP DNS, connection, TLS, timeout, read,
+and unsafe-redirect failures stop the scan; the bounded supporting CNAME lookup
+and Browser analyzer use non-fatal failure policies unless the caller cancels.
 
 Only scan public targets that you are authorized to assess.
 
 ## Current DNS/TLS observation
 
 After a successful HTTP navigation, Hemera performs one bounded lookup for the
-final host's canonical CNAME and emits it only when it differs from the requested
+final host's canonical CNAME and emits it only when it differs from that final
 host. For HTTPS targets it also emits the negotiated TLS version and ALPN, plus
 the verified leaf certificate's issuer, subject, and up to 256 sorted DNS SANs.
 TLS data comes from the existing HTTP connection; Hemera does not create a
@@ -249,6 +252,9 @@ confidence indicators, not calibrated probabilities.
 
 `hemera scan` evaluates the embedded rules once after aggregating HTTP, DNS/TLS,
 and browser signals, then passes the scored results to the selected reporter.
+The Turnstile and reCAPTCHA rules intentionally use only static HTTP evidence;
+source-agnostic predicates in the other rules can match compatible HTTP or
+Browser observations.
 See the [detector rule schema V2](docs/detector-rules.md) and
 [detector family support standard](docs/detector-support-standard.md) for the
 implemented contract, built-in rules, quality criteria, and scoring semantics.
@@ -325,7 +331,7 @@ and sandbox invariants.
 ## Documentation
 
 The repository roadmap is the authoritative source for implementation order and
-status
+status:
 
 - [Documentation index](docs/README.md)
 - [Installation and usage guide](docs/installation-and-usage.md)

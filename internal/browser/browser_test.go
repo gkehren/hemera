@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,6 +36,45 @@ func TestDefaultConfig(t *testing.T) {
 		config.MaxTransferBytes != defaultMaxBrowserBytes || config.MaxConcurrentRequests != defaultMaxBrowserConcurrency {
 		t.Errorf("browser budgets = requests %d redirects %d bytes %d concurrency %d",
 			config.MaxRequests, config.MaxRedirects, config.MaxTransferBytes, config.MaxConcurrentRequests)
+	}
+}
+
+func TestDocumentedBrowserLimitsMatchConfiguration(t *testing.T) {
+	t.Parallel()
+	repositoryRoot := filepath.Join("..", "..")
+	architecturePath := filepath.Join(repositoryRoot, "docs", "architecture.md")
+	architecture, err := os.ReadFile(architecturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	architectureText := strings.Join(strings.Fields(string(architecture)), " ")
+	wants := []string{
+		fmt.Sprintf("Startup uses a %d-second default timeout and a %d-second hard ceiling", int(defaultStartupTimeout/time.Second), int(maxStartupTimeout/time.Second)),
+		fmt.Sprintf("bounded by %d seconds", int(maxNavigationTimeout/time.Second)),
+		fmt.Sprintf("default limit of %d, with a hard ceiling of %d", defaultMaxBrowserRequests, maxBrowserRequests),
+		fmt.Sprintf("permits %d active requests by default, configurable only up to %d", defaultMaxBrowserConcurrency, maxBrowserConcurrency),
+		fmt.Sprintf("%d-second connection timeout", int(maxBrowserConnectTimeout/time.Second)),
+		fmt.Sprintf("limited to %d", maxBrowserRedirects),
+		fmt.Sprintf("every browser URL to %d bytes", maxBrowserURLBytes),
+	}
+	for _, want := range wants {
+		if !strings.Contains(architectureText, want) {
+			t.Errorf("architecture does not contain browser limit %q", want)
+		}
+	}
+
+	securityPath := filepath.Join(repositoryRoot, "docs", "security-and-ethics.md")
+	security, err := os.ReadFile(securityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	securityText := strings.Join(strings.Fields(string(security)), " ")
+	startupSummary := fmt.Sprintf(
+		"default startup timeout of %d seconds, with a %d-second hard ceiling",
+		int(defaultStartupTimeout/time.Second), int(maxStartupTimeout/time.Second),
+	)
+	if !strings.Contains(securityText, startupSummary) {
+		t.Errorf("security documentation does not contain browser startup limits %q", startupSummary)
 	}
 }
 

@@ -55,11 +55,31 @@ detector matched them as evidence; the report does not otherwise add a raw
 network-observation inventory. `final_url` remains the final HTTP URL rather
 than a browser redirect field.
 
-Each detection contains identity fields, `detected`, `status`,
-`incomplete_sources`, the matching gates, `evidence_score`, final `score`,
-`level`, grouped positive/negative/ambiguous evidence,
-`positive_evidence_groups`, missing evidence and dependencies, and applied
-conflict penalties.
+Each detection contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Stable detector rule identifier from the embedded ruleset. |
+| `name` | string | Human-readable detector name. |
+| `category` | string | Rule category from the detector schema. |
+| `vendor` | string | Vendor or project represented by the rule. |
+| `product` | string, omitted when empty | Product name; infrastructure-only rules omit it. |
+| `detected` | boolean | Convenience flag equivalent to `status == "detected"`. |
+| `status` | string | `detected`, `not_detected`, or `insufficient_coverage`. |
+| `incomplete_sources` | string array | Stable sources whose incomplete capabilities keep a negative result inconclusive. |
+| `condition_matched` | boolean | Whether the positive condition tree matched. |
+| `minimum_evidence_met` | boolean | Whether enough distinct positive evidence groups matched. |
+| `evidence_score` | number | Score after evidence and conflict penalties but before dependency gating. |
+| `score` | number | Final bounded score after dependency gating. |
+| `level` | string | `not_detected`, `low`, `medium`, `high`, or `very_high`. |
+| `evidence` | object | Grouped `positive`, `negative`, and `ambiguous` evidence arrays. |
+| `positive_evidence_groups` | array | Correlation-group contribution summaries. |
+| `missing_evidence` | string array | Unmatched positive evidence identifiers. |
+| `missing_dependencies` | string array | Required rule identifiers that were not detected. |
+| `applied_conflicts` | array | Applied cross-rule penalties; each object uses `rule_id` and `penalty`. |
+
+The top-level detection identifier is `id`. `rule_id` appears only in an
+`applied_conflicts` entry, where it names the conflicting rule.
 
 `status` is one of `detected`, `not_detected`, or `insufficient_coverage`.
 `not_detected` is emitted only when observation coverage was sufficient to

@@ -30,7 +30,7 @@ Read these documents before making architectural or security-sensitive changes:
 
 - `README.md` — public project overview and current status;
 - `docs/vision-and-goals.md` — direction, objectives, and non-goals;
-- `docs/architecture.md` — component boundaries and planned data flow;
+- `docs/architecture.md` — component boundaries and current data flow;
 - `docs/roadmap.md` — current milestones and delivery order;
 - `docs/security-and-ethics.md` — mandatory safety and ethical boundaries.
 
@@ -52,7 +52,8 @@ Hemera is in early development. The repository currently contains:
   delayed post-load, adversarial security, and resource-limit coverage, using
   partial-order traffic contracts and explicit completion barriers;
 - the normalized signal model, detector rule matching, and confidence scoring;
-- built-in Cloudflare Turnstile and Google reCAPTCHA rules;
+- 12 built-in rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha,
+  and Arkose Labs with explicit infrastructure-versus-product separation;
 - deterministic multi-analyzer orchestration, typed HTTP metadata, and
   a validated static producer-capability registry kept separate from
   capability-level coverage tracking for bounded analyzer observations;
@@ -65,9 +66,9 @@ Hemera is in early development. The repository currently contains:
   sandboxed Chromium integration tests on Linux with and without the race
   detector.
 
-Do not document planned behavior as implemented. Broader detector coverage and
-release packaging remain planned until their roadmap steps are completed and
-verified.
+Do not document planned behavior as implemented. Additional detector coverage
+and release packaging remain planned until their roadmap steps are completed
+and verified.
 
 ## Architecture boundaries
 
