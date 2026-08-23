@@ -368,6 +368,24 @@ independent facts; analyzer identity alone is not that rationale. Regression
 tests verify that identical HTTP and browser script observations contribute the
 maximum of one shared group rather than two additive proofs.
 
+### Capability support validation
+
+Every evidence predicate must use a source/signal pair implemented by a
+production analyzer. Built-in rules are validated against the static producer
+registry when they load, and scanner construction validates the complete rule
+set against its frozen registry. An exact source constraint such as
+`browser_analyzer` plus `js_global` is rejected because Browser has no such
+producer. A source-agnostic predicate is valid only when at least one registered
+source can emit its signal type; patterned source constraints must likewise
+match at least one capable source.
+
+This validation applies to positive, negative, and ambiguous evidence. The
+current source/signal matrix is documented in
+[Architecture](architecture.md#capability-support-contract). Common-model types that
+are reserved for future producers, including `dom_selector` and `js_global`,
+cannot be used by built-in rules yet. `resource_host` is currently HTTP-only,
+not Browser-capable.
+
 ### Coverage-sensitive negative results
 
 Rules remain independent of Go analyzer implementations. The scanner evaluates
@@ -390,6 +408,10 @@ own. An analyzer that declares any capability coverage is treated as
 capability-aware, so signal types it does not declare are inconclusive by
 construction and can never become conclusive through its execution status.
 Incomplete capabilities unrelated to a rule's predicates do not downgrade it.
+
+Capability support is static and must not be inferred from this runtime state.
+Completeness answers whether one supported channel finished for one scan; it
+cannot authorize a source/signal pair that is absent from the producer registry.
 
 Each selected signal field contains exactly one text operation:
 

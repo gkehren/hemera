@@ -273,7 +273,8 @@ func TestScanDeclaredCompleteCapabilitiesWithoutEvidenceAreConclusive(t *testing
 
 func TestScanBrowserChannelTruncationScopesToRelevantRules(t *testing.T) {
 	t.Parallel()
-	domKey := "#captcha-container"
+	domKey := "dom"
+	browserSource := analysis.SourceBrowser
 	ruleSet := rules.RuleSet{
 		SchemaVersion: rules.CurrentSchemaVersion,
 		Rules: []rules.Rule{
@@ -281,8 +282,9 @@ func TestScanBrowserChannelTruncationScopesToRelevantRules(t *testing.T) {
 				ID: "dom.rule", Name: "DOM Rule", Category: rules.CategoryThirdPartySecurity,
 				Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
 				Match: rules.Condition{Signal: &rules.Evidence{
-					ID: "dom", Group: "dom", Type: model.SignalTypeDOMSelector,
-					Key: &rules.TextPattern{Exact: &domKey}, Weight: 75,
+					ID: "dom", Group: "dom", Type: model.SignalTypePageContent,
+					Source: &rules.TextPattern{Exact: &browserSource},
+					Key:    &rules.TextPattern{Exact: &domKey}, Weight: 75,
 				}},
 			},
 			{
@@ -295,9 +297,9 @@ func TestScanBrowserChannelTruncationScopesToRelevantRules(t *testing.T) {
 			},
 		},
 	}
-	// DOM capture was truncated while requests completed cleanly. The browser
-	// declares only the capabilities it actually observes, so the DOM selector
-	// predicate is inconclusive because it was never declared.
+	// DOM capture was truncated while requests completed cleanly. The Browser
+	// page-content predicate is inconclusive while the request predicate remains
+	// conclusive.
 	browserPartialDOM := analysis.Observation{
 		Source: analysis.SourceBrowser,
 		Capabilities: []analysis.CapabilityCoverage{
@@ -449,13 +451,10 @@ func TestBuildCapabilityCompleterScopesFallbackPerAnalyzer(t *testing.T) {
 	}
 }
 
-func TestScanUndeclaredCapabilityOnCompleteAnalyzerIsInsufficientCoverage(t *testing.T) {
+func TestNewRejectsUnsupportedExactSourceCapability(t *testing.T) {
 	t.Parallel()
-	// Regression: analyzer-wide success must not imply that an undeclared
-	// capability was conclusively evaluated. The browser observation reports
-	// complete execution and complete coverage for every channel it actually
-	// observes, but it can never produce js_global evidence, so a js_global
-	// rule must stay inconclusive instead of returning a conclusive negative.
+	// Regression: Browser never produces js_global. A rule cannot silently load
+	// and later treat analyzer-wide success as conclusive observation of it.
 	globalKey := "challengeProviderReady"
 	ruleSet := rules.RuleSet{
 		SchemaVersion: rules.CurrentSchemaVersion,
@@ -469,36 +468,14 @@ func TestScanUndeclaredCapabilityOnCompleteAnalyzerIsInsufficientCoverage(t *tes
 			}},
 		}},
 	}
-	browserComplete := analysis.Observation{
-		Source: analysis.SourceBrowser,
-		Capabilities: []analysis.CapabilityCoverage{
-			{SignalType: model.SignalTypeNetworkRequest, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeNetworkResponse, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypePageContent, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeScriptURL, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeIframeURL, Status: analysis.CapabilityComplete},
-			{SignalType: model.SignalTypeCookie, Status: analysis.CapabilityComplete},
-		},
-	}
-	engine, err := New(Config{
+	_, err := New(Config{
 		Analyzers: []AnalyzerConfig{
-			{Analyzer: analyzerStub{source: analysis.SourceBrowser, observation: browserComplete}},
+			{Analyzer: analyzerStub{source: analysis.SourceBrowser}},
 		},
 		RuleSet: ruleSet,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := engine.Scan(context.Background(), "https://example.test/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := result.Analyzers[0].Status; got != AnalyzerStatusComplete {
-		t.Fatalf("analyzer status = %q, want complete", got)
-	}
-	statuses := statusByRule(result.Coverage)
-	if got := statuses["global.only"]; got != DetectionStatusInsufficientCoverage {
-		t.Errorf("global.only status = %s, want insufficient_coverage for undeclared capability", got)
+	if !errors.Is(err, rules.ErrUnsupportedCapability) {
+		t.Fatalf("New() error = %v, want ErrUnsupportedCapability", err)
 	}
 }
 

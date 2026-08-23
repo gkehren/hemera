@@ -17,6 +17,7 @@ import (
 	"github.com/gkehren/hemera/internal/httpanalyzer"
 	"github.com/gkehren/hemera/internal/scanner"
 	"github.com/gkehren/hemera/internal/tui"
+	"github.com/gkehren/hemera/pkg/model"
 )
 
 // TestMain detaches tests from any real terminal so the interactive mode
@@ -326,6 +327,27 @@ type stubAnalyzer struct {
 }
 
 func (a stubAnalyzer) Source() string { return a.source }
+
+func (a stubAnalyzer) Capabilities() []model.SignalType {
+	if implemented := analysis.SupportedSignalTypes(a.source); len(implemented) > 0 {
+		return implemented
+	}
+	return []model.SignalType{
+		model.SignalTypeResponseHeader,
+		model.SignalTypeCookie,
+		model.SignalTypeScriptURL,
+		model.SignalTypeNetworkRequest,
+		model.SignalTypeNetworkResponse,
+		model.SignalTypeDOMSelector,
+		model.SignalTypeIframeURL,
+		model.SignalTypeJSGlobal,
+		model.SignalTypeDNSRecord,
+		model.SignalTypeTLSProperty,
+		model.SignalTypeRedirect,
+		model.SignalTypePageContent,
+		model.SignalTypeResourceHost,
+	}
+}
 
 func (a stubAnalyzer) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
 	if a.observe != nil {

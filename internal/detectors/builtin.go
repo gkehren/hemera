@@ -18,5 +18,12 @@ func Load() (rules.RuleSet, error) {
 	if err != nil {
 		return rules.RuleSet{}, fmt.Errorf("load built-in detectors: %w", err)
 	}
+	capabilities, err := rules.DefaultCapabilityRegistry()
+	if err != nil {
+		return rules.RuleSet{}, fmt.Errorf("load built-in detector capabilities: %w", err)
+	}
+	if err := rules.ValidateRuleSetCapabilities(ruleSet, capabilities); err != nil {
+		return rules.RuleSet{}, fmt.Errorf("load built-in detectors: %w", err)
+	}
 	return ruleSet, nil
 }

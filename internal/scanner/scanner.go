@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -37,6 +38,7 @@ const (
 // Analyzer is the observation boundary required by Scanner.
 type Analyzer interface {
 	Source() string
+	Capabilities() []model.SignalType
 	Observe(context.Context, analysis.Target) (analysis.Observation, error)
 }
 
@@ -116,9 +118,10 @@ type configuredAnalyzer struct {
 
 // Scanner coordinates an ordered analyzer pipeline and validated detector rules.
 type Scanner struct {
-	analyzers []configuredAnalyzer
-	ruleSet   rules.RuleSet
-	progress  ProgressFunc
+	analyzers  []configuredAnalyzer
+	ruleSet    rules.RuleSet
+	capability rules.CapabilityRegistry
+	progress   ProgressFunc
 }
 
 // New validates the scanner dependencies and freezes analyzer order and source
@@ -130,6 +133,11 @@ func New(config Config) (*Scanner, error) {
 	if err := config.RuleSet.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: detector rules: %w", ErrInvalidConfig, err)
 	}
+	defaultCapabilities, err := rules.DefaultCapabilityRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("%w: production capabilities: %w", ErrInvalidConfig, err)
+	}
+	capabilityDeclarations := defaultCapabilities.Capabilities()
 
 	configured := make([]configuredAnalyzer, 0, len(config.Analyzers))
 	sources := make(map[string]struct{}, len(config.Analyzers))
@@ -151,13 +159,51 @@ func New(config Config) (*Scanner, error) {
 		if _, exists := sources[source]; exists {
 			return nil, fmt.Errorf("%w: duplicate analyzer source %q", ErrInvalidConfig, source)
 		}
+		advertised := append([]model.SignalType{}, entry.Analyzer.Capabilities()...)
+		if len(advertised) == 0 {
+			return nil, fmt.Errorf("%w: analyzer %q declares no capabilities", ErrInvalidConfig, source)
+		}
+		sort.Slice(advertised, func(i, j int) bool { return advertised[i] < advertised[j] })
+		for capabilityIndex, signalType := range advertised {
+			if !signalType.Valid() {
+				return nil, fmt.Errorf(
+					"%w: analyzer %q capability %d has invalid signal type %q",
+					ErrInvalidConfig, source, capabilityIndex, signalType,
+				)
+			}
+			if capabilityIndex > 0 && signalType == advertised[capabilityIndex-1] {
+				return nil, fmt.Errorf(
+					"%w: analyzer %q repeats capability %q",
+					ErrInvalidConfig, source, signalType,
+				)
+			}
+			capabilityDeclarations = append(capabilityDeclarations, analysis.Capability{
+				Source: source, SignalType: signalType,
+			})
+		}
+		if implemented := analysis.SupportedSignalTypes(source); len(implemented) > 0 && !slices.Equal(advertised, implemented) {
+			return nil, fmt.Errorf(
+				"%w: analyzer %q capabilities %v do not match production contract %v",
+				ErrInvalidConfig, source, advertised, implemented,
+			)
+		}
 		sources[source] = struct{}{}
 		configured = append(configured, configuredAnalyzer{
 			analyzer: entry.Analyzer, source: source, policy: entry.FailurePolicy,
 		})
 	}
+	capabilityRegistry, err := rules.NewCapabilityRegistry(capabilityDeclarations)
+	if err != nil {
+		return nil, fmt.Errorf("%w: analyzer capabilities: %w", ErrInvalidConfig, err)
+	}
+	if err := rules.ValidateRuleSetCapabilities(config.RuleSet, capabilityRegistry); err != nil {
+		return nil, fmt.Errorf("%w: detector rules: %w", ErrInvalidConfig, err)
+	}
 
-	return &Scanner{analyzers: configured, ruleSet: config.RuleSet, progress: config.Progress}, nil
+	return &Scanner{
+		analyzers: configured, ruleSet: config.RuleSet,
+		capability: capabilityRegistry, progress: config.Progress,
+	}, nil
 }
 
 // Sources returns the frozen analyzer source identities in scan order.
@@ -208,7 +254,7 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		if err := ctx.Err(); err != nil {
 			return Result{}, fmt.Errorf("analyzer %q canceled: %w", configured.source, errors.Join(analyzerErr, err))
 		}
-		if err := validateObservation(configured.source, observation); err != nil {
+		if err := validateObservation(configured.source, observation, s.capability); err != nil {
 			return Result{}, err
 		}
 		for _, kind := range observation.Metadata.Kinds() {
@@ -254,7 +300,7 @@ func (s *Scanner) Scan(ctx context.Context, rawURL string) (Result, error) {
 		return Result{}, fmt.Errorf("scan canceled during detector evaluation: %w", err)
 	}
 	result.Detections = detections
-	coverage, err := buildDetectionCoverage(s.ruleSet, detections, result.Analyzers, result.Signals)
+	coverage, err := buildDetectionCoverage(s.ruleSet, detections, result.Analyzers, result.Signals, s.capability)
 	if err != nil {
 		return Result{}, fmt.Errorf("evaluate coverage: %w", err)
 	}
@@ -267,6 +313,7 @@ func buildDetectionCoverage(
 	detections []scoring.Detection,
 	analyzers []AnalyzerResult,
 	signals []model.Signal,
+	capabilities rules.CapabilityRegistry,
 ) ([]DetectionCoverage, error) {
 	completeCapability := buildCapabilityCompleter(analyzers)
 
@@ -282,7 +329,7 @@ func buildDetectionCoverage(
 
 	conditionResults := make(map[string]rules.ConditionCoverageResult, len(ruleSet.Rules))
 	for _, rule := range ruleSet.Rules {
-		cRes, err := rules.EvaluateConditionCoverage(rule.Match, signals, completeCapability)
+		cRes, err := rules.EvaluateConditionCoverage(rule.Match, signals, capabilities, completeCapability)
 		if err != nil {
 			return nil, fmt.Errorf("evaluate coverage for rule %q: %w", rule.ID, err)
 		}
@@ -484,7 +531,11 @@ func priorObservations(results []AnalyzerResult) []analysis.Observation {
 	return prior
 }
 
-func validateObservation(source string, observation analysis.Observation) error {
+func validateObservation(
+	source string,
+	observation analysis.Observation,
+	capabilities rules.CapabilityRegistry,
+) error {
 	if observation.Source != source {
 		return fmt.Errorf("%w: analyzer %q returned source %q", ErrInvalidObservation, source, observation.Source)
 	}
@@ -498,6 +549,12 @@ func validateObservation(source string, observation analysis.Observation) error 
 				ErrInvalidObservation, source, index, signal.Source,
 			)
 		}
+		if !capabilities.Supports(source, signal.Type) {
+			return fmt.Errorf(
+				"%w: analyzer %q signal %d uses undeclared capability %q",
+				ErrInvalidObservation, source, index, signal.Type,
+			)
+		}
 	}
 	declared := make(map[model.SignalType]struct{}, len(observation.Capabilities))
 	for index, capability := range observation.Capabilities {
@@ -508,6 +565,12 @@ func validateObservation(source string, observation analysis.Observation) error 
 			return fmt.Errorf(
 				"%w: analyzer %q declared capability %q more than once",
 				ErrInvalidObservation, source, capability.SignalType,
+			)
+		}
+		if !capabilities.Supports(source, capability.SignalType) {
+			return fmt.Errorf(
+				"%w: analyzer %q coverage %d uses undeclared capability %q",
+				ErrInvalidObservation, source, index, capability.SignalType,
 			)
 		}
 		declared[capability.SignalType] = struct{}{}

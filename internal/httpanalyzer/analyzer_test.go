@@ -399,6 +399,11 @@ func TestAnalyzeCollectsRedirectHTTPAndHTMLSignals(t *testing.T) {
 	if len(types) == 0 || types[0] != model.SignalTypeNetworkResponse {
 		t.Errorf("signal order starts with %v", types)
 	}
+	slices.Sort(types)
+	types = slices.Compact(types)
+	if want := (*Analyzer)(nil).Capabilities(); !slices.Equal(types, want) {
+		t.Fatalf("normalization produces %v, advertised capabilities are %v", types, want)
+	}
 }
 
 func TestAnalyzeHandlesGzipAndTruncation(t *testing.T) {

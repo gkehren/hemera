@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,6 +65,15 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 		if signal.Type == model.SignalTypeCookie && strings.Contains(signal.Value, "synthetic-secret") {
 			t.Errorf("cookie signal retained a cookie value: %#v", signal)
 		}
+	}
+	producedTypes := make([]model.SignalType, 0, len(signals))
+	for _, signal := range signals {
+		producedTypes = append(producedTypes, signal.Type)
+	}
+	slices.Sort(producedTypes)
+	producedTypes = slices.Compact(producedTypes)
+	if want := (*Analyzer)(nil).Capabilities(); !slices.Equal(producedTypes, want) {
+		t.Fatalf("normalization produces %v, advertised capabilities are %v", producedTypes, want)
 	}
 }
 

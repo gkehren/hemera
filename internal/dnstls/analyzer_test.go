@@ -72,6 +72,15 @@ func TestObserveNormalizesCNAMEAndReusedTLSDeterministically(t *testing.T) {
 			t.Errorf("signal %#v is invalid: %v", signal, err)
 		}
 	}
+	producedTypes := make([]model.SignalType, 0, len(observation.Signals))
+	for _, signal := range observation.Signals {
+		producedTypes = append(producedTypes, signal.Type)
+	}
+	slices.Sort(producedTypes)
+	producedTypes = slices.Compact(producedTypes)
+	if want := analyzer.Capabilities(); !slices.Equal(producedTypes, want) {
+		t.Fatalf("normalization produces %v, advertised capabilities are %v", producedTypes, want)
+	}
 }
 
 func TestObserveSkipsUnaliasedAndLiteralHosts(t *testing.T) {

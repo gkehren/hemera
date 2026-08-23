@@ -48,6 +48,12 @@ func (*Analyzer) Source() string {
 	return analysis.SourceBrowser
 }
 
+// Capabilities returns the normalized signal types this production analyzer
+// implements. Static support is independent from per-navigation completeness.
+func (*Analyzer) Capabilities() []model.SignalType {
+	return analysis.SupportedSignalTypes(analysis.SourceBrowser)
+}
+
 // Observe performs one sandboxed, bounded browser navigation and returns only
 // normalized, minimized evidence. Browser-local failures may retain a partial
 // capture for scanner failure-policy handling. Successful captures declare

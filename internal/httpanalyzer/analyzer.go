@@ -163,6 +163,12 @@ func (*Analyzer) Source() string {
 	return source
 }
 
+// Capabilities returns the normalized signal types this production analyzer
+// implements. Static support is independent from per-navigation completeness.
+func (*Analyzer) Capabilities() []model.SignalType {
+	return analysis.SupportedSignalTypes(source)
+}
+
 // Observe adapts one HTTP navigation to the analyzer-agnostic observation
 // contract consumed by scan orchestration. On success it declares
 // capability-level coverage derived from structured completion state so that

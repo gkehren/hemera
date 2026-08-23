@@ -7,54 +7,6 @@ import (
 	"github.com/gkehren/hemera/pkg/model"
 )
 
-// defaultCapableSources maps normalized signal types to the standard observation
-// sources capable of producing them.
-var defaultCapableSources = map[model.SignalType][]string{
-	model.SignalTypeResponseHeader:  {"http_analyzer"},
-	model.SignalTypeCookie:          {"browser_analyzer", "http_analyzer"},
-	model.SignalTypeScriptURL:       {"browser_analyzer", "http_analyzer"},
-	model.SignalTypeNetworkRequest:  {"browser_analyzer"},
-	model.SignalTypeNetworkResponse: {"browser_analyzer", "http_analyzer"},
-	model.SignalTypeDOMSelector:     {"browser_analyzer"},
-	model.SignalTypeIframeURL:       {"browser_analyzer", "http_analyzer"},
-	model.SignalTypeJSGlobal:        {"browser_analyzer"},
-	model.SignalTypeDNSRecord:       {"dns_tls_analyzer"},
-	model.SignalTypeTLSProperty:     {"dns_tls_analyzer"},
-	model.SignalTypeRedirect:        {"http_analyzer"},
-	model.SignalTypePageContent:     {"browser_analyzer", "http_analyzer"},
-	model.SignalTypeResourceHost:    {"browser_analyzer", "http_analyzer"},
-}
-
-// CapableSources returns the observation sources that can produce evidence matching
-// the given evidence predicate. If the predicate specifies an exact or patterned
-// source constraint, the returned sources are filtered accordingly.
-func CapableSources(evidence Evidence) []string {
-	if evidence.Source != nil && evidence.Source.Exact != nil {
-		return []string{*evidence.Source.Exact}
-	}
-	candidates, ok := defaultCapableSources[evidence.Type]
-	if !ok {
-		if evidence.Source != nil && evidence.Source.Exact != nil {
-			return []string{*evidence.Source.Exact}
-		}
-		return nil
-	}
-	if evidence.Source == nil {
-		result := make([]string, len(candidates))
-		copy(result, candidates)
-		sort.Strings(result)
-		return result
-	}
-	var filtered []string
-	for _, candidate := range candidates {
-		if matched, err := evidence.Source.matches(candidate); err == nil && matched {
-			filtered = append(filtered, candidate)
-		}
-	}
-	sort.Strings(filtered)
-	return filtered
-}
-
 // CoverageState represents the tri-state outcome of condition evaluation under
 // incomplete analyzer observations.
 type CoverageState int
@@ -103,23 +55,25 @@ type CapabilityCompleter func(source string, signalType model.SignalType) bool
 func EvaluateConditionCoverage(
 	condition Condition,
 	signals []model.Signal,
+	capabilities CapabilityRegistry,
 	complete CapabilityCompleter,
 ) (ConditionCoverageResult, error) {
 	cached := make([]cachedSignal, len(signals))
 	for i, s := range signals {
 		cached[i].signal = s
 	}
-	return evaluateConditionCoverageCached(condition, cached, complete)
+	return evaluateConditionCoverageCached(condition, cached, capabilities, complete)
 }
 
 func evaluateConditionCoverageCached(
 	condition Condition,
 	signals []cachedSignal,
+	capabilities CapabilityRegistry,
 	complete CapabilityCompleter,
 ) (ConditionCoverageResult, error) {
 	if condition.Signal != nil {
 		evidence := *condition.Signal
-		capable := CapableSources(evidence)
+		capable := capabilities.CapableSources(evidence)
 		match, ok, err := strongestMatch(evidence, signals)
 		if err != nil {
 			return ConditionCoverageResult{}, err
@@ -180,7 +134,7 @@ func evaluateConditionCoverageCached(
 		var requiredSources []string
 		hasUnknown := false
 		for _, child := range children {
-			childRes, err := evaluateConditionCoverageCached(child, signals, complete)
+			childRes, err := evaluateConditionCoverageCached(child, signals, capabilities, complete)
 			if err != nil {
 				return ConditionCoverageResult{}, err
 			}
@@ -221,7 +175,7 @@ func evaluateConditionCoverageCached(
 	atLeastOneSatisfiable := false
 
 	for _, child := range children {
-		childRes, err := evaluateConditionCoverageCached(child, signals, complete)
+		childRes, err := evaluateConditionCoverageCached(child, signals, capabilities, complete)
 		if err != nil {
 			return ConditionCoverageResult{}, err
 		}
