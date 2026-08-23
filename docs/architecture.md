@@ -491,6 +491,32 @@ compile-time constant, a minimized target, or a control-stripped label.
 Validation messages surfaced by the wizard pass through the same sanitization
 because URL parse failures can embed fragments of pasted input.
 
+### Application lifecycle and cancellation
+
+The CLI process boundary creates one `signal.NotifyContext` derived from the
+application root for `os.Interrupt` and `SIGTERM`. The same context enters both
+classic `hemera scan` dispatch and interactive execution; analyzers never
+subscribe to operating-system signals. The huh wizard and Bubble Tea progress
+program both receive this context and disable Bubble Tea's built-in
+SIGINT/SIGTERM handler, preventing competing termination ownership. The
+production signal wrapper returns an exit code to `main` only after the
+dispatched command has returned and its defers have unwound. `main` is the sole
+`os.Exit` caller, so a signal callback cannot bypass recorder, session, proxy,
+Chromium, or temporary-profile cleanup.
+
+Classic scans execute synchronously on that context. Process cancellation is a
+fatal runtime outcome with exit code `1` and a fixed, attacker-independent
+diagnostic. The interactive progress view runs the scanner in a goroutine, but
+always cancels and joins that goroutine before returning and then detaches the
+progress callback. Its own `Ctrl+C` key action remains a deliberate user cancel
+with exit code `0`; cancellation inherited from the application context returns
+`1`. Browser cleanup retains its existing fixed shutdown bounds, so graceful
+process cancellation does not introduce an unbounded wait. Because huh's
+accessible line-oriented runner does not observe its supplied context, Hemera
+closes the application-owned stdin on cancellation and gives that runner a
+fixed one-second shutdown window; it therefore cannot hold process termination
+indefinitely.
+
 ### Interactive terminal experience
 
 When launched without arguments on a terminal (stdin and stdout are both character

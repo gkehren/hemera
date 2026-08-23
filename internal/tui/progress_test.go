@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -17,6 +19,16 @@ func newTestModel() progressModel {
 		"https://example.test/",
 		nil,
 	)
+}
+
+func TestRunProgressReturnsApplicationContextCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := RunProgress(ctx, io.Discard, nil, "https://example.test/", make(chan Msg))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunProgress() error = %v, want context.Canceled", err)
+	}
 }
 
 func eventMsg(event scanner.ScanEvent) progressEventMsg {

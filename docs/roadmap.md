@@ -91,6 +91,9 @@ Browser -----┘
 - [x] Track capability-level observation completeness for bounded analyzer
   channels so truncated HTTP or browser evidence cannot produce a false
   conclusive `not_detected` ([issue #18](https://github.com/gkehren/hemera/issues/18)).
+- [x] Cancel classic and interactive scans from process signals and join bounded
+  Browser cleanup before process exit
+  ([issue #19](https://github.com/gkehren/hemera/issues/19)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while

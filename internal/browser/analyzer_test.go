@@ -5,8 +5,10 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/pkg/model"
@@ -103,6 +105,52 @@ func TestAnalyzerObserveRunsLifecycleAndPreservesPartialCapture(t *testing.T) {
 	}
 }
 
+func TestAnalyzerObserveCancellationClosesRecorderAndSession(t *testing.T) {
+	source := newCancellationCaptureSource()
+	backend := newFakeAnalyzerBackend(source, nil)
+	navigationStarted := make(chan struct{})
+	backend.navigateFunc = func(ctx context.Context, _ string) error {
+		close(navigationStarted)
+		<-ctx.Done()
+		// BeginCapture ties the recorder to the same root context. Wait for its
+		// cancellation watcher so the test proves recorder cleanup, not merely
+		// the later session close.
+		<-source.closed
+		return ctx.Err()
+	}
+	analyzer := analyzerForBackend(t, backend)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := analyzer.Observe(ctx, analysis.Target{URL: "https://example.test/"})
+		result <- err
+	}()
+
+	select {
+	case <-navigationStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("browser navigation did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Observe() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Observe did not return after cancellation")
+	}
+	if source.closeCalls.Load() != 1 || source.finishCalls.Load() != 0 {
+		t.Errorf("recorder lifecycle = close %d finish %d, want close 1 finish 0",
+			source.closeCalls.Load(), source.finishCalls.Load())
+	}
+	if backend.closeCalls.Load() != 1 || backend.cleanupCalls.Load() != 1 {
+		t.Errorf("session lifecycle = close %d cleanup %d, want 1/1",
+			backend.closeCalls.Load(), backend.cleanupCalls.Load())
+	}
+}
+
 func TestAnalyzerObserveReportsUnavailableBrowserWithoutLeakingError(t *testing.T) {
 	t.Parallel()
 	secretErr := errors.New("launch failed for --token=synthetic-secret")
@@ -161,6 +209,7 @@ type fakeAnalyzerBackend struct {
 	*fakeBackendSession
 	source        captureSource
 	navigateErr   error
+	navigateFunc  func(context.Context, string) error
 	beginCalls    atomic.Int32
 	navigateCalls atomic.Int32
 }
@@ -178,9 +227,34 @@ func (b *fakeAnalyzerBackend) beginCapture(context.Context) (captureSource, erro
 	return b.source, nil
 }
 
-func (b *fakeAnalyzerBackend) navigate(context.Context, string) error {
+func (b *fakeAnalyzerBackend) navigate(ctx context.Context, target string) error {
 	b.navigateCalls.Add(1)
+	if b.navigateFunc != nil {
+		return b.navigateFunc(ctx, target)
+	}
 	return b.navigateErr
+}
+
+type cancellationCaptureSource struct {
+	closed      chan struct{}
+	closeOnce   sync.Once
+	closeCalls  atomic.Int32
+	finishCalls atomic.Int32
+}
+
+func newCancellationCaptureSource() *cancellationCaptureSource {
+	return &cancellationCaptureSource{closed: make(chan struct{})}
+}
+
+func (s *cancellationCaptureSource) finish(ctx context.Context) (CaptureResult, error) {
+	s.finishCalls.Add(1)
+	return CaptureResult{}, ctx.Err()
+}
+
+func (s *cancellationCaptureSource) Close() error {
+	s.closeCalls.Add(1)
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
 }
 
 var _ captureBackendSession = (*fakeAnalyzerBackend)(nil)
