@@ -303,10 +303,15 @@ but never their values, and never expose collected HTML. Internally, HTTP signal
 omit cookie values and redact authorization-, cookie-, token-, secret-,
 authentication-, and API-key-bearing header values. Reports are produced in
 memory and the scanner does not persist results. Multi-analyzer reports expose
-each source's coverage status and producer-sanitized warnings, but omit retained
+each source's coverage status and producer-safe warnings, but omit retained
 analyzer error details because those errors can contain attacker-controlled URLs
-or other untrusted data. Analyzer warnings must never include raw attacker input
-or secrets.
+or other untrusted data. Analyzer errors and warnings are separate trust
+channels: errors may retain internal untrusted detail and are never serialized
+directly, while warnings come from a closed, bounded, producer-owned semantic
+vocabulary and may be serialized as-is. A warning must never contain
+`err.Error()` text, a raw URL, response value, HTML fragment, terminal control
+sequence, or secret. Capability coverage is structured state and never depends
+on parsing a warning.
 
 Terminal output is part of the same trust boundary. Raw analyzer errors and raw
 target URLs are never written directly to stderr or to the interactive view.

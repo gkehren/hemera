@@ -20,11 +20,12 @@ import (
 )
 
 const (
-	source           = analysis.SourceDNSTLS
-	maxLookupTimeout = 2 * time.Second
-	maxDNSNameBytes  = 253
-	maxTLSValueBytes = 2048
-	maxTLSDNSNames   = 256
+	source                  = analysis.SourceDNSTLS
+	warningCNAMEUnavailable = "CNAME observation was unavailable"
+	maxLookupTimeout        = 2 * time.Second
+	maxDNSNameBytes         = 253
+	maxTLSValueBytes        = 2048
+	maxTLSDNSNames          = 256
 )
 
 var (
@@ -106,12 +107,12 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 	defer cancel()
 	canonical, err := a.resolver.LookupCNAME(lookupCtx, host)
 	if err != nil {
-		observation.Warnings = []string{"CNAME observation was unavailable"}
+		observation.Warnings = []string{warningCNAMEUnavailable}
 		return observation, fmt.Errorf("look up final-host CNAME: %w", err)
 	}
 	canonical, err = normalizeDNSName(canonical, false)
 	if err != nil {
-		observation.Warnings = []string{"CNAME observation was unavailable"}
+		observation.Warnings = []string{warningCNAMEUnavailable}
 		return observation, fmt.Errorf("%w: CNAME: %w", ErrInvalidObservation, err)
 	}
 	normalizedHost, err := normalizeDNSName(host, false)

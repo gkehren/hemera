@@ -193,7 +193,7 @@ func TestAnalyzeCharsetFailureSetsStructuredFlags(t *testing.T) {
 	if !result.PageContentIncomplete || !result.ResourcesIncomplete {
 		t.Fatalf("incomplete flags = %t/%t, want both set after local HTML failure", result.PageContentIncomplete, result.ResourcesIncomplete)
 	}
-	if len(result.Warnings) == 0 {
-		t.Error("warnings = empty, want charset diagnostic")
+	if len(result.Warnings) != 1 || result.Warnings[0] != warningHTMLIncomplete {
+		t.Errorf("warnings = %#v, want controlled HTML warning", result.Warnings)
 	}
 }

@@ -171,7 +171,7 @@ func TestScanAggregatesAnalyzersInConfiguredOrder(t *testing.T) {
 func TestScanAppliesFatalAndPartialFailurePolicies(t *testing.T) {
 	t.Parallel()
 	ruleSet := multiSourceRuleSet()
-	localErr := errors.New("supplemental analyzer failed")
+	localErr := errors.New("supplemental analyzer failed for https://user:password@attacker.invalid/?token=secret\x1b[31m\nraw-html")
 	var finalCalls atomic.Int32
 	partial := analysis.Observation{Source: "partial", Signals: []model.Signal{{
 		Type: model.SignalTypeScriptURL, Source: "partial", Key: "script", Confidence: 1,
@@ -201,6 +201,10 @@ func TestScanAppliesFatalAndPartialFailurePolicies(t *testing.T) {
 		if outcome.Status != AnalyzerStatusPartial || !errors.Is(outcome.Err, localErr) ||
 			!slices.Equal(outcome.Observation.Warnings, partial.Warnings) {
 			t.Errorf("partial outcome = %#v", outcome)
+		}
+		if strings.Contains(strings.Join(outcome.Observation.Warnings, " "), "attacker.invalid") ||
+			strings.Contains(strings.Join(outcome.Observation.Warnings, " "), "token=secret") {
+			t.Errorf("scanner warning copy disclosed analyzer error: %#v", outcome.Observation.Warnings)
 		}
 	})
 

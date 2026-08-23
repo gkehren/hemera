@@ -224,11 +224,14 @@ func TestHTMLTokenizerHandlesAdversarialDocuments(t *testing.T) {
 
 func TestHTMLResourceLimitPreservesCollectedSignals(t *testing.T) {
 	t.Parallel()
+	const configuredLimit = 3
 	var body strings.Builder
-	for i := 0; i < maxHTMLResources+32; i++ {
+	for i := 0; i < configuredLimit+2; i++ {
 		fmt.Fprintf(&body, `<script src="/%d.js"></script>`, i)
 	}
-	analyzer, err := New(DefaultConfig())
+	config := DefaultConfig()
+	config.MaxHTMLResources = configuredLimit
+	analyzer, err := New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,16 +244,16 @@ func TestHTMLResourceLimitPreservesCollectedSignals(t *testing.T) {
 		t.Fatal(err)
 	}
 	resources := htmlResourceValues(result)
-	if len(resources) != maxHTMLResources {
-		t.Fatalf("resource signals = %d, want %d", len(resources), maxHTMLResources)
+	if len(resources) != configuredLimit {
+		t.Fatalf("resource signals = %d, want %d", len(resources), configuredLimit)
 	}
 	if got, want := resources[0], "http://example.test/0.js"; got != want {
 		t.Errorf("first resource = %q, want %q", got, want)
 	}
-	if got, want := resources[len(resources)-1], fmt.Sprintf("http://example.test/%d.js", maxHTMLResources-1); got != want {
+	if got, want := resources[len(resources)-1], fmt.Sprintf("http://example.test/%d.js", configuredLimit-1); got != want {
 		t.Errorf("last resource = %q, want %q", got, want)
 	}
-	warning := fmt.Sprintf("HTML resource extraction stopped at %d resources", maxHTMLResources)
+	warning := fmt.Sprintf(warningHTMLResourceLimitFormat, configuredLimit)
 	if count := countString(result.Warnings, warning); count != 1 {
 		t.Errorf("limit warning count = %d, warnings = %v", count, result.Warnings)
 	}
@@ -415,6 +418,9 @@ func TestAnalyzeHandlesGzipAndTruncation(t *testing.T) {
 	if !result.BodyTruncated || len(result.Warnings) == 0 {
 		t.Errorf("truncated/warnings = %t/%v", result.BodyTruncated, result.Warnings)
 	}
+	if !slices.Equal(result.Warnings, []string{fmt.Sprintf(warningResponseBodyTruncatedFormat, 64)}) {
+		t.Errorf("warnings = %#v, want trusted configured byte ceiling", result.Warnings)
+	}
 	foundPage := false
 	for _, signal := range result.Signals {
 		foundPage = foundPage || signal.Type == model.SignalTypePageContent
@@ -435,11 +441,52 @@ func TestAnalyzeKeepsHTTPSignalsOnCharsetWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("warnings = nil, want charset warning")
+	if !slices.Equal(result.Warnings, []string{warningHTMLIncomplete}) {
+		t.Fatalf("warnings = %#v, want controlled HTML warning", result.Warnings)
+	}
+	if result.HTMLAnalysisError() == nil || !strings.Contains(result.HTMLAnalysisError().Error(), "definitely-unknown") {
+		t.Fatalf("internal HTML error = %v, want detailed charset diagnostic", result.HTMLAnalysisError())
 	}
 	if len(result.Signals) == 0 || result.Signals[0].Type != model.SignalTypeNetworkResponse {
 		t.Errorf("HTTP signals were lost: %#v", result.Signals)
+	}
+}
+
+func TestHTMLFailureCannotEscapeThroughObservationWarnings(t *testing.T) {
+	t.Parallel()
+	hostile := "parse failure for https://user:password@attacker.invalid/path?token=secret#fragment" +
+		"\x1b[31m\n\x00raw-html=<script>steal()</script>" + strings.Repeat("x", 32<<10)
+	underlying := errors.New(hostile)
+	result := Result{PageContentIncomplete: true, ResourcesIncomplete: true}
+	recordHTMLFailure(&result, underlying)
+
+	observation := observationFromResult(result)
+	if !slices.Equal(observation.Warnings, []string{warningHTMLIncomplete}) {
+		t.Fatalf("observation warnings = %#v, want controlled warning", observation.Warnings)
+	}
+	for _, attackerText := range []string{
+		"attacker.invalid", "user:password", "token=secret", "raw-html", "\x1b", "\n", "steal()", strings.Repeat("x", 1024),
+	} {
+		if strings.Contains(strings.Join(observation.Warnings, " "), attackerText) {
+			t.Errorf("observation warnings disclosed attacker text %q", attackerText)
+		}
+	}
+	if !errors.Is(result.HTMLAnalysisError(), underlying) {
+		t.Fatal("detailed HTML error was not retained internally")
+	}
+	statuses := make(map[model.SignalType]analysis.CapabilityStatus, len(observation.Capabilities))
+	for _, capability := range observation.Capabilities {
+		statuses[capability.SignalType] = capability.Status
+	}
+	if got := statuses[model.SignalTypePageContent]; got != analysis.CapabilityIncomplete {
+		t.Errorf("page-content capability = %q, want incomplete", got)
+	}
+
+	resourceResult := Result{ResourcesIncomplete: true}
+	recordHTMLFailure(&resourceResult, underlying)
+	resourceObservation := observationFromResult(resourceResult)
+	if !slices.Equal(resourceObservation.Warnings, []string{warningHTMLResourcesIncomplete}) {
+		t.Fatalf("resource observation warnings = %#v, want controlled resource warning", resourceObservation.Warnings)
 	}
 }
 
@@ -688,7 +735,7 @@ func TestCollectTLSMetadataBoundsCertificateProperties(t *testing.T) {
 	if result.TLS == nil || len(result.TLS.DNSNames) != maxCertificateDNSNames {
 		t.Fatalf("TLS metadata = %#v", result.TLS)
 	}
-	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "truncated") {
+	if !slices.Equal(result.Warnings, []string{fmt.Sprintf(warningCertificateDNSNamesLimitFormat, maxCertificateDNSNames)}) {
 		t.Errorf("warnings = %v, want truncation warning", result.Warnings)
 	}
 }

@@ -67,8 +67,10 @@ func (c CapabilityCoverage) Validate() error {
 
 // Observation contains one analyzer's normalized signals, local warnings,
 // declared per-capability coverage, and bounded source-specific metadata.
-// Warnings must be safe diagnostic summaries and must not contain raw
-// attacker-controlled input or secrets.
+// Warnings must come from a closed producer-owned vocabulary of bounded,
+// semantic summaries. They must not contain raw attacker-controlled input,
+// secrets, or underlying error text because reporters serialize them without
+// further sanitization.
 type Observation struct {
 	Source       string
 	Signals      []model.Signal

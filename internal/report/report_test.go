@@ -392,11 +392,14 @@ func TestWriteTextExplainsDetectionsWithoutSecrets(t *testing.T) {
 
 func TestBuildReportsPartialAnalyzerCoverageWithoutErrorDetails(t *testing.T) {
 	t.Parallel()
-	secretError := errors.New("navigation failed for https://example.test/?token=secret")
+	hostileErrorText := "parser failed for https://user:password@attacker.invalid/private?token=report-secret#fragment" +
+		"\x1b[31m\n\x00raw-html=<script>steal()</script>" + strings.Repeat("x", 32<<10)
+	secretError := errors.New(hostileErrorText)
+	controlledWarning := "HTML observation was incomplete"
 	result := scanner.Result{Target: analysis.Target{URL: "https://example.test/?token=secret"}, Analyzers: []scanner.AnalyzerResult{
 		{
 			Observation: analysis.Observation{
-				Source: "dns_tls_analyzer", Warnings: []string{"certificate observations are incomplete"},
+				Source: analysis.SourceHTTP, Warnings: []string{controlledWarning},
 			},
 			Status: scanner.AnalyzerStatusFailed, Err: secretError,
 		},
@@ -406,7 +409,7 @@ func TestBuildReportsPartialAnalyzerCoverageWithoutErrorDetails(t *testing.T) {
 		t.Errorf("requested URL = %q, want redacted target fallback", report.RequestedURL)
 	}
 	if len(report.Analyzers) != 1 || report.Analyzers[0].Status != scanner.AnalyzerStatusFailed ||
-		!strings.Contains(report.Analyzers[0].Warnings[0], "incomplete") {
+		!slices.Equal(report.Analyzers[0].Warnings, []string{controlledWarning}) {
 		t.Fatalf("analyzer reports = %#v", report.Analyzers)
 	}
 	if report.FinalURL != nil || report.HTTP != nil {
@@ -421,12 +424,24 @@ func TestBuildReportsPartialAnalyzerCoverageWithoutErrorDetails(t *testing.T) {
 	if err := WriteText(&textOutput, report); err != nil {
 		t.Fatal(err)
 	}
-	for name, output := range map[string]string{"JSON": jsonOutput.String(), "text": textOutput.String()} {
-		if !strings.Contains(output, "dns_tls_analyzer") || !strings.Contains(output, "failed") {
+	var styledOutput bytes.Buffer
+	if err := WriteStyled(&styledOutput, report); err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string]string{
+		"JSON": jsonOutput.String(), "text": textOutput.String(), "styled": stripANSI(styledOutput.String()),
+	} {
+		if !strings.Contains(output, analysis.SourceHTTP) || !strings.Contains(output, "failed") ||
+			!strings.Contains(output, controlledWarning) {
 			t.Errorf("%s report does not expose incomplete coverage: %s", name, output)
 		}
-		if strings.Contains(output, "token=secret") {
-			t.Errorf("%s report disclosed analyzer error details: %s", name, output)
+		for _, attackerText := range []string{
+			"attacker.invalid", "user:password", "report-secret", "raw-html", "steal()",
+			"\x1b", "\x00", `\u001b`, `\u0000`, strings.Repeat("x", 1024),
+		} {
+			if strings.Contains(output, attackerText) {
+				t.Errorf("%s report disclosed analyzer error text %q", name, attackerText)
+			}
 		}
 	}
 	for _, expected := range []string{`"final_url": null`, `"http": null`} {

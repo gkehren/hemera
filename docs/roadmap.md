@@ -97,6 +97,10 @@ Browser -----┘
 - [x] Honor production CLI Chromium executable selection and reject an invalid
   explicit configuration without fallback
   ([issue #20](https://github.com/gkehren/hemera/issues/20)).
+- [x] Keep analyzer warnings within a bounded, producer-owned diagnostic
+  vocabulary and prevent underlying attacker-controlled error text from
+  reaching reports
+  ([issue #21](https://github.com/gkehren/hemera/issues/21)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while
