@@ -131,6 +131,15 @@ disable, and non-proxied WebRTC UDP restriction. Missing, duplicate, or
 conflicting security switches are fatal; environments that cannot prove these
 invariants fail startup.
 
+Process-environment handling remains at the CLI application boundary. A
+non-empty `HEMERA_CHROMIUM_PATH` is copied into `browser.Config.ExecutablePath`
+after default or deep limits are selected and before `browser.NewAnalyzer` is
+called. `internal/browser` does not read process globals: its constructor uses
+`exec.LookPath` as the authoritative path or binary-name resolver and rejects
+an explicit value it cannot resolve. Scanner construction then fails instead of
+falling back to automatic discovery. Custom executables remain subject to every
+effective command-line and sandbox invariant described above.
+
 `Session.BeginCapture` now permits one recorder for the current target. It
 enables the CDP Network and Page domains and records requests, responses, and
 redirect responses in CDP order. Finalization stops the listener, reads target

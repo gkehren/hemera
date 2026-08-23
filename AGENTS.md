@@ -46,7 +46,8 @@ Hemera is in early development. The repository currently contains:
 - safe URL/DNS validation and passive HTTP analysis;
 - sandboxed Chromium/CDP session startup, bounded post-load capture, validated
   resource-bounded navigation, fail-closed child targets, normalized browser
-  signals, and scanner integration;
+  signals, production-configured local executable selection, and scanner
+  integration;
 - a versioned, synthetic browser fixture corpus with hermetic dynamic, negative,
   delayed post-load, adversarial security, and resource-limit coverage, using
   partial-order traffic contracts and explicit completion barriers;

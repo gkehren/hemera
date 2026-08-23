@@ -280,10 +280,17 @@ sandbox enabled:
 go test -tags=browser_integration ./internal/browser ./internal/scanner
 ```
 
-Set `HEMERA_CHROMIUM_PATH` to select a specific executable. The integration test
-uses the versioned synthetic corpus in `internal/browser/testdata`, injected DNS
-and dialing dependencies, and a loopback `httptest` server reached only through
-the same validated proxy boundary used in production. The manifest-driven
+Set a non-empty `HEMERA_CHROMIUM_PATH` to select a specific executable for
+`hemera scan` and the browser integration tests. The value may be an absolute
+path, a relative path such as `./chromium`, or a binary name resolved through
+`PATH`; these are the exact `exec.LookPath` semantics used by the browser
+configuration. An explicit value that cannot be resolved is a scanner
+configuration error, and Hemera exits without silently falling back to another
+browser. Deep mode changes only the bounded observation budgets and preserves
+the executable selection. The integration test uses the versioned synthetic
+corpus in `internal/browser/testdata`, injected DNS and dialing dependencies,
+and a loopback `httptest` server reached only through the same validated proxy
+boundary used in production. The manifest-driven
 dynamic and negative scenarios use a fresh Chromium profile, declare every
 allowed route, express only semantic traffic dependencies as a partial order,
 and never contact a live page or third-party asset. Dynamic fixtures use

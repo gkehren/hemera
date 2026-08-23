@@ -137,6 +137,13 @@ profile, runs headless, listens for CDP only on `127.0.0.1` with an
 operating-system-selected port, and starts at `about:blank`. Remote CDP
 attachment is not supported.
 
+The CLI may select that local executable through a non-empty
+`HEMERA_CHROMIUM_PATH`. The application passes the value into Browser
+configuration, where `exec.LookPath` resolves an absolute or relative path or a
+binary name from `PATH`. An explicit value that cannot be resolved stops scanner
+configuration; Hemera never silently substitutes another executable. Selection
+does not bypass any startup or effective command-line security validation.
+
 The package explicitly sets the `no-sandbox` allocator option to false. This
 prevents `chromedp` from silently adding `--no-sandbox` when Hemera runs as root;
 the effective Chromium command line is then read through CDP and rejected if a

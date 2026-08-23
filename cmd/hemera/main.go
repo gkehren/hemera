@@ -23,6 +23,10 @@ import (
 
 var version = "dev"
 
+const chromiumPathEnvironment = "HEMERA_CHROMIUM_PATH"
+
+type environmentLookup func(string) string
+
 func main() {
 	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -128,6 +132,16 @@ type scanRunner interface {
 }
 
 func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engine scanRunner) int {
+	return runScanWithEnvironment(ctx, args, stdout, stderr, engine, os.Getenv)
+}
+
+func runScanWithEnvironment(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	engine scanRunner,
+	getenv environmentLookup,
+) int {
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" {
 			printScanUsage(stdout)
@@ -162,7 +176,7 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	if engine == nil {
 		isDeep := *deep || *mode == "deep"
 		var err error
-		engine, err = newScannerEngine(isDeep, nil)
+		engine, err = newScannerEngineWithEnvironment(isDeep, nil, getenv)
 		if err != nil {
 			fmt.Fprintf(stderr, "hemera: configure scanner: %s\n", safeoutput.SanitizeDiagnostic(err))
 			return 1
@@ -202,12 +216,17 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 }
 
 func newScannerEngine(deep bool, progress scanner.ProgressFunc) (*scanner.Scanner, error) {
+	return newScannerEngineWithEnvironment(deep, progress, os.Getenv)
+}
+
+func newScannerEngineWithEnvironment(
+	deep bool,
+	progress scanner.ProgressFunc,
+	getenv environmentLookup,
+) (*scanner.Scanner, error) {
 	httpConfig := httpanalyzer.DefaultConfig()
 	dnsConfig := dnstls.DefaultConfig()
-	browserConfig := browser.DefaultConfig()
-	if deep {
-		browserConfig = browser.DeepConfig()
-	}
+	browserConfig := browserConfigFromEnvironment(deep, getenv)
 	analyzer, err := httpanalyzer.New(httpConfig)
 	if err != nil {
 		return nil, fmt.Errorf("configure HTTP analyzer: %w", err)
@@ -233,6 +252,17 @@ func newScannerEngine(deep bool, progress scanner.ProgressFunc) (*scanner.Scanne
 		RuleSet:  ruleSet,
 		Progress: progress,
 	})
+}
+
+func browserConfigFromEnvironment(deep bool, getenv environmentLookup) browser.Config {
+	config := browser.DefaultConfig()
+	if deep {
+		config = browser.DeepConfig()
+	}
+	if path := getenv(chromiumPathEnvironment); path != "" {
+		config.ExecutablePath = path
+	}
+	return config
 }
 
 // runInteractive drives the terminal experience: wizard, live progress view,
