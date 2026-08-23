@@ -5,13 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gkehren/hemera/internal/analysis"
+	"github.com/gkehren/hemera/internal/browser"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
 	"github.com/gkehren/hemera/internal/rules"
+	"github.com/gkehren/hemera/internal/safeoutput"
 	"github.com/gkehren/hemera/internal/scanner"
 	"github.com/gkehren/hemera/internal/scoring"
 )
@@ -472,22 +477,114 @@ func TestRunScanSupportsDeepModeAndRejectsInvalidMode(t *testing.T) {
 	}
 }
 
-func TestNewScannerEngineDefaultAndDeep(t *testing.T) {
+func TestBrowserConfigFromEnvironment(t *testing.T) {
 	t.Parallel()
-	defaultEngine, err := newScannerEngine(false, nil)
-	if err != nil {
-		t.Fatalf("newScannerEngine(false) error = %v", err)
-	}
-	if defaultEngine == nil {
-		t.Fatal("newScannerEngine(false) returned nil")
-	}
 
-	deepEngine, err := newScannerEngine(true, nil)
-	if err != nil {
-		t.Fatalf("newScannerEngine(true) error = %v", err)
+	tests := []struct {
+		name         string
+		deep         bool
+		chromiumPath string
+		want         browser.Config
+	}{
+		{name: "unset uses automatic discovery", want: browser.DefaultConfig()},
+		{name: "empty uses automatic discovery", chromiumPath: "", want: browser.DefaultConfig()},
+		{
+			name:         "default mode uses explicit executable",
+			chromiumPath: "chromium-test",
+			want: func() browser.Config {
+				config := browser.DefaultConfig()
+				config.ExecutablePath = "chromium-test"
+				return config
+			}(),
+		},
+		{
+			name:         "deep mode preserves deep limits and explicit executable",
+			deep:         true,
+			chromiumPath: "chromium-deep-test",
+			want: func() browser.Config {
+				config := browser.DeepConfig()
+				config.ExecutablePath = "chromium-deep-test"
+				return config
+			}(),
+		},
 	}
-	if deepEngine == nil {
-		t.Fatal("newScannerEngine(true) returned nil")
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			lookup := func(name string) string {
+				if name != chromiumPathEnvironment {
+					t.Errorf("environment lookup name = %q, want %q", name, chromiumPathEnvironment)
+				}
+				return test.chromiumPath
+			}
+			if got := browserConfigFromEnvironment(test.deep, lookup); !reflect.DeepEqual(got, test.want) {
+				t.Errorf("browserConfigFromEnvironment() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestNewScannerEngineUsesChromiumEnvironment(t *testing.T) {
+	t.Parallel()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing-chromium")
+
+	tests := []struct {
+		name         string
+		deep         bool
+		chromiumPath string
+		wantErr      error
+	}{
+		{name: "unset", chromiumPath: ""},
+		{name: "valid executable", chromiumPath: executable},
+		{name: "valid executable in deep mode", deep: true, chromiumPath: executable},
+		{name: "invalid executable", chromiumPath: missing, wantErr: browser.ErrInvalidConfig},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			lookup := func(string) string { return test.chromiumPath }
+			engine, err := newScannerEngineWithEnvironment(test.deep, nil, lookup)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("newScannerEngineWithEnvironment() error = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr == nil && engine == nil {
+				t.Fatal("newScannerEngineWithEnvironment() returned nil engine")
+			}
+		})
+	}
+}
+
+func TestRunScanReportsInvalidChromiumEnvironment(t *testing.T) {
+	t.Parallel()
+	invalidPath := strings.Repeat("missing-chromium-", 100)
+	lookup := func(string) string { return invalidPath }
+	var stdout, stderr bytes.Buffer
+
+	code := runScanWithEnvironment(
+		context.Background(),
+		[]string{"https://example.test/"},
+		&stdout,
+		&stderr,
+		nil,
+		lookup,
+	)
+	if code != 1 {
+		t.Fatalf("runScanWithEnvironment() code = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "hemera: configure scanner: configure browser analyzer: invalid browser configuration") {
+		t.Errorf("stderr = %q, want visible browser configuration failure", got)
+	} else if len(got) > len("hemera: configure scanner: ")+safeoutput.MaxDiagnosticBytes+1 {
+		t.Errorf("stderr length = %d, want bounded diagnostic", len(got))
+	} else if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+		t.Errorf("stderr = %q, want one bounded diagnostic line", got)
 	}
 }
 

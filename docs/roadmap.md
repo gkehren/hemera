@@ -94,6 +94,9 @@ Browser -----┘
 - [x] Cancel classic and interactive scans from process signals and join bounded
   Browser cleanup before process exit
   ([issue #19](https://github.com/gkehren/hemera/issues/19)).
+- [x] Honor production CLI Chromium executable selection and reject an invalid
+  explicit configuration without fallback
+  ([issue #20](https://github.com/gkehren/hemera/issues/20)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while

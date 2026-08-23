@@ -409,6 +409,7 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	var peakResources atomic.Int32
 	domBarrierStarted := make(chan struct{}, 1)
 	domBarrierDone := make(chan bool, 1)
+	domMutationComplete := make(chan struct{}, 1)
 	domBarrierRelease := make(chan struct{})
 	var releaseDOMBarrier sync.Once
 	fixture := newFixtureServer(t, corpus, map[string]http.HandlerFunc{
@@ -427,6 +428,10 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 			}
 		},
 		"dom-completion-signal": func(writer http.ResponseWriter, _ *http.Request) {
+			select {
+			case domMutationComplete <- struct{}{}:
+			default:
+			}
 			releaseDOMBarrier.Do(func() { close(domBarrierRelease) })
 			writer.WriteHeader(http.StatusOK)
 			_, _ = writer.Write([]byte("released"))
@@ -499,6 +504,19 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 		t.Fatalf("navigate post-load bounded DOM fixture: %v", err)
 	}
 	navElapsed := time.Since(navStart)
+	select {
+	case <-domMutationComplete:
+	case <-sessionCtx.Done():
+		t.Fatalf("wait for post-load DOM mutation: %v", sessionCtx.Err())
+	}
+	select {
+	case completed := <-domBarrierDone:
+		if !completed {
+			t.Fatal("post-load DOM completion barrier ended before the mutation signal")
+		}
+	case <-sessionCtx.Done():
+		t.Fatalf("wait for post-load DOM completion barrier: %v", sessionCtx.Err())
+	}
 
 	finishCtx2, cancelFinish2 := integrationCaptureFinalizeContext(t, sessionCtx)
 	finishStart := time.Now()
@@ -519,14 +537,6 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 	case <-domBarrierStarted:
 	default:
 		t.Fatal("post-load DOM completion barrier was not requested")
-	}
-	select {
-	case canceled := <-domBarrierDone:
-		if !canceled {
-			t.Fatal("post-load DOM completion barrier reached its fallback deadline")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("post-load DOM completion barrier did not quiesce before capture")
 	}
 	if err := session.Close(); err != nil {
 		t.Fatalf("close bounded DOM Chromium session: %v", err)
@@ -569,7 +579,7 @@ func TestSandboxedChromiumBoundedDOMURLTruncationIsPerChannel(t *testing.T) {
 			writer.WriteHeader(http.StatusOK)
 			oversized := "/limits/ping?oversized=" + strings.Repeat("x", maxBrowserURLBytes)
 			_, _ = fmt.Fprintf(writer,
-				"<html><body><script src=%q></script><iframe src=\"/limits/ping\"></iframe></body></html>",
+				"<html><body><iframe src=\"/limits/ping\"></iframe><script src=%q></script></body></html>",
 				oversized)
 		},
 	})

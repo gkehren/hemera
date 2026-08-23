@@ -3,9 +3,15 @@
 window.addEventListener("load", () => {
   fetch("/limits/large-postload-dom-barrier").catch(() => {});
   setTimeout(() => {
+    const template = document.createElement("span");
+    template.setAttribute("data-fixture-a", "");
+    template.setAttribute("data-fixture-b", "");
+    template.setAttribute("data-fixture-c", "");
     const fragment = document.createDocumentFragment();
-    for (let index = 0; index < 110000; index++) {
-      fragment.appendChild(document.createElement("span"));
+    // Each clone contributes one node and three attributes, so this exceeds
+    // the 100,000-item traversal ceiling with substantially fewer DOM nodes.
+    for (let index = 0; index < 26000; index++) {
+      fragment.appendChild(template.cloneNode(false));
     }
     document.body.appendChild(fragment);
     document.body.dataset.mutationComplete = "true";

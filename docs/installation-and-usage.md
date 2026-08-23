@@ -75,13 +75,13 @@ go run ./cmd/hemera scan https://example.com/
 
 ## Configuring the browser analyzer
 
-Hemera automatically searches standard system paths for a Chromium or Google
-Chrome binary.
+When `HEMERA_CHROMIUM_PATH` is unset or empty, Hemera uses `chromedp`'s
+platform-specific discovery for a Chromium or Google Chrome binary.
 
 ### Custom Chromium executable path
 
-If Chromium is installed in a non-standard location or you wish to use a specific
-binary (e.g. ungoogled-chromium or a testing build), set the
+If Chromium is installed in a non-standard location or you wish to use a
+specific binary (for example, ungoogled-chromium or a testing build), set the
 `HEMERA_CHROMIUM_PATH` environment variable:
 
 ```sh
@@ -89,15 +89,31 @@ export HEMERA_CHROMIUM_PATH="/usr/bin/chromium-browser"
 hemera scan https://example.com/
 ```
 
+The non-empty value may be an absolute path, a relative path such as
+`./chromium`, or an executable name such as `chromium` that can be resolved
+through `PATH`. Hemera passes the value to Go's `exec.LookPath`; relative paths
+are therefore interpreted from Hemera's working directory. If an explicit
+value cannot be resolved, scanner configuration fails with exit code `1` and a
+bounded diagnostic. Hemera does not fall back to a different browser. The same
+selection applies in default mode, deep mode, and the interactive scan wizard.
+
 ### Sandboxing requirements
 
 Hemera mandates that Chromium's system sandbox remains active:
+
 - On Linux, unprivileged user namespaces or standard SUID sandboxes are required.
 - Running Hemera as `root` without user namespaces or attempting to disable
   sandboxing will cause the browser analyzer initialization to fail.
+- A custom executable must pass the same effective command-line validation for
+  sandboxing, Hemera's safety proxy, direct-DNS suppression, QUIC, and WebRTC;
+  selecting it does not disable any Browser startup invariant.
 - When browser analyzer initialization fails, the scan does not abort: HTTP and
   DNS/TLS analyzers proceed normally, and the report reflects
   `"status": "failed"` for `browser_analyzer` in the JSON output.
+
+The non-fatal behavior in the final item applies to runtime startup and
+observation failures. An invalid explicit executable is a configuration error
+detected before the scanner starts, so no analyzer runs.
 
 ---
 
