@@ -14,7 +14,7 @@ top-level `schema_version` is mandatory and is currently `6`.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schema_version` | integer | Report contract version. |
-| `tool_version` | string | Hemera binary version. |
+| `tool_version` | string | Hemera build identity, shared with `hemera --version`. |
 | `requested_url` | string | Initial URL with query values masked. |
 | `final_url` | string or null | Final observed HTTP URL with query values masked, or `null` when unavailable. |
 | `http` | object or null | Final HTTP status, truncation, redirects, and warnings, or `null` when unavailable. |
@@ -26,6 +26,17 @@ When HTTP metadata is available, the `http` object contains `status_code`,
 `to`, and `status`. If no HTTP analyzer ran or an analyzer configured to continue
 failed before producing HTTP metadata, both `http` and `final_url` are `null`;
 the report never substitutes status `0` or an empty final URL.
+
+`tool_version` identifies the executable that produced the report. An official
+release or a build installed from a versioned Go module reports its module/tag
+version, such as `v0.2.0`; Go may use a development pseudo-version for a source
+build. When Go supplies no module version, Hemera reports a bounded development
+identity such as `dev+g0c02a1ce`, optionally followed by `.dirty`, or falls back
+to `dev` when usable Git metadata is unavailable. Consumers must not require
+strict semantic-version syntax. Explicit release-time injection takes
+precedence over the embedded Go module and development metadata. The derivation
+reads no repository path, username, environment variable, or unrelated build
+setting.
 
 Each `analyzers` entry contains:
 
