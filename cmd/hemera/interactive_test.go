@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/detectors"
@@ -21,6 +22,9 @@ import (
 // TestMain detaches tests from any real terminal so the interactive mode
 // stays off unless a test explicitly opts in.
 func TestMain(m *testing.M) {
+	if os.Getenv(signalHelperEnv) == "1" {
+		os.Exit(runSignalHelper())
+	}
 	stdinIsTTY = func() bool { return false }
 	stdoutIsTTY = func() bool { return false }
 	os.Exit(m.Run())
@@ -49,13 +53,13 @@ func TestRunStartsInteractiveModeOnlyOnTerminals(t *testing.T) {
 			stdinIsTTY = func() bool { return testCase.stdin }
 			stdoutIsTTY = func() bool { return testCase.stdout }
 			wizardCalls := 0
-			runWizard = func() (tui.Options, error) {
+			runWizard = func(context.Context) (tui.Options, error) {
 				wizardCalls++
 				return tui.Options{}, tui.ErrAborted
 			}
 
 			var stdout, stderr bytes.Buffer
-			if code := run(nil, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), nil, &stdout, &stderr); code != 0 {
 				t.Fatalf("run() code = %d, want 0", code)
 			}
 			if got := wizardCalls > 0; got != testCase.wantWizard {
@@ -77,7 +81,7 @@ func TestRunStartsInteractiveModeOnlyOnTerminals(t *testing.T) {
 func TestRunInteractiveReportsWizardAbort(t *testing.T) {
 	originalWizard := runWizard
 	t.Cleanup(func() { runWizard = originalWizard })
-	runWizard = func() (tui.Options, error) { return tui.Options{}, tui.ErrAborted }
+	runWizard = func(context.Context) (tui.Options, error) { return tui.Options{}, tui.ErrAborted }
 
 	var stdout, stderr bytes.Buffer
 	if code := runInteractive(context.Background(), &stdout, &stderr); code != 0 {
@@ -94,7 +98,9 @@ func TestRunInteractiveReportsWizardAbort(t *testing.T) {
 func TestRunInteractivePropagatesWizardFailure(t *testing.T) {
 	originalWizard := runWizard
 	t.Cleanup(func() { runWizard = originalWizard })
-	runWizard = func() (tui.Options, error) { return tui.Options{}, errors.New("terminal unavailable") }
+	runWizard = func(context.Context) (tui.Options, error) {
+		return tui.Options{}, errors.New("terminal unavailable")
+	}
 
 	var stdout, stderr bytes.Buffer
 	if code := runInteractive(context.Background(), &stdout, &stderr); code != 1 {
@@ -102,6 +108,72 @@ func TestRunInteractivePropagatesWizardFailure(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "terminal unavailable") {
 		t.Errorf("stderr = %q, want wizard error", stderr.String())
+	}
+}
+
+func TestRunInteractiveExternalCancellationDominatesWizardAbort(t *testing.T) {
+	originalWizard := runWizard
+	t.Cleanup(func() { runWizard = originalWizard })
+	started := make(chan struct{})
+	runWizard = func(ctx context.Context) (tui.Options, error) {
+		close(started)
+		<-ctx.Done()
+		// Model the reported race: even if the UI reports an abort concurrently,
+		// the canceled application context is authoritative.
+		return tui.Options{}, tui.ErrAborted
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var stdout, stderr bytes.Buffer
+	codeDone := make(chan int, 1)
+	go func() { codeDone <- runInteractive(ctx, &stdout, &stderr) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("wizard did not start")
+	}
+	cancel()
+
+	select {
+	case code := <-codeDone:
+		if code != 1 {
+			t.Fatalf("runInteractive() code = %d, want 1", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runInteractive did not return after external cancellation")
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunInteractiveCancellationBetweenWizardAndScanIsFatal(t *testing.T) {
+	originalWizard := runWizard
+	originalProgress := runProgressView
+	t.Cleanup(func() {
+		runWizard = originalWizard
+		runProgressView = originalProgress
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	runWizard = func(context.Context) (tui.Options, error) {
+		cancel()
+		return tui.Options{URL: "https://example.test/"}, nil
+	}
+	progressCalls := 0
+	runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+		progressCalls++
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runInteractive(ctx, &stdout, &stderr); code != 1 {
+		t.Fatalf("runInteractive() code = %d, want 1", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+	if progressCalls != 0 {
+		t.Fatalf("progress view calls = %d, want 0", progressCalls)
 	}
 }
 
@@ -357,6 +429,73 @@ func TestRunInteractiveScanJoinsScanBeforeReturn(t *testing.T) {
 	}
 }
 
+func TestRunInteractiveScanJoinsAfterExternalCancellation(t *testing.T) {
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	analyzerStarted := make(chan struct{})
+	viewStarted := make(chan struct{})
+	cleanupDone := make(chan struct{})
+
+	original := runProgressView
+	t.Cleanup(func() { runProgressView = original })
+	runProgressView = func(ctx context.Context, _ io.Writer, _ []string, _ string, _ <-chan tui.Msg) error {
+		close(viewStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	engine := newStubEngine(t, stubAnalyzer{
+		source: analysis.SourceHTTP,
+		observe: func(ctx context.Context, _ analysis.Target) (analysis.Observation, error) {
+			close(analyzerStarted)
+			defer close(cleanupDone)
+			<-ctx.Done()
+			return analysis.Observation{Source: analysis.SourceHTTP}, ctx.Err()
+		},
+	}, scanner.FailurePolicyContinue)
+
+	var stdout, stderr bytes.Buffer
+	codeDone := make(chan int, 1)
+	go func() {
+		codeDone <- runInteractiveScan(
+			parentCtx,
+			tui.Options{URL: "https://example.test/"},
+			&stdout,
+			&stderr,
+			engine,
+		)
+	}()
+
+	for name, started := range map[string]<-chan struct{}{
+		"analyzer": analyzerStarted,
+		"view":     viewStarted,
+	} {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s did not start", name)
+		}
+	}
+	cancelParent()
+
+	select {
+	case code := <-codeDone:
+		if code != 1 {
+			t.Fatalf("runInteractiveScan() code = %d, want 1", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runInteractiveScan did not return after external cancellation")
+	}
+	select {
+	case <-cleanupDone:
+	default:
+		t.Fatal("analyzer cleanup did not finish before runInteractiveScan returned")
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
 // TestRunInteractiveScanDetachesProgressCallback proves a Scanner that went
 // through the interactive flow can be scanned again without panicking on the
 // closed progress channel.
@@ -396,9 +535,9 @@ func TestRunInteractiveScanHandlesEarlyViewExit(t *testing.T) {
 			wantStderr: "canceled",
 		},
 		{
-			name:       "context cancellation renders no report",
+			name:       "unexpected view context cancellation is fatal",
 			runErr:     context.Canceled,
-			wantCode:   0,
+			wantCode:   1,
 			wantStderr: "canceled",
 		},
 		{

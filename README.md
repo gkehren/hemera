@@ -98,6 +98,12 @@ scripted invocations always get the classic non-interactive behavior, so CI and
 automation are unaffected. Set `HEMERA_ACCESSIBLE=1` to run the wizard in
 huh's accessible, screen-reader-friendly mode.
 
+During an active scan, `Ctrl+C` and supported process-termination signals cancel
+the shared scan context. Hemera waits for bounded analyzer and Browser cleanup
+before exiting; classic or externally canceled scans return exit code `1`, while
+the interactive view's own `Ctrl+C` action remains a successful user cancel
+with exit code `0`.
+
 ## Project principles
 
 1. **Explainability first.** Every detection must be tied to observable evidence.

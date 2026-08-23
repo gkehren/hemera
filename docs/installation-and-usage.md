@@ -155,8 +155,17 @@ Hemera CLI uses deterministic exit codes to facilitate script integration:
 | Exit code | Meaning | Description |
 | :---: | :--- | :--- |
 | `0` | **Success** | The scan completed and the report was written to stdout. Detections and coverage states are detailed in the output. |
-| `1` | **Scan / Runtime error** | A fatal network failure occurred (e.g. DNS resolution error, connection timeout, unreachable host) or writing the report failed. Details are written to stderr. |
+| `1` | **Scan / Runtime error** | A fatal network failure occurred (e.g. DNS resolution error, connection timeout, unreachable host), the active scan was canceled by an external context or process signal, or writing the report failed. Details are written to stderr. |
 | `2` | **Usage / Target error** | Invalid command-line arguments (unknown flag, missing URL, unsupported format) or an invalid/forbidden initial URL target (e.g. private/loopback IP, cloud metadata address, unsupported URL scheme). |
+
+During an active scan, `Ctrl+C` (`SIGINT`) and `SIGTERM` where supported cancel
+the application context. Hemera then waits for analyzer cleanup, including the
+bounded Browser recorder, proxy, Chromium process, and temporary-profile
+shutdown paths, before returning exit code `1`. The interactive progress view's
+own `Ctrl+C` key handling remains a deliberate user cancellation and returns
+exit code `0`; an external context or process cancellation returns `1` in both
+classic and interactive scan execution. Signal handling never exits directly
+from a callback.
 
 ---
 

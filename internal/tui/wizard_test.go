@@ -1,9 +1,85 @@
 package tui
 
 import (
+	"context"
+	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"charm.land/huh/v2"
 )
+
+func TestRunWizardRejectsNilAndCanceledContexts(t *testing.T) {
+	t.Parallel()
+	if _, err := RunWizard(nil); err == nil {
+		t.Fatal("RunWizard(nil) error = nil")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := RunWizard(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWizard(canceled) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestAccessibleWizardCancellationClosesInputAndReturns(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	input := &trackingReadCloser{
+		ReadCloser: reader,
+		started:    make(chan struct{}),
+		closed:     make(chan struct{}),
+	}
+	var value string
+	form := huh.NewForm(huh.NewGroup(huh.NewInput().Value(&value))).
+		WithAccessible(true).
+		WithInput(input).
+		WithOutput(io.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- runAccessibleForm(ctx, form, input) }()
+
+	select {
+	case <-input.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("accessible wizard did not start reading input")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("runAccessibleForm() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("accessible wizard did not return after cancellation")
+	}
+	select {
+	case <-input.closed:
+	default:
+		t.Fatal("accessible wizard input was not closed")
+	}
+}
+
+type trackingReadCloser struct {
+	io.ReadCloser
+	startedOnce sync.Once
+	closedOnce  sync.Once
+	started     chan struct{}
+	closed      chan struct{}
+}
+
+func (r *trackingReadCloser) Read(p []byte) (int, error) {
+	r.startedOnce.Do(func() { close(r.started) })
+	return r.ReadCloser.Read(p)
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closedOnce.Do(func() { close(r.closed) })
+	return r.ReadCloser.Close()
+}
 
 func TestValidateTargetURL(t *testing.T) {
 	t.Parallel()

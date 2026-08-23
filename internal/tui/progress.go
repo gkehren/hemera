@@ -289,8 +289,18 @@ var ErrViewCanceled = errors.New("progress view canceled")
 // caller's own completion channel.
 func RunProgress(ctx context.Context, output io.Writer, sources []string, target string, msgs <-chan Msg) error {
 	model := newProgressModel(sources, target, msgs)
-	program := tea.NewProgram(model, tea.WithOutput(output), tea.WithContext(ctx))
+	program := tea.NewProgram(
+		model,
+		tea.WithOutput(output),
+		tea.WithContext(ctx),
+		tea.WithoutSignalHandler(),
+	)
 	finalModel, err := program.Run()
+	// The application context owns process cancellation. Prefer it over any
+	// concurrent framework result so callers get deterministic classification.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	if err != nil {
 		return fmt.Errorf("run progress view: %w", err)
 	}

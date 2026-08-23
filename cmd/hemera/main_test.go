@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gkehren/hemera/internal/analysis"
 	"github.com/gkehren/hemera/internal/httpanalyzer"
@@ -21,7 +22,7 @@ func TestRunShowsHelpWhenNoArgumentsAreProvided(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if code := run(nil, &stdout, &stderr); code != 0 {
+	if code := run(context.Background(), nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("run() code = %d, want 0", code)
 	}
 	if !strings.Contains(stdout.String(), "Usage:") {
@@ -38,7 +39,7 @@ func TestRunShowsVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if code := run([]string{"--version"}, &stdout, &stderr); code != 0 {
+	if code := run(context.Background(), []string{"--version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run() code = %d, want 0", code)
 	}
 	if got, want := stdout.String(), "hemera dev\n"; got != want {
@@ -60,7 +61,7 @@ func TestRunShowsHelp(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 
-			if code := run([]string{argument}, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), []string{argument}, &stdout, &stderr); code != 0 {
 				t.Fatalf("run() code = %d, want 0", code)
 			}
 			if !strings.Contains(stdout.String(), "Usage:") {
@@ -84,7 +85,7 @@ func TestRunHelpTakesPriorityOverVersion(t *testing.T) {
 			t.Parallel()
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
-			if code := run(args, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run() code = %d, want 0", code)
 			}
 			if !strings.Contains(stdout.String(), "Usage:") || strings.Contains(stdout.String(), "hemera dev") {
@@ -108,7 +109,7 @@ func TestRunScanHelpTakesPriorityOverVersion(t *testing.T) {
 			t.Parallel()
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
-			if code := run(args, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run() code = %d, want 0", code)
 			}
 			if !strings.Contains(stdout.String(), "hemera scan") || !strings.Contains(stdout.String(), "--format") {
@@ -127,7 +128,7 @@ func TestRunRejectsUnexpectedArguments(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if code := run([]string{"unknown"}, &stdout, &stderr); code != 2 {
+	if code := run(context.Background(), []string{"unknown"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("run() code = %d, want 2", code)
 	}
 	if stdout.Len() != 0 {
@@ -145,6 +146,12 @@ type fakeScanner struct {
 
 func (f fakeScanner) Scan(context.Context, string) (scanner.Result, error) {
 	return f.result, f.err
+}
+
+type scanRunnerFunc func(context.Context, string) (scanner.Result, error)
+
+func (f scanRunnerFunc) Scan(ctx context.Context, target string) (scanner.Result, error) {
+	return f(ctx, target)
 }
 
 type errorWriter struct{}
@@ -292,6 +299,102 @@ func TestRunScanClassifiesFailures(t *testing.T) {
 	}
 }
 
+func TestRunScanCancellationWaitsForScannerCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	runner := scanRunnerFunc(func(ctx context.Context, _ string) (scanner.Result, error) {
+		close(started)
+		defer close(cleanupDone)
+		<-ctx.Done()
+		return scanner.Result{}, fmt.Errorf(
+			"cancel https://user:password@example.test/?token=SUPER_SECRET: %w",
+			ctx.Err(),
+		)
+	})
+
+	var stdout, stderr bytes.Buffer
+	codeDone := make(chan int, 1)
+	go func() {
+		codeDone <- runScan(ctx, []string{"https://example.test/"}, &stdout, &stderr, runner)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not start")
+	}
+	cancel()
+
+	select {
+	case code := <-codeDone:
+		if code != 1 {
+			t.Fatalf("runScan() code = %d, want 1", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runScan did not return after cancellation")
+	}
+	select {
+	case <-cleanupDone:
+	default:
+		t.Fatal("scanner cleanup did not finish before runScan returned")
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); got != "hemera: scan canceled\n" {
+		t.Errorf("stderr = %q, want deterministic cancellation diagnostic", got)
+	}
+}
+
+func TestRunScanRootCancellationDominatesConcurrentError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := scanRunnerFunc(func(context.Context, string) (scanner.Result, error) {
+		cancel()
+		return scanner.Result{}, fmt.Errorf(
+			"reject https://example.test/?token=SUPER_SECRET: %w",
+			httpanalyzer.ErrInitialTarget,
+		)
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := runScan(ctx, []string{"https://example.test/"}, &stdout, &stderr, runner); code != 1 {
+		t.Fatalf("runScan() code = %d, want cancellation code 1", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: scan canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunScanRootCancellationDominatesConcurrentSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := scanRunnerFunc(func(context.Context, string) (scanner.Result, error) {
+		cancel()
+		return scanner.Result{}, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := runScan(ctx, []string{"https://example.test/"}, &stdout, &stderr, runner); code != 1 {
+		t.Fatalf("runScan() code = %d, want cancellation code 1", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: scan canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunPassesCanceledRootContextToClassicScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"scan", "https://example.test/?token=SUPER_SECRET"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("run() code = %d, want 1; stderr = %q", code, stderr.String())
+	}
+	if stdout.Len() != 0 || stderr.String() != "hemera: scan canceled\n" {
+		t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
 // TestRunScanSanitizesDiagnosticsAndPreservesClassification proves the
 // privacy boundary never changes control flow: exit codes are classified from
 // the original wrapped error while the rendered text is minimized.
@@ -340,7 +443,7 @@ func TestRunScanSanitizesDiagnosticsAndPreservesClassification(t *testing.T) {
 func TestRunPreservesHTTPOnlyInvalidTargetBehavior(t *testing.T) {
 	t.Parallel()
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"scan", "ftp://example.test/"}, &stdout, &stderr); code != 2 {
+	if code := run(context.Background(), []string{"scan", "ftp://example.test/"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("run() code = %d, want 2; stderr = %q", code, stderr.String())
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid or forbidden initial target") {

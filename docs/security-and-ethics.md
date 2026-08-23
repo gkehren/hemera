@@ -258,6 +258,19 @@ Caller cancellation remains fatal, and an unsafe initial HTTP target prevents
 the later analyzers from running. This integration does not authorize challenge
 bypass, fingerprint spoofing, or active probing.
 
+The CLI owns `SIGINT` and supported `SIGTERM` handling at the process boundary
+and converts either signal into cancellation of the shared application context.
+The wizard and progress UI receive that context with Bubble Tea's own
+SIGINT/SIGTERM handler disabled, so framework abort handling cannot race the
+application's fatal cancellation classification. The accessible wizard closes
+application-owned stdin on cancellation and has a fixed one-second shutdown
+window. The interactive runner joins its scan goroutine and detaches progress
+delivery before returning; the process does not call `os.Exit` until recorder,
+session, proxy, Chromium, and temporary-profile cleanup have had their normal
+bounded opportunity to finish. Signal callbacks never print analyzer errors or
+attacker-controlled URLs, and classic/external cancellation emits only a fixed
+diagnostic before exiting with runtime code `1`.
+
 ## Explicitly prohibited capabilities
 
 Hemera must not include features that:

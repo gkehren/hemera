@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/gkehren/hemera/internal/browser"
@@ -22,7 +24,24 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+}
+
+type applicationRunner func(context.Context, []string, io.Writer, io.Writer) int
+
+// runMain owns process-signal cancellation and returns only after run and all
+// of its deferred analyzer cleanup have completed. main is the sole os.Exit
+// caller, so no signal callback can bypass stack unwinding.
+func runMain(parent context.Context, args []string, stdout, stderr io.Writer) int {
+	return runMainWithRunner(parent, args, stdout, stderr, run)
+}
+
+// runMainWithRunner keeps signal ownership testable without delivering signals
+// to the main test process.
+func runMainWithRunner(parent context.Context, args []string, stdout, stderr io.Writer, runner applicationRunner) int {
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runner(ctx, args, stdout, stderr)
 }
 
 // stdinIsTTY and stdoutIsTTY are overridable in tests.
@@ -38,13 +57,13 @@ var (
 	runProgressView = tui.RunProgress
 )
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "scan" {
-		return runScan(context.Background(), args[1:], stdout, stderr, nil)
+		return runScan(ctx, args[1:], stdout, stderr, nil)
 	}
 
 	if len(args) == 0 && stdinIsTTY() && stdoutIsTTY() {
-		return runInteractive(context.Background(), stdout, stderr)
+		return runInteractive(ctx, stdout, stderr)
 	}
 
 	flags := flag.NewFlagSet("hemera", flag.ContinueOnError)
@@ -151,7 +170,18 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer, engin
 	}
 
 	result, err := engine.Scan(ctx, flags.Arg(0))
+	// The application context is authoritative even if cancellation races with
+	// a scanner result. Never render a concurrent success or classify a
+	// concurrent target error as anything other than fatal cancellation.
+	if ctx.Err() != nil {
+		fmt.Fprintln(stderr, "hemera: scan canceled")
+		return 1
+	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(stderr, "hemera: scan canceled")
+			return 1
+		}
 		fmt.Fprintf(stderr, "hemera: scan failed: %s\n", safeoutput.SanitizeDiagnostic(err))
 		if errors.Is(err, httpanalyzer.ErrInitialTarget) {
 			return 2
@@ -209,13 +239,21 @@ func newScannerEngine(deep bool, progress scanner.ProgressFunc) (*scanner.Scanne
 // styled summary, and the standard text report. It is only reached when both
 // stdin and stdout are terminals.
 func runInteractive(ctx context.Context, stdout, stderr io.Writer) int {
-	opts, err := runWizard()
+	opts, err := runWizard(ctx)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 1
+		}
 		if errors.Is(err, tui.ErrAborted) {
 			fmt.Fprintln(stderr, "hemera: canceled")
 			return 0
 		}
 		fmt.Fprintf(stderr, "hemera: %s\n", safeoutput.SanitizeDiagnostic(err))
+		return 1
+	}
+	if ctx.Err() != nil {
+		fmt.Fprintln(stderr, "hemera: canceled")
 		return 1
 	}
 	return runInteractiveScan(ctx, opts, stdout, stderr, nil)
@@ -275,19 +313,31 @@ func runInteractiveScan(ctx context.Context, opts tui.Options, stdout, stderr io
 	outcome := <-scanDone
 
 	// A non-nil view error means the progress view exited before the scan
-	// outcome was delivered, so there is no report to render. Both the
-	// view-canceled sentinel and a context cancellation report a deliberate
-	// user cancellation, not a scan failure.
+	// outcome was delivered, so there is no report to render. The view-canceled
+	// sentinel is a deliberate UI cancellation; inherited application-context
+	// cancellation retains the fatal runtime exit classification.
 	if runErr != nil {
-		if errors.Is(runErr, tui.ErrViewCanceled) || errors.Is(runErr, context.Canceled) {
+		if ctx.Err() != nil {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 1
+		}
+		if errors.Is(runErr, tui.ErrViewCanceled) {
 			fmt.Fprintln(stderr, "hemera: canceled")
 			return 0
+		}
+		if errors.Is(runErr, context.Canceled) {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 1
 		}
 		fmt.Fprintf(stderr, "hemera: %s\n", safeoutput.SanitizeDiagnostic(runErr))
 		return 1
 	}
 
 	if outcome.Err != nil {
+		if ctx.Err() != nil || errors.Is(outcome.Err, context.Canceled) {
+			fmt.Fprintln(stderr, "hemera: canceled")
+			return 1
+		}
 		fmt.Fprintf(stderr, "hemera: scan failed: %s\n", safeoutput.SanitizeDiagnostic(outcome.Err))
 		if errors.Is(outcome.Err, httpanalyzer.ErrInitialTarget) {
 			return 2
