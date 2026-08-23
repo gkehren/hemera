@@ -459,6 +459,103 @@ func TestBuiltInRulesHaveDocumentedLimitations(t *testing.T) {
 	}
 }
 
+func TestBuiltInDetectorDocumentationMatchesInventory(t *testing.T) {
+	t.Parallel()
+	ruleSet, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repositoryRoot := filepath.Join("..", "..")
+	documentPaths := []string{
+		"README.md",
+		filepath.Join("docs", "detector-rules.md"),
+		filepath.Join("docs", "detector-support-standard.md"),
+		filepath.Join("docs", "detector-limitations.md"),
+		filepath.Join("docs", "regression-and-accuracy.md"),
+	}
+	documents := make(map[string]string, len(documentPaths))
+	for _, relativePath := range documentPaths {
+		data, err := os.ReadFile(filepath.Join(repositoryRoot, relativePath))
+		if err != nil {
+			t.Fatalf("read %s: %v", relativePath, err)
+		}
+		documents[relativePath] = string(data)
+	}
+
+	for _, rule := range ruleSet.Rules {
+		for _, relativePath := range documentPaths {
+			if !strings.Contains(documents[relativePath], "`"+rule.ID+"`") {
+				t.Errorf("rule %q is not documented in %s", rule.ID, relativePath)
+			}
+		}
+
+		readmeEntry := fmt.Sprintf("`%s` (%s)", rule.ID, rule.Name)
+		if !strings.Contains(documents["README.md"], readmeEntry) {
+			t.Errorf("README detector entry %q is missing", readmeEntry)
+		}
+		catalogRow := fmt.Sprintf("| `%s` | `%s` | %s |", rule.ID, rule.Category, rule.Name)
+		if !strings.Contains(documents[filepath.Join("docs", "detector-rules.md")], catalogRow) {
+			t.Errorf("detector catalog row prefix %q is missing", catalogRow)
+		}
+	}
+
+	vendors := make(map[string]struct{})
+	for _, rule := range ruleSet.Rules {
+		vendors[rule.Vendor] = struct{}{}
+	}
+	normalizeWhitespace := func(value string) string {
+		return strings.Join(strings.Fields(value), " ")
+	}
+	summaries := map[string]string{
+		"README.md": fmt.Sprintf(
+			"Hemera ships %d built-in detector rules with explicit product-level separation across %d vendor families:",
+			len(ruleSet.Rules), len(vendors),
+		),
+		filepath.Join("docs", "architecture.md"): fmt.Sprintf(
+			"Hemera includes %d built-in rules across %d vendor families",
+			len(ruleSet.Rules), len(vendors),
+		),
+		filepath.Join("docs", "detector-rules.md"): fmt.Sprintf(
+			"Hemera ships %d built-in detector rules across", len(ruleSet.Rules),
+		),
+		filepath.Join("docs", "regression-and-accuracy.md"): fmt.Sprintf(
+			"across all %d built-in rules", len(ruleSet.Rules),
+		),
+	}
+	for relativePath, want := range summaries {
+		content, ok := documents[relativePath]
+		if !ok {
+			data, err := os.ReadFile(filepath.Join(repositoryRoot, relativePath))
+			if err != nil {
+				t.Fatalf("read %s: %v", relativePath, err)
+			}
+			content = string(data)
+		}
+		if !strings.Contains(normalizeWhitespace(content), want) {
+			t.Errorf("%s does not contain current inventory summary %q", relativePath, want)
+		}
+	}
+
+	markdownPaths, err := filepath.Glob(filepath.Join(repositoryRoot, "docs", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdownPaths = append(markdownPaths,
+		filepath.Join(repositoryRoot, "README.md"),
+		filepath.Join(repositoryRoot, "AGENTS.md"),
+	)
+	for _, path := range markdownPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(strings.ToLower(string(data)), "13 built-in") {
+			t.Errorf("%s contains the stale 13-rule count", path)
+		}
+	}
+}
+
 type evidenceProvenance struct {
 	Weight    float64 `json:"weight"`
 	Group     string  `json:"group"`

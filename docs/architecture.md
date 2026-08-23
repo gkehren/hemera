@@ -115,16 +115,18 @@ that a precise bot-management or WAF product is active.
 
 ### Browser analyzer
 
-A sandboxed Chromium instance observed through the Chrome DevTools Protocol can
-collect the final DOM, network requests and responses, XHR/fetch traffic, dynamic
-scripts and iframes, JavaScript-created cookies, browser redirects, visible
-challenges, and a small set of relevant JavaScript globals. Navigation remains
-normal: the analyzer must not implement bypass behavior.
+The Browser analyzer observes a sandboxed Chromium instance through the Chrome
+DevTools Protocol. It collects the final DOM, bounded HTTP(S) network requests
+and responses (including XHR/fetch traffic), dynamic scripts and iframes,
+JavaScript-created cookie names and domains, and browser redirects. It does not
+currently produce `dom_selector` or `js_global` signals. Navigation remains
+normal and implements no bypass behavior.
 
 The browser bootstrap in `internal/browser` starts a locally installed Chromium
 through `chromedp`, creates a fresh temporary profile, binds the random CDP port
 to `127.0.0.1`, and verifies the connection with `Browser.getVersion`. Startup
-is limited to a positive configurable timeout with a hard ceiling of 10 seconds.
+uses a 5-second default timeout and a 20-second hard ceiling; deep mode uses the
+20-second ceiling.
 Session shutdown is idempotent, bounded, tied to the caller's context, and
 removes the temporary profile after the process stops. The package deliberately
 overrides `chromedp`'s root behavior so Chromium is never launched with
@@ -411,7 +413,7 @@ rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
 `internal/detectors` embeds the validated V2 rules shipped with the binary.
-Hemera includes 13 built-in rules across 7 vendor families (Cloudflare, Google,
+Hemera includes 12 built-in rules across 7 vendor families (Cloudflare, Google,
 AWS, DataDome, Akamai, hCaptcha, and Arkose Labs) with strict product-level
 separation. They use decisive evidence (headers, scripts, block page DOM, DNS/TLS)
 and supporting markers grouped by correlation. Every supported rule adheres to the
@@ -582,7 +584,7 @@ interactive path and keep the plain text renderer, so stdout contracts and exit
 codes remain unchanged. `HEMERA_ACCESSIBLE=1` switches the wizard to huh's
 accessible mode.
 
-## Proposed repository layout
+## Current repository layout
 
 ```text
 cmd/hemera/               CLI entry point
@@ -592,17 +594,14 @@ internal/detectors/       embedded detector rules
 internal/httpanalyzer/    HTTP collection
 internal/browser/         Chromium navigation, capture, and signal normalization
 internal/dnstls/          DNS/TLS normalization and bounded CNAME observation
-internal/signals/         normalization
 internal/rules/           rule loading and matching
 internal/scoring/         confidence calculation
 internal/report/          safe text and JSON renderers
 internal/safeoutput/      canonical URL minimization and bounded, escape-free CLI diagnostics
 internal/tui/             interactive wizard, progress view, and styled summary
-pkg/model/                intentionally public models, if needed
-detectors/                data-driven signatures
-testdata/                 fixtures, captures, and expected results
+pkg/model/                public normalized signal model
 docs/                     project and contributor documentation
 ```
 
-This is a starting boundary map, not a requirement to create empty packages.
-Packages should be introduced as working vertical slices need them.
+This map lists the implemented package boundaries. New packages should be
+introduced only when a working vertical slice needs them.

@@ -1,8 +1,10 @@
 # Detector Limitations and Operational Boundaries
 
-This document provides a comprehensive analysis of the operational limitations,
-blind spots, and detection boundaries of Hemera's 13 built-in detector rules across
-all 7 supported vendor families.
+This document describes the operational limitations, blind spots, and detection
+boundaries of every built-in detector rule across the 7 supported vendor
+families. The authoritative rule inventory is maintained in
+[`internal/detectors/rules.json`](../internal/detectors/rules.json) and summarized
+in the [detector rule schema](detector-rules.md#built-in-detectors).
 
 ## 1. General Scanner Principles & Architectural Boundaries
 
@@ -13,14 +15,14 @@ strictly governed by security and ethical requirements:
   payloads or abnormal traversal sequences to trigger WAF blocks.
 - **No Challenge Bypassing or Solving:** Hemera never solves CAPTCHAs, executes
   turnstile tokens, or spoofs browser fingerprints for evasion.
-- **No Aggressive Crawling or DoS:** Requests are bounded, throttled, and respect
-  resource limits.
+- **No Aggressive Crawling or DoS:** Request counts, concurrency, transferred
+  bytes, and total time are bounded.
 
 Consequently, Hemera's detectors rely on observable, public signals:
 1. Standard response headers emitted on benign or challenge responses;
 2. Client-side SDK script and iframe URLs;
 3. Standard DOM markup (challenge widgets, error wrappers);
-4. Diagnostic and session cookies;
+4. Diagnostic and session cookie names (never values);
 5. Canonical DNS CNAME records and TLS certificate metadata.
 
 ---
@@ -54,7 +56,9 @@ Consequently, Hemera's detectors rely on observable, public signals:
 #### `google.recaptcha` (Category: `captcha_challenge`)
 - **Version Granularity:** Currently detects the presence of Google reCAPTCHA (v2, v3, invisible, and Enterprise) under a unified rule ID (`google.recaptcha`). It does not split into distinct product IDs for v2 vs. v3.
 - **Server-Side Token Assessment:** reCAPTCHA v3 score-based validation occurs entirely on the customer backend (`siteverify` or Cloud API). If client scripts are masked or loaded through Google Tag Manager (GTM) dynamic triggers without DOM markers, passive HTML analysis may miss it until dynamic browser evaluation runs.
-- **Custom Alternate Hosts:** While official hosts (`recaptcha.net`, `google.com/recaptcha`, `recaptcha.enterprise.com`) are supported, custom private reverse proxies are not detected statically.
+- **Alternate Hosts:** The rule supports the documented `www.google.com` and
+  `www.recaptcha.net` API paths. Custom private reverse proxies and other hosts
+  are not detected statically.
 
 ---
 

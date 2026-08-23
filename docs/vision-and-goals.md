@@ -51,7 +51,7 @@ Project decisions should follow this order of priority:
 - Researchers and contributors experimenting with transparent fingerprint rules.
 - CI or local tooling that consumes structured scan results.
 
-## Initial protection categories
+## Protection categories
 
 - CDN / reverse proxy
 - WAF
@@ -60,9 +60,10 @@ Project decisions should follow this order of priority:
 - Client-side fingerprinting signal
 - Third-party security service
 
-The first planned families are Cloudflare, Google reCAPTCHA, AWS WAF, Akamai,
-DataDome, hCaptcha, and Arkose Labs. Coverage depends on signature specificity;
-the list is not a release promise.
+The implemented rules cover Cloudflare, Google reCAPTCHA, AWS, Akamai, DataDome,
+hCaptcha, and Arkose Labs. Each supported detector remains limited to its
+documented, fixture-backed signatures; this list does not promise that every
+product from those vendors is detectable.
 
 ## Non-goals
 

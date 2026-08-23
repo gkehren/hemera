@@ -10,8 +10,8 @@ and future contributor documentation.
    installation, configuration, CLI reference, and automation examples.
 2. [Vision, direction, and objectives](vision-and-goals.md) explains why Hemera
    exists, what success means, and how product decisions should be made.
-3. [Architecture](architecture.md) describes the planned analysis pipeline and
-   its main boundaries.
+3. [Architecture](architecture.md) describes the implemented analysis pipeline,
+   its main boundaries, and explicitly labeled future extensions.
 4. [Roadmap](roadmap.md) is the authoritative source for implementation order
    and status and breaks delivery into incremental, testable milestones.
 5. [Security and ethical boundaries](security-and-ethics.md) defines the safety

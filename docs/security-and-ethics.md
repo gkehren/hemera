@@ -56,9 +56,9 @@ Configuration can only reduce these limits; it cannot raise the safety
 ceilings. Reaching the static resource limit preserves already collected
 signals, stops extraction, and emits one warning.
 
-These connection controls apply to the HTTP analyzer and to all connection state
-reused by DNS/TLS observation. Browser navigation remains planned and must
-establish equivalent boundaries before it is enabled.
+These HTTP connection controls also govern the connection state reused by
+DNS/TLS observation. Browser navigation is implemented through the separately
+bounded, validated proxy and CDP controls documented below.
 
 ### Implemented DNS/TLS boundary
 
@@ -153,8 +153,9 @@ same runtime check requires the exact per-session Hemera proxy address,
 `proxy-bypass-list=<-loopback>`, direct-DNS suppression, QUIC disable, and the
 non-proxied WebRTC UDP restriction. Missing, duplicate, unexpected, or
 conflicting values fail startup before untrusted navigation. A
-startup timeout of at most 10 seconds covers process launch and the
-`Browser.getVersion` handshake. Caller cancellation, startup failure, loss of
+default startup timeout of 5 seconds, with a 20-second hard ceiling, covers
+process launch and the `Browser.getVersion` handshake. Deep mode uses the
+20-second ceiling. Caller cancellation, startup failure, loss of
 the CDP session, and explicit close all stop the process and remove the profile;
 explicit close also has a fixed shutdown deadline.
 

@@ -2,7 +2,7 @@
 
 Hemera is an open-source web protection scanner. Given a target URL, it
 observes publicly visible HTTP, DNS, TLS, DOM, and browser-network signals to
-produce an explainable report of active protections (such as CDN/reverse
+produce an explainable report of protections that may be present (such as CDN/reverse
 proxies, WAFs, bot management, CAPTCHAs, and client-side fingerprinting).
 
 This guide provides instructions for installing the Hemera CLI, configuring the
@@ -219,52 +219,11 @@ file storage, or pipe processing):
 hemera scan --format json https://example.com/ > report.json
 ```
 
-The JSON report follows the [JSON report schema V6](report-schema.md) specification:
-
-```json
-{
-  "schema_version": 6,
-  "tool_version": "dev",
-  "requested_url": "https://example.com/",
-  "final_url": "https://example.com/",
-  "http": {
-    "status_code": 200,
-    "body_truncated": false,
-    "redirects": [],
-    "warnings": []
-  },
-  "analyzers": [
-    {
-      "source": "http_analyzer",
-      "status": "complete",
-      "warnings": []
-    },
-    {
-      "source": "dns_tls_analyzer",
-      "status": "complete",
-      "warnings": []
-    },
-    {
-      "source": "browser_analyzer",
-      "status": "complete",
-      "warnings": []
-    }
-  ],
-  "detections": [
-    {
-      "rule_id": "cloudflare.turnstile",
-      "name": "Cloudflare Turnstile",
-      "vendor": "Cloudflare",
-      "category": "captcha",
-      "detected": false,
-      "status": "not_detected",
-      "incomplete_sources": [],
-      "score": 0,
-      "level": "NONE"
-    }
-  ]
-}
-```
+The JSON report follows the [JSON report schema V6](report-schema.md). The
+checked-in [complete V6 golden report](../internal/report/testdata/complete-report.golden.json)
+is an exact, test-validated example of the current field names and value shapes.
+In particular, a detection's identifier field is `id`; `rule_id` is used only
+inside an applied cross-rule conflict object.
 
 ---
 
@@ -279,16 +238,16 @@ List all detected protections with their confidence score and confidence level:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.detected == true) | {rule_id, name, score, level}'
+  | jq '.detections[] | select(.detected == true) | {id, name, score, level}'
 ```
 
 ### Filter high-confidence detections
 
-Select detections with score >= 70 or level `HIGH`:
+Select detections with score at least 75 (`high` or `very_high`):
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.level == "HIGH" or .level == "CERTAIN") | {name, score, level}'
+  | jq '.detections[] | select(.level == "high" or .level == "very_high") | {id, name, score, level}'
 ```
 
 ### Inspect analyzer execution status and warnings
@@ -308,7 +267,7 @@ analyzer observations:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.status == "insufficient_coverage") | {rule_id, name, incomplete_sources}'
+  | jq '.detections[] | select(.status == "insufficient_coverage") | {id, name, incomplete_sources}'
 ```
 
 ---
@@ -317,15 +276,15 @@ hemera scan --format json https://example.com/ \
 
 ### Shell script assertion
 
-The following script scans an endpoint, validates exit codes, and fails if an
-unexpected protection or high-risk configuration is found:
+The following script scans an endpoint, verifies the report schema, and prints
+positive detections. It fails when the scan or schema check fails:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 TARGET_URL="https://staging.example.com/"
-REPORT_FILE="$(mktemp --suffix=.json)"
+REPORT_FILE="$(mktemp "${TMPDIR:-/tmp}/hemera-report.XXXXXX")"
 trap 'rm -f "$REPORT_FILE"' EXIT
 
 echo "Scanning target: ${TARGET_URL}..."
@@ -336,16 +295,16 @@ fi
 
 # Assert schema compatibility
 SCHEMA_VERSION=$(jq -r '.schema_version' "${REPORT_FILE}")
-if [ "${SCHEMA_VERSION}" -ne 5 ]; then
+if [ "${SCHEMA_VERSION}" -ne 6 ]; then
   echo "Unexpected JSON schema version: ${SCHEMA_VERSION}" >&2
   exit 1
 fi
 
 # Check for detected bot management or WAF
 DETECTED_COUNT=$(jq '[.detections[] | select(.detected == true)] | length' "${REPORT_FILE}")
-echo "Scan complete. Active protections detected: ${DETECTED_COUNT}"
+echo "Scan complete. Positive detections: ${DETECTED_COUNT}"
 
-jq -r '.detections[] | select(.detected == true) | " - \(.name) (\(.rule_id)): score \(.score) [\(.level)]"' "${REPORT_FILE}"
+jq -r '.detections[] | select(.detected == true) | " - \(.name) (\(.id)): score \(.score) [\(.level)]"' "${REPORT_FILE}"
 ```
 
 ### GitHub Actions workflow step

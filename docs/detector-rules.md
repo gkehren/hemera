@@ -11,19 +11,20 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Hemera ships 12 built-in detector rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs:
+Hemera ships 12 built-in detector rules across Cloudflare, Google, AWS,
+DataDome, Akamai, hCaptcha, and Arkose Labs:
 
-| Rule ID | Category | Product | Decisive evidence | Supporting evidence |
+| Rule ID | Category | Detector name | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
-| `cloudflare.proxy` | `cdn_reverse_proxy` | (Infrastructure) | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
+| `cloudflare.proxy` | `cdn_reverse_proxy` | Cloudflare Reverse Proxy | `Server: cloudflare` or `cf-ray` header | `cf-cache-status`, CNAME, TLS cert issuer, clearance cookie |
 | `cloudflare.challenge_page` | `captcha_challenge` | Cloudflare Challenge Page | `cf-mitigated: challenge` or challenge script | `cf-error-code`, error wrapper and block page DOM |
 | `cloudflare.bot_protection` | `bot_management` | Cloudflare Bot Protection | `/cdn-cgi/challenge-platform/scripts/jsd/(main\|api).js` script | `__cf_bm` cookie |
 | `cloudflare.turnstile` | `captcha_challenge` | Cloudflare Turnstile | Documented `challenges.cloudflare.com/turnstile/v0/api.js` script | `cf-turnstile` HTML marker |
 | `google.recaptcha` | `captcha_challenge` | Google reCAPTCHA | Documented Google or `recaptcha.net` `api.js`/`enterprise.js` script | `g-recaptcha` marker and static `grecaptcha.render`/`execute` call |
-| `aws.cloudfront` | `cdn_reverse_proxy` | (Infrastructure) | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
+| `aws.cloudfront` | `cdn_reverse_proxy` | Amazon CloudFront | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
 | `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
 | `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js` (unversioned/versioned), `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
-| `akamai.edge` | `cdn_reverse_proxy` | (Infrastructure) | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, `x-akamai-session-info`, Akamai TLS |
+| `akamai.edge` | `cdn_reverse_proxy` | Akamai Edge | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, `x-akamai-session-info`, Akamai TLS |
 | `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
 | `hcaptcha.challenge` | `captcha_challenge` | hCaptcha | Official `js.hcaptcha.com/1/api.js` script or challenge iframe | `h-captcha` container marker, `hcaptcha.render()` call |
 | `arkoselabs.matchkey` | `captcha_challenge` | Arkose MatchKey | Official `client-api.arkoselabs.com/v2/api.js` script or challenge frame | `arkose-enforcement` container, `setupArkose()` call |
