@@ -289,6 +289,26 @@ an incomplete capability could have allowed a rule to reach detection gates,
 report V6 emits `insufficient_coverage` instead of a definitive `not_detected`;
 rules never import or name a Go analyzer type.
 
+### Capability support contract
+
+Static capability support is a producer contract owned at the shared analysis
+boundary. Each analyzer adapter advertises its supported `SignalType` values,
+scanner construction freezes those declarations, and embedded detector loading
+rejects predicates that no implemented producer can satisfy. The current
+production matrix is:
+
+| Source | Implemented signal types | Producer semantics |
+| --- | --- | --- |
+| `http_analyzer` | `response_header`, `cookie`, `script_url`, `network_response`, `iframe_url`, `redirect`, `page_content`, `resource_host` | Bounded response/redirect metadata and static final-document extraction. `resource_host` is derived only from referenced script and iframe URLs; it does not represent another request. |
+| `dns_tls_analyzer` | `dns_record`, `tls_property` | One final-host CNAME observation plus bounded properties copied from the verified HTTP TLS connection. |
+| `browser_analyzer` | `network_request`, `network_response`, `page_content`, `script_url`, `iframe_url`, `cookie` | Bounded Chromium network capture and final DOM, resource URL, and cookie-name normalization. |
+
+`dom_selector` and `js_global` remain valid common-model types for future
+producers, but no production analyzer currently supports them. Browser also
+does not support `resource_host`; only HTTP static extraction currently emits
+that type. A plausible future observation is not part of the matrix until its
+production normalization path and producer contract tests exist.
+
 Analyzer execution status and capability observation completeness are distinct
 concepts. Execution status (`complete`, `partial`, `failed`) describes whether
 an analyzer returned without an error; it cannot express that one bounded
@@ -308,6 +328,13 @@ their previous execution-status semantics. An isolated channel failure, such as
 a failed cookie query on an otherwise clean capture, stays scoped to its own
 capability instead of downgrading unrelated channels. Warnings remain
 presentation diagnostics only.
+
+Static support and runtime completeness answer different questions. Support
+asks whether a source can ever produce a signal type and is validated before a
+scan. Completeness reports whether that supported channel was observed fully in
+one bounded scan. A source cannot make an unsupported pair valid by declaring
+runtime coverage for it; scanner observation validation rejects that producer
+contract violation.
 
 ### Signal model
 

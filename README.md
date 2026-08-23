@@ -200,6 +200,8 @@ a signal capability required by a rule predicate was incompletely observed —
 because its analyzer was partial, failed, absent, or hit a bounded-capture
 ceiling such as a truncated response body or DOM snapshot. Rules remain coupled
 only to normalized source names and signal types, not analyzer implementations.
+Built-in rules are rejected at load time if an exact source/signal pair has no
+production producer, or if a source-agnostic signal has no implemented source.
 
 The default text report and versioned JSON report contain scored product
 detections with the evidence that contributed to them. The JSON contract is

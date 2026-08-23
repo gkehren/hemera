@@ -79,6 +79,12 @@ func (*Analyzer) Source() string {
 	return source
 }
 
+// Capabilities returns the normalized signal types this production analyzer
+// implements. Static support is independent from per-observation completeness.
+func (*Analyzer) Capabilities() []model.SignalType {
+	return analysis.SupportedSignalTypes(source)
+}
+
 // Observe emits a CNAME when the final host is an alias and emits selected TLS
 // properties from the verified final HTTP connection. It never performs a TLS
 // handshake itself.

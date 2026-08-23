@@ -96,6 +96,14 @@ flowchart TD
   same script) must share a correlation `group` (e.g., `static_integration`,
   `browser_network`). Within a group, only the maximum contribution is counted,
   preventing duplicate proof of the same fact.
+- **Implemented producer contract:** Every positive, negative, and ambiguous
+  predicate must be producible by the declared source. Exact source constraints
+  must name an implemented source/signal pair, while source-agnostic or patterned
+  predicates must have at least one implemented producer. Common-model types
+  reserved for future producers do not qualify. The authoritative current
+  matrix is documented in
+  [Architecture](architecture.md#capability-support-contract),
+  and CI compares it with analyzer normalization contracts.
 
 ### 5. Documented score and threshold rationale
 

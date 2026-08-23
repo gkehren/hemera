@@ -101,6 +101,9 @@ Browser -----┘
   vocabulary and prevent underlying attacker-controlled error text from
   reaching reports
   ([issue #21](https://github.com/gkehren/hemera/issues/21)).
+- [x] Align static source/signal capability support with implemented analyzer
+  producers and reject detector predicates that depend on unsupported channels
+  ([issue #22](https://github.com/gkehren/hemera/issues/22)).
 
 **Exit criterion:** browser-only, DNS/TLS-only, and HTTP evidence can participate
 in detections without coupling detector rules to a specific analyzer, while

@@ -31,14 +31,25 @@ func (f fixtureResolver) LookupNetIP(ctx context.Context, network, host string) 
 }
 
 type analyzerStub struct {
-	source      string
-	observation analysis.Observation
-	err         error
-	observe     func(context.Context, analysis.Target) (analysis.Observation, error)
+	source       string
+	capabilities []model.SignalType
+	observation  analysis.Observation
+	err          error
+	observe      func(context.Context, analysis.Target) (analysis.Observation, error)
 }
 
 func (s analyzerStub) Source() string {
 	return s.source
+}
+
+func (s analyzerStub) Capabilities() []model.SignalType {
+	if s.capabilities != nil {
+		return append([]model.SignalType{}, s.capabilities...)
+	}
+	if implemented := analysis.SupportedSignalTypes(s.source); len(implemented) > 0 {
+		return implemented
+	}
+	return testSignalTypes()
 }
 
 func (s analyzerStub) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
@@ -57,8 +68,33 @@ func (s secondaryAnalyzerStub) Source() string {
 	return s.source
 }
 
+func (s secondaryAnalyzerStub) Capabilities() []model.SignalType {
+	if implemented := analysis.SupportedSignalTypes(s.source); len(implemented) > 0 {
+		return implemented
+	}
+	return testSignalTypes()
+}
+
 func (s secondaryAnalyzerStub) Observe(ctx context.Context, target analysis.Target) (analysis.Observation, error) {
 	return s.observe(ctx, target)
+}
+
+func testSignalTypes() []model.SignalType {
+	return []model.SignalType{
+		model.SignalTypeResponseHeader,
+		model.SignalTypeCookie,
+		model.SignalTypeScriptURL,
+		model.SignalTypeNetworkRequest,
+		model.SignalTypeNetworkResponse,
+		model.SignalTypeDOMSelector,
+		model.SignalTypeIframeURL,
+		model.SignalTypeJSGlobal,
+		model.SignalTypeDNSRecord,
+		model.SignalTypeTLSProperty,
+		model.SignalTypeRedirect,
+		model.SignalTypePageContent,
+		model.SignalTypeResourceHost,
+	}
 }
 
 func TestNewValidatesDependencies(t *testing.T) {
@@ -89,6 +125,22 @@ func TestNewValidatesDependencies(t *testing.T) {
 			{Analyzer: analyzerStub{source: "duplicate"}},
 			{Analyzer: analyzerStub{source: "duplicate"}},
 		}, RuleSet: ruleSet}},
+		{name: "empty capabilities", config: Config{Analyzers: []AnalyzerConfig{{
+			Analyzer: analyzerStub{source: "first", capabilities: []model.SignalType{}},
+		}}, RuleSet: ruleSet}},
+		{name: "invalid capability", config: Config{Analyzers: []AnalyzerConfig{{
+			Analyzer: analyzerStub{source: "first", capabilities: []model.SignalType{"unknown"}},
+		}}, RuleSet: ruleSet}},
+		{name: "duplicate capability", config: Config{Analyzers: []AnalyzerConfig{{
+			Analyzer: analyzerStub{source: "first", capabilities: []model.SignalType{
+				model.SignalTypeScriptURL, model.SignalTypeScriptURL,
+			}},
+		}}, RuleSet: ruleSet}},
+		{name: "production capability mismatch", config: Config{Analyzers: []AnalyzerConfig{{
+			Analyzer: analyzerStub{source: analysis.SourceHTTP, capabilities: []model.SignalType{
+				model.SignalTypeScriptURL,
+			}},
+		}}, RuleSet: ruleSet}},
 		{name: "invalid rules", config: Config{Analyzers: []AnalyzerConfig{{
 			Analyzer: analyzerStub{source: "first"},
 		}}}},
@@ -316,6 +368,25 @@ func TestScanTreatsCancellationAndInvalidOutputAsFatal(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("signal outside advertised producer contract", func(t *testing.T) {
+		observation := analysis.Observation{Source: "limited", Signals: []model.Signal{{
+			Type: model.SignalTypeCookie, Source: "limited", Key: "cookie", Confidence: 1,
+		}}}
+		engine, err := New(Config{Analyzers: []AnalyzerConfig{{
+			Analyzer: analyzerStub{
+				source: "limited", capabilities: []model.SignalType{model.SignalTypeScriptURL},
+				observation: observation,
+			},
+		}}, RuleSet: ruleSet})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = engine.Scan(context.Background(), "https://example.test/")
+		if !errors.Is(err, ErrInvalidObservation) {
+			t.Fatalf("Scan() error = %v, want ErrInvalidObservation", err)
+		}
+	})
 
 	t.Run("duplicate HTTP metadata", func(t *testing.T) {
 		httpMetadata := func(source string) analysis.Observation {
@@ -552,8 +623,9 @@ func TestMultiSourceCoverageEvaluation(t *testing.T) {
 	t.Parallel()
 
 	headerKey := "x-custom-waf"
-	domKey := "#custom-captcha"
+	domKey := "dom"
 	scriptKey := "https://cdn.example.com/telemetry.js"
+	browserSource := analysis.SourceBrowser
 
 	// Rule 1: unconstrained script (can be HTTP or Browser)
 	scriptRule := rules.Rule{
@@ -565,7 +637,7 @@ func TestMultiSourceCoverageEvaluation(t *testing.T) {
 		}},
 	}
 
-	// Rule 2: ANY(HTTP-specific header, Browser-specific DOM)
+	// Rule 2: ANY(HTTP-specific header, Browser-specific page content)
 	anyRule := rules.Rule{
 		ID: "any.http.or.browser", Name: "Any HTTP or Browser", Category: rules.CategoryThirdPartySecurity,
 		Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
@@ -575,13 +647,14 @@ func TestMultiSourceCoverageEvaluation(t *testing.T) {
 				Key: &rules.TextPattern{Exact: &headerKey}, Weight: 75,
 			}},
 			{Signal: &rules.Evidence{
-				ID: "dom", Group: "dom", Type: model.SignalTypeDOMSelector,
-				Key: &rules.TextPattern{Exact: &domKey}, Weight: 75,
+				ID: "dom", Group: "dom", Type: model.SignalTypePageContent,
+				Source: &rules.TextPattern{Exact: &browserSource},
+				Key:    &rules.TextPattern{Exact: &domKey}, Weight: 75,
 			}},
 		}},
 	}
 
-	// Rule 3: ALL(HTTP-specific header, Browser-specific DOM)
+	// Rule 3: ALL(HTTP-specific header, Browser-specific page content)
 	allRule := rules.Rule{
 		ID: "all.http.and.browser", Name: "All HTTP and Browser", Category: rules.CategoryThirdPartySecurity,
 		Vendor: "Fixture", MinimumEvidence: 1, MinimumScore: 75,
@@ -591,8 +664,9 @@ func TestMultiSourceCoverageEvaluation(t *testing.T) {
 				Key: &rules.TextPattern{Exact: &headerKey}, Weight: 75,
 			}},
 			{Signal: &rules.Evidence{
-				ID: "dom", Group: "dom", Type: model.SignalTypeDOMSelector,
-				Key: &rules.TextPattern{Exact: &domKey}, Weight: 75,
+				ID: "dom", Group: "dom", Type: model.SignalTypePageContent,
+				Source: &rules.TextPattern{Exact: &browserSource},
+				Key:    &rules.TextPattern{Exact: &domKey}, Weight: 75,
 			}},
 		}},
 	}

@@ -9,16 +9,34 @@ import (
 
 func TestCapableSources(t *testing.T) {
 	t.Parallel()
+	registry, err := DefaultCapabilityRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 	customSource := "custom_analyzer"
+	browserSource := "browser_analyzer"
+	uppercaseHTTPSource := "HTTP_ANALYZER"
 	tests := []struct {
 		name     string
 		evidence Evidence
 		want     []string
 	}{
 		{
-			name:     "exact source specified",
+			name:     "unsupported exact source omitted",
 			evidence: Evidence{Type: model.SignalTypeScriptURL, Source: &TextPattern{Exact: &customSource}},
-			want:     []string{"custom_analyzer"},
+			want:     nil,
+		},
+		{
+			name:     "supported exact source",
+			evidence: Evidence{Type: model.SignalTypeScriptURL, Source: &TextPattern{Exact: &browserSource}},
+			want:     []string{"browser_analyzer"},
+		},
+		{
+			name: "case insensitive exact source",
+			evidence: Evidence{Type: model.SignalTypeResponseHeader, Source: &TextPattern{
+				Exact: &uppercaseHTTPSource, CaseInsensitive: true,
+			}},
+			want: []string{"http_analyzer"},
 		},
 		{
 			name:     "unconstrained response header",
@@ -36,9 +54,9 @@ func TestCapableSources(t *testing.T) {
 			want:     []string{"browser_analyzer", "http_analyzer"},
 		},
 		{
-			name:     "unconstrained DOM selector",
+			name:     "unconstrained unsupported DOM selector",
 			evidence: Evidence{Type: model.SignalTypeDOMSelector},
-			want:     []string{"browser_analyzer"},
+			want:     nil,
 		},
 		{
 			name:     "unconstrained DNS record",
@@ -51,7 +69,7 @@ func TestCapableSources(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := CapableSources(tt.evidence)
+			got := registry.CapableSources(tt.evidence)
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("CapableSources() = %#v, want %#v", got, tt.want)
 			}
@@ -61,9 +79,13 @@ func TestCapableSources(t *testing.T) {
 
 func TestEvaluateConditionCoverage(t *testing.T) {
 	t.Parallel()
+	capabilities, err := DefaultCapabilityRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 	scriptKey := "https://example.com/widget.js"
 	headerKey := "x-test-header"
-	domKey := "#captcha-container"
+	requestKey := "GET"
 
 	scriptEvidence := &Evidence{
 		ID: "script", Group: "script", Type: model.SignalTypeScriptURL,
@@ -73,9 +95,9 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		ID: "header", Group: "header", Type: model.SignalTypeResponseHeader,
 		Key: &TextPattern{Exact: &headerKey}, Weight: 75,
 	}
-	domEvidence := &Evidence{
-		ID: "dom", Group: "dom", Type: model.SignalTypeDOMSelector,
-		Key: &TextPattern{Exact: &domKey}, Weight: 75,
+	browserEvidence := &Evidence{
+		ID: "request", Group: "request", Type: model.SignalTypeNetworkRequest,
+		Key: &TextPattern{Exact: &requestKey}, Weight: 75,
 	}
 
 	signalsWithScript := []model.Signal{{
@@ -89,7 +111,7 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 
 	t.Run("single evidence matched", func(t *testing.T) {
 		t.Parallel()
-		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, signalsWithScript, httpOnlyComplete)
+		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, signalsWithScript, capabilities, httpOnlyComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +122,7 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 
 	t.Run("single evidence absent with complete sources", func(t *testing.T) {
 		t.Parallel()
-		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, allComplete)
+		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, capabilities, allComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +133,7 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 
 	t.Run("single evidence absent with incomplete sources", func(t *testing.T) {
 		t.Parallel()
-		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, httpOnlyComplete)
+		res, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, capabilities, httpOnlyComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,9 +149,9 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		t.Parallel()
 		cond := Condition{All: []Condition{
 			{Signal: headerEvidence},
-			{Signal: domEvidence},
+			{Signal: browserEvidence},
 		}}
-		res, err := EvaluateConditionCoverage(cond, nil, httpOnlyComplete)
+		res, err := EvaluateConditionCoverage(cond, nil, capabilities, httpOnlyComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,9 +167,9 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		t.Parallel()
 		cond := Condition{Any: []Condition{
 			{Signal: headerEvidence},
-			{Signal: domEvidence},
+			{Signal: browserEvidence},
 		}}
-		res, err := EvaluateConditionCoverage(cond, nil, httpOnlyComplete)
+		res, err := EvaluateConditionCoverage(cond, nil, capabilities, httpOnlyComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,9 +185,9 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		t.Parallel()
 		cond := Condition{Any: []Condition{
 			{Signal: headerEvidence},
-			{Signal: domEvidence},
+			{Signal: browserEvidence},
 		}}
-		res, err := EvaluateConditionCoverage(cond, nil, allComplete)
+		res, err := EvaluateConditionCoverage(cond, nil, capabilities, allComplete)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,14 +212,14 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 			}
 			return signalType != model.SignalTypeScriptURL
 		})
-		res, err := EvaluateConditionCoverage(Condition{Signal: contentEvidence}, nil, completer)
+		res, err := EvaluateConditionCoverage(Condition{Signal: contentEvidence}, nil, capabilities, completer)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if res.State != CoverageStateNotMatched {
 			t.Fatalf("page_content State = %v, want CoverageStateNotMatched", res.State)
 		}
-		scriptRes, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, completer)
+		scriptRes, err := EvaluateConditionCoverage(Condition{Signal: scriptEvidence}, nil, capabilities, completer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,7 +239,7 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		completer := CapabilityCompleter(func(source string, signalType model.SignalType) bool {
 			return source == "http_analyzer" && signalType == model.SignalTypeScriptURL
 		})
-		res, err := EvaluateConditionCoverage(Condition{Signal: browserScriptEvidence}, nil, completer)
+		res, err := EvaluateConditionCoverage(Condition{Signal: browserScriptEvidence}, nil, capabilities, completer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,7 +258,7 @@ func TestEvaluateConditionCoverage(t *testing.T) {
 		completer := CapabilityCompleter(func(source string, signalType model.SignalType) bool {
 			return !(source == "http_analyzer" && signalType == model.SignalTypePageContent)
 		})
-		res, err := EvaluateConditionCoverage(Condition{Signal: headerEvidence}, nil, completer)
+		res, err := EvaluateConditionCoverage(Condition{Signal: headerEvidence}, nil, capabilities, completer)
 		if err != nil {
 			t.Fatal(err)
 		}
