@@ -161,7 +161,7 @@ func TestRunInteractiveCancellationBetweenWizardAndScanIsFatal(t *testing.T) {
 		return tui.Options{URL: "https://example.test/"}, nil
 	}
 	progressCalls := 0
-	runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+	runProgressView = func(context.Context, io.Writer, []string, string, string, <-chan tui.Msg) error {
 		progressCalls++
 		return nil
 	}
@@ -299,9 +299,12 @@ func TestRunInteractiveScanSeparatesScanURLFromDisplayURL(t *testing.T) {
 	var viewTargets []string
 	original := runProgressView
 	t.Cleanup(func() { runProgressView = original })
-	runProgressView = func(_ context.Context, _ io.Writer, _ []string, target string, msgs <-chan tui.Msg) error {
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, target, _ string, msgs <-chan tui.Msg) error {
 		viewTargets = append(viewTargets, target)
-		for range msgs {
+		for msg := range msgs {
+			if msg.Final {
+				return nil
+			}
 		}
 		return nil
 	}
@@ -375,15 +378,18 @@ func newStubEngine(t *testing.T, analyzer stubAnalyzer, policy scanner.FailurePo
 }
 
 // restoreQuietProgressView replaces the live progress view with a fake that
-// mirrors the production contract: it returns nil only after the scan
-// goroutine delivered its final message and closed the channel, which is the
-// only situation where the real view exits without an error.
+// mirrors the production contract: the real view exits without an error as
+// soon as the scan goroutine delivers its final message; the producer closes
+// the channel afterwards, once the scan goroutine has joined.
 func restoreQuietProgressView(t *testing.T) {
 	t.Helper()
 	original := runProgressView
 	t.Cleanup(func() { runProgressView = original })
-	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, msgs <-chan tui.Msg) error {
-		for range msgs {
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, _ string, msgs <-chan tui.Msg) error {
+		for msg := range msgs {
+			if msg.Final {
+				return nil
+			}
 		}
 		return nil
 	}
@@ -401,7 +407,7 @@ func TestRunInteractiveScanJoinsScanBeforeReturn(t *testing.T) {
 	// The view "exits" only once the analyzer is mid-flight, exactly like a
 	// Ctrl+C arriving during a live scan: the model quits cleanly, so the
 	// real RunProgress returns the view-canceled sentinel rather than nil.
-	runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+	runProgressView = func(context.Context, io.Writer, []string, string, string, <-chan tui.Msg) error {
 		<-started
 		return tui.ErrViewCanceled
 	}
@@ -460,7 +466,7 @@ func TestRunInteractiveScanJoinsAfterExternalCancellation(t *testing.T) {
 
 	original := runProgressView
 	t.Cleanup(func() { runProgressView = original })
-	runProgressView = func(ctx context.Context, _ io.Writer, _ []string, _ string, _ <-chan tui.Msg) error {
+	runProgressView = func(ctx context.Context, _ io.Writer, _ []string, _ string, _ string, _ <-chan tui.Msg) error {
 		close(viewStarted)
 		<-ctx.Done()
 		return ctx.Err()
@@ -579,7 +585,7 @@ func TestRunInteractiveScanHandlesEarlyViewExit(t *testing.T) {
 			}, scanner.FailurePolicyContinue)
 			original := runProgressView
 			t.Cleanup(func() { runProgressView = original })
-			runProgressView = func(context.Context, io.Writer, []string, string, <-chan tui.Msg) error {
+			runProgressView = func(context.Context, io.Writer, []string, string, string, <-chan tui.Msg) error {
 				return testCase.runErr
 			}
 
@@ -595,5 +601,104 @@ func TestRunInteractiveScanHandlesEarlyViewExit(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", stderr.String(), testCase.wantStderr)
 			}
 		})
+	}
+}
+
+func TestRunInteractiveMultiScanAggregatesPagesWithSummary(t *testing.T) {
+	var viewLabels []string
+	original := runProgressView
+	t.Cleanup(func() { runProgressView = original })
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, pageLabel string, msgs <-chan tui.Msg) error {
+		viewLabels = append(viewLabels, pageLabel)
+		for msg := range msgs {
+			if msg.Final {
+				return nil
+			}
+		}
+		return nil
+	}
+	engine := newStubEngine(t, stubAnalyzer{
+		source:      analysis.SourceHTTP,
+		observation: analysis.Observation{Source: analysis.SourceHTTP},
+	}, scanner.FailurePolicyContinue)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://a.test/", Pages: []string{"https://b.test/"}}
+	code := runInteractiveMultiScan(context.Background(), opts,
+		[]string{"https://a.test/", "https://b.test/"}, &stdout, &stderr, engine)
+	if code != 0 {
+		t.Fatalf("runInteractiveMultiScan() code = %d, stderr = %q", code, stderr.String())
+	}
+	if len(viewLabels) != 2 || viewLabels[0] != "Page 1 of 2" || viewLabels[1] != "Page 2 of 2" {
+		t.Errorf("view labels = %#v, want one labeled view per page", viewLabels)
+	}
+	if !strings.Contains(stdout.String(), "Page 1 of 2") || !strings.Contains(stdout.String(), "Page 2 of 2") {
+		t.Errorf("report lacks per-page sections: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Summary across pages") {
+		t.Errorf("report lacks the cross-page summary: %q", stdout.String())
+	}
+}
+
+func TestRunInteractiveMultiScanContinuesAfterPageFailure(t *testing.T) {
+	restoreQuietProgressView(t)
+	engine := newStubEngine(t, stubAnalyzer{
+		source: analysis.SourceHTTP,
+		observe: func(_ context.Context, target analysis.Target) (analysis.Observation, error) {
+			if target.URL == "https://broken.test/" {
+				return analysis.Observation{Source: analysis.SourceHTTP}, errors.New("connection refused")
+			}
+			return analysis.Observation{Source: analysis.SourceHTTP}, nil
+		},
+	}, scanner.FailurePolicyAbort)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://a.test/"}
+	code := runInteractiveMultiScan(context.Background(), opts,
+		[]string{"https://a.test/", "https://broken.test/"}, &stdout, &stderr, engine)
+	if code != 0 {
+		t.Fatalf("runInteractiveMultiScan() code = %d, want 0 when at least one page succeeded", code)
+	}
+	if !strings.Contains(stderr.String(), "page 2") {
+		t.Errorf("stderr = %q, want the failed page notice", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "page scan failed") {
+		t.Errorf("report lacks the failed page entry: %q", stdout.String())
+	}
+}
+
+func TestRunInteractiveMultiScanKeepsCompletedPagesOnCancel(t *testing.T) {
+	calls := 0
+	original := runProgressView
+	t.Cleanup(func() { runProgressView = original })
+	runProgressView = func(_ context.Context, _ io.Writer, _ []string, _ string, _ string, msgs <-chan tui.Msg) error {
+		calls++
+		if calls == 1 {
+			for msg := range msgs {
+				if msg.Final {
+					return nil
+				}
+			}
+			return nil
+		}
+		return tui.ErrViewCanceled
+	}
+	engine := newStubEngine(t, stubAnalyzer{
+		source:      analysis.SourceHTTP,
+		observation: analysis.Observation{Source: analysis.SourceHTTP},
+	}, scanner.FailurePolicyContinue)
+
+	var stdout, stderr bytes.Buffer
+	opts := tui.Options{URL: "https://a.test/"}
+	code := runInteractiveMultiScan(context.Background(), opts,
+		[]string{"https://a.test/", "https://b.test/"}, &stdout, &stderr, engine)
+	if code != 0 {
+		t.Errorf("runInteractiveMultiScan() code = %d, want 0 after user cancellation", code)
+	}
+	if !strings.Contains(stderr.String(), "canceled") {
+		t.Errorf("stderr = %q, want the cancellation note", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Hemera scan report") {
+		t.Errorf("stdout = %q, want the report of completed pages", stdout.String())
 	}
 }

@@ -59,13 +59,17 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 	}}
 
 	report := Build("test-version", result)
-	if got, want := report.RequestedURL, "https://example.test/start?redacted"; got != want {
+	if len(report.Pages) != 1 {
+		t.Fatalf("pages = %d, want exactly one for a single-page scan", len(report.Pages))
+	}
+	page := report.Pages[0]
+	if got, want := page.RequestedURL, "https://example.test/start?redacted"; got != want {
 		t.Errorf("RequestedURL = %q, want %q", got, want)
 	}
-	if got, want := report.FinalURL, "https://example.test/final?redacted"; got == nil || *got != want {
+	if got, want := page.FinalURL, "https://example.test/final?redacted"; got == nil || *got != want {
 		t.Errorf("FinalURL = %v, want %q", got, want)
 	}
-	values := report.Detections[0].Evidence.Positive
+	values := page.Detections[0].Evidence.Positive
 	if got, want := values[0].Value, "https://cdn.test/app.js?redacted"; got != want {
 		t.Errorf("script value = %q, want %q", got, want)
 	}
@@ -80,7 +84,7 @@ func TestBuildMinimizesSecretsAndSanitizesURLs(t *testing.T) {
 			t.Errorf("correlated evidence %q contributions = %v/%v, want 10/0", evidence.ID, evidence.RawContribution, evidence.Contribution)
 		}
 	}
-	groups := report.Detections[0].PositiveEvidenceGroups
+	groups := page.Detections[0].PositiveEvidenceGroups
 	if len(groups) != 1 || groups[0].RawContribution != 105 || groups[0].Contribution != 75 {
 		t.Errorf("positive evidence groups = %#v, want raw 105 capped to 75", groups)
 	}
@@ -149,7 +153,7 @@ func TestWriteJSONUsesVersionedDeterministicShape(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	for _, key := range []string{"schema_version", "tool_version", "requested_url", "final_url", "http", "analyzers", "detections"} {
+	for _, key := range []string{"schema_version", "tool_version", "pages"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("missing top-level field %q", key)
 		}
@@ -159,6 +163,11 @@ func TestWriteJSONUsesVersionedDeterministicShape(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "null") {
 		t.Errorf("JSON contains null collection: %s", output.String())
+	}
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(filepath.Join("testdata", "empty-report.golden.json"), output.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	want, err := os.ReadFile(filepath.Join("testdata", "empty-report.golden.json"))
 	if err != nil {
@@ -237,6 +246,11 @@ func TestWriteJSONPreservesCompleteDetectionShape(t *testing.T) {
 	if err := WriteJSON(&output, Build("1.2.3", result)); err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(filepath.Join("testdata", "complete-report.golden.json"), output.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	want, err := os.ReadFile(filepath.Join("testdata", "complete-report.golden.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -286,11 +300,15 @@ func TestBuildMinimizesBrowserEvidenceAndCoverage(t *testing.T) {
 		}},
 	}
 	report := Build("dev", result)
-	if len(report.Analyzers) != 1 || report.Analyzers[0].Source != analysis.SourceBrowser ||
-		report.Analyzers[0].Status != scanner.AnalyzerStatusPartial {
-		t.Fatalf("browser coverage = %#v", report.Analyzers)
+	if len(report.Pages) != 1 {
+		t.Fatalf("pages = %d, want exactly one for a single-page scan", len(report.Pages))
 	}
-	evidence := report.Detections[0].Evidence.Positive
+	browserPage := report.Pages[0]
+	if len(browserPage.Analyzers) != 1 || browserPage.Analyzers[0].Source != analysis.SourceBrowser ||
+		browserPage.Analyzers[0].Status != scanner.AnalyzerStatusPartial {
+		t.Fatalf("browser coverage = %#v", browserPage.Analyzers)
+	}
+	evidence := browserPage.Detections[0].Evidence.Positive
 	if evidence[0].Value != "https://api.example.test/widget?redacted" ||
 		evidence[0].URL != "https://example.test/?redacted" || evidence[1].Value != "" || evidence[2].Value != "" {
 		t.Fatalf("browser evidence was not minimized: %#v", evidence)
@@ -331,11 +349,11 @@ func TestBuildKeepsPartialEvidenceRawButNotContributing(t *testing.T) {
 		}},
 	}}})
 
-	evidence := report.Detections[0].Evidence.Positive[0]
+	evidence := report.Pages[0].Detections[0].Evidence.Positive[0]
 	if evidence.RawContribution != 30 || evidence.Contribution != 0 {
 		t.Errorf("partial evidence contributions = %v/%v, want 30/0", evidence.RawContribution, evidence.Contribution)
 	}
-	group := report.Detections[0].PositiveEvidenceGroups[0]
+	group := report.Pages[0].Detections[0].PositiveEvidenceGroups[0]
 	if group.RawContribution != 30 || group.Contribution != 0 {
 		t.Errorf("partial group contributions = %v/%v, want 30/0", group.RawContribution, group.Contribution)
 	}
@@ -377,11 +395,11 @@ func TestBuildCopiesScoringContributions(t *testing.T) {
 		}},
 	}}})
 
-	evidence := report.Detections[0].Evidence.Positive[0]
+	evidence := report.Pages[0].Detections[0].Evidence.Positive[0]
 	if evidence.RawContribution != 17 || evidence.Contribution != 7 {
 		t.Errorf("report recomputed evidence contributions: %#v", evidence)
 	}
-	group := report.Detections[0].PositiveEvidenceGroups[0]
+	group := report.Pages[0].Detections[0].PositiveEvidenceGroups[0]
 	if group.RawContribution != 17 || group.Contribution != 7 {
 		t.Errorf("report recomputed group contributions: %#v", group)
 	}
@@ -446,15 +464,19 @@ func TestBuildReportsPartialAnalyzerCoverageWithoutErrorDetails(t *testing.T) {
 		},
 	}}
 	report := Build("dev", result)
-	if report.RequestedURL != "https://example.test/?redacted" {
-		t.Errorf("requested URL = %q, want redacted target fallback", report.RequestedURL)
+	if len(report.Pages) != 1 {
+		t.Fatalf("pages = %d, want exactly one for a single-page scan", len(report.Pages))
 	}
-	if len(report.Analyzers) != 1 || report.Analyzers[0].Status != scanner.AnalyzerStatusFailed ||
-		!slices.Equal(report.Analyzers[0].Warnings, []string{controlledWarning}) {
-		t.Fatalf("analyzer reports = %#v", report.Analyzers)
+	coveragePage := report.Pages[0]
+	if coveragePage.RequestedURL != "https://example.test/?redacted" {
+		t.Errorf("requested URL = %q, want redacted target fallback", coveragePage.RequestedURL)
 	}
-	if report.FinalURL != nil || report.HTTP != nil {
-		t.Fatalf("unavailable HTTP report = final URL %v, HTTP %#v", report.FinalURL, report.HTTP)
+	if len(coveragePage.Analyzers) != 1 || coveragePage.Analyzers[0].Status != scanner.AnalyzerStatusFailed ||
+		!slices.Equal(coveragePage.Analyzers[0].Warnings, []string{controlledWarning}) {
+		t.Fatalf("analyzer reports = %#v", coveragePage.Analyzers)
+	}
+	if coveragePage.FinalURL != nil || coveragePage.HTTP != nil {
+		t.Fatalf("unavailable HTTP report = final URL %v, HTTP %#v", coveragePage.FinalURL, coveragePage.HTTP)
 	}
 
 	var jsonOutput bytes.Buffer
@@ -508,7 +530,7 @@ func TestBuildReportsInsufficientRuleCoverageWithoutCallingItNotDetected(t *test
 		}},
 	}
 	built := Build("dev", result)
-	if got := built.Detections[0]; got.Status != scanner.DetectionStatusInsufficientCoverage ||
+	if got := built.Pages[0].Detections[0]; got.Status != scanner.DetectionStatusInsufficientCoverage ||
 		!slices.Equal(got.IncompleteSources, []string{analysis.SourceBrowser}) || got.Detected {
 		t.Fatalf("detection coverage = %#v", got)
 	}
@@ -563,5 +585,155 @@ func scanResultWithHTTP(result httpanalyzer.Result) scanner.Result {
 			Observation: observation, Status: scanner.AnalyzerStatusComplete,
 		}},
 		Signals: append([]model.Signal{}, result.Signals...),
+	}
+}
+
+func TestBuildExposesBoundedNetworkDiagnostics(t *testing.T) {
+	t.Parallel()
+	result := scanResultWithHTTP(httpanalyzer.Result{
+		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,
+	})
+	result.Analyzers = append(result.Analyzers, scanner.AnalyzerResult{
+		Observation: analysis.Observation{
+			Source: analysis.SourceBrowser,
+			Metadata: analysis.Metadata{Network: &analysis.NetworkMetadata{
+				FinalURL:       "https://example.test/?session=secret",
+				RequestCount:   3,
+				ResponseCount:  2,
+				WireBytesTotal: 1934,
+				POSTEndpoints:  []string{"https://api.example.test/submit?token=secret"},
+				Protocols:      []analysis.NetworkNameCount{{Name: "h2", Count: 3}},
+				StatusClasses:  []analysis.NetworkNameCount{{Name: "2xx", Count: 1}, {Name: "4xx", Count: 1}},
+				Hosts:          []analysis.NetworkHostTraffic{{Host: "api.example.test", Requests: 2, ReusedRequests: 1}},
+				QueueTiming:    analysis.NetworkTimingStats{P50Ms: 2, P95Ms: 30, MaxMs: 40},
+				TTFBTiming:     analysis.NetworkTimingStats{P50Ms: 80, P95Ms: 200, MaxMs: 210},
+				Truncated:      true,
+				Transactions: []analysis.NetworkTransaction{
+					{Method: "POST", URL: "https://api.example.test/submit?token=secret", Status: 403,
+						Protocol: "h2", ConnectionReused: true, WireBytes: 734,
+						QueueMs: 2, TTFBMs: 80, TotalMs: 150},
+				},
+			}},
+		},
+		Status: scanner.AnalyzerStatusComplete,
+	})
+
+	report := Build("test-version", result)
+	if len(report.Pages) != 1 {
+		t.Fatalf("pages = %d, want exactly one for a single-page scan", len(report.Pages))
+	}
+	network := report.Pages[0].Network
+	if network == nil {
+		t.Fatal("Network = nil, want a network section")
+	}
+	if got, want := network.FinalURL, "https://example.test/?redacted"; got != want {
+		t.Errorf("Network.FinalURL = %q, want %q", got, want)
+	}
+	if got, want := network.POSTEndpoints[0], "https://api.example.test/submit?redacted"; got != want {
+		t.Errorf("POSTEndpoints[0] = %q, want %q", got, want)
+	}
+	transaction := network.Transactions[0]
+	if transaction.Method != "POST" || transaction.Status != 403 || !transaction.ConnectionReused ||
+		transaction.WireBytes != 734 || transaction.QueueMs != 2 || transaction.TotalMs != 150 {
+		t.Errorf("transaction = %#v, want bounded waterfall row", transaction)
+	}
+
+	var output bytes.Buffer
+	if err := WriteJSON(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "secret") {
+		t.Errorf("JSON network section disclosed a query secret: %s", output.String())
+	}
+	var text bytes.Buffer
+	if err := WriteText(&text, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"Network:", "POST endpoints", "Queue (ms)", "p95=200", "reused)"} {
+		if !strings.Contains(text.String(), fragment) {
+			t.Errorf("text report missing %q:\n%s", fragment, text.String())
+		}
+	}
+	if !strings.Contains(text.String(), "... 2 more") && !strings.Contains(text.String(), "truncated by capture limits") {
+		t.Errorf("text report should show truncation or more-rows markers:\n%s", text.String())
+	}
+}
+
+func TestWriteTextOmitsNetworkSectionWithoutMetadata(t *testing.T) {
+	t.Parallel()
+	var text bytes.Buffer
+	if err := WriteText(&text, Build("1.2.3", scanResultWithHTTP(httpanalyzer.Result{
+		RequestedURL: "https://example.test/", StatusCode: 200,
+	}))); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text.String(), "Network:") {
+		t.Errorf("text report contains an empty network section:\n%s", text.String())
+	}
+}
+
+func TestBuildPagesAggregatesSummaryAndFailedPages(t *testing.T) {
+	t.Parallel()
+	first := scanResultWithHTTP(httpanalyzer.Result{
+		RequestedURL: "https://a.test/", FinalURL: "https://a.test/", StatusCode: 200,
+	})
+	first.Detections = []scoring.Detection{
+		{RuleID: "vendor.one", Name: "Vendor One", Category: rules.CategoryCDNReverseProxy, Vendor: "Vendor",
+			Detected: true, Score: 80, Level: scoring.LevelHigh},
+		{RuleID: "vendor.two", Name: "Vendor Two", Category: rules.CategoryBotManagement, Vendor: "Vendor",
+			Score: 10, Level: scoring.LevelLow},
+	}
+	second := scanResultWithHTTP(httpanalyzer.Result{
+		RequestedURL: "https://b.test/", FinalURL: "https://b.test/", StatusCode: 200,
+	})
+	second.Detections = []scoring.Detection{
+		{RuleID: "vendor.one", Name: "Vendor One", Category: rules.CategoryCDNReverseProxy, Vendor: "Vendor",
+			Score: 90, Level: scoring.LevelVeryHigh},
+		{RuleID: "vendor.two", Name: "Vendor Two", Category: rules.CategoryBotManagement, Vendor: "Vendor",
+			Detected: true, Score: 60, Level: scoring.LevelMedium},
+	}
+	failed := scanner.PageResult{URL: "https://broken.test/", Err: errors.New("connection refused")}
+
+	report := BuildPages("test-version", []scanner.PageResult{
+		{URL: "https://a.test/", Result: first},
+		{URL: "https://b.test/", Result: second},
+		failed,
+	})
+	if len(report.Pages) != 3 {
+		t.Fatalf("pages = %d, want 3", len(report.Pages))
+	}
+	if !report.Pages[2].Failed || report.Pages[2].RequestedURL != "https://broken.test/" {
+		t.Errorf("failed page = %#v, want requested URL with failed flag", report.Pages[2])
+	}
+	if report.Summary == nil {
+		t.Fatal("Summary = nil, want an aggregate for a multi-page scan")
+	}
+	if report.Summary.PageCount != 3 || report.Summary.FailedPages != 1 {
+		t.Errorf("summary counts = %d/%d, want 3 pages, 1 failed", report.Summary.PageCount, report.Summary.FailedPages)
+	}
+	if len(report.Summary.Detections) != 2 {
+		t.Fatalf("summary detections = %d, want 2 rules", len(report.Summary.Detections))
+	}
+	one, two := report.Summary.Detections[0], report.Summary.Detections[1]
+	if one.ID != "vendor.one" || one.DetectedPages != 1 || one.MaxScore != 90 || one.MaxLevel != scoring.LevelVeryHigh {
+		t.Errorf("vendor.one summary = %#v, want 1 detected page with max score 90", one)
+	}
+	if two.ID != "vendor.two" || two.DetectedPages != 1 || two.MaxScore != 60 || two.MaxLevel != scoring.LevelMedium {
+		t.Errorf("vendor.two summary = %#v, want 1 detected page with max score 60", two)
+	}
+
+	var output bytes.Buffer
+	if err := WriteText(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"Page 1 of 3", "Page 3 of 3", "Page scan: failed", "Summary across 3 pages"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Errorf("multi-page text report missing %q:\n%s", fragment, output.String())
+		}
+	}
+
+	single := BuildPages("test-version", []scanner.PageResult{{URL: "https://a.test/", Result: first}})
+	if single.Summary != nil {
+		t.Errorf("single-page summary = %#v, want none", single.Summary)
 	}
 }

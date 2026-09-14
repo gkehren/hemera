@@ -109,6 +109,16 @@ func TestValidateSupportStandardRejections(t *testing.T) {
 	}
 }
 
+// interactionPhaseRules require the opt-in browser form-interaction phase
+// for their positive evidence. By design they can never fire on the passive
+// HTTP fixture corpus, so their positive and ambiguity coverage is provided
+// by the browser integration suite instead; each listed rule must still be
+// exercised there by name, and must still be hard-negative tested by the
+// HTTP corpus.
+var interactionPhaseRules = map[string]bool{
+	"datadome.form_reaction": true,
+}
+
 func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 	t.Parallel()
 	ruleSet, err := Load()
@@ -236,14 +246,18 @@ func TestBuiltInRulesHaveRequiredFixtureCoverage(t *testing.T) {
 				}
 			}
 
-			if !hasPositiveIntent {
+			interactionPhase := interactionPhaseRules[rule.ID]
+			if !hasPositiveIntent && !interactionPhase {
 				t.Errorf("rule %q lacks an explicit positive_for fixture case", rule.ID)
 			}
 			if !hasHardNegativeIntent {
 				t.Errorf("rule %q lacks an explicit hard_negative_for fixture case", rule.ID)
 			}
-			if !hasAmbiguityIntent {
+			if !hasAmbiguityIntent && !interactionPhase {
 				t.Errorf("rule %q lacks an explicit ambiguous_for fixture case", rule.ID)
+			}
+			if interactionPhase && !hasHardNegativeIntent {
+				t.Errorf("interaction-phase rule %q still requires a hard_negative_for fixture case", rule.ID)
 			}
 		})
 	}
@@ -550,8 +564,11 @@ func TestBuiltInDetectorDocumentationMatchesInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		if strings.Contains(strings.ToLower(string(data)), "13 built-in") {
-			t.Errorf("%s contains the stale 13-rule count", path)
+		// The stale-count guard forbids the previous inventory number so a
+		// rule addition that forgets the documentation sweep cannot pass.
+		staleCount := fmt.Sprintf("%d built-in", len(ruleSet.Rules)-1)
+		if strings.Contains(strings.ToLower(string(data)), staleCount) {
+			t.Errorf("%s contains the stale %s count", path, staleCount)
 		}
 	}
 }
@@ -699,13 +716,15 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 	}
 
 	type channelReqs struct {
-		HTTP          bool
-		DNS           bool
-		TLS           bool
-		BrowserScript bool
-		BrowserIframe bool
-		BrowserCookie bool
-		BrowserDOM    bool
+		HTTP           bool
+		DNS            bool
+		TLS            bool
+		BrowserScript  bool
+		BrowserIframe  bool
+		BrowserCookie  bool
+		BrowserDOM     bool
+		BrowserNetwork bool
+		BrowserForms   bool
 	}
 
 	var inspectCondition func(rules.Condition, *channelReqs)
@@ -723,6 +742,12 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 				if c.Signal.Source == nil || c.Signal.Source.Exact == nil || *c.Signal.Source.Exact != "http_analyzer" {
 					reqs.BrowserScript = true
 				}
+			case model.SignalTypeNetworkRequest:
+				reqs.BrowserNetwork = true
+			case model.SignalTypeNetworkTransaction:
+				reqs.BrowserNetwork = true
+			case model.SignalTypeFormSubmission:
+				reqs.BrowserForms = true
 			case model.SignalTypeIframeURL:
 				reqs.HTTP = true
 				reqs.BrowserIframe = true
@@ -762,7 +787,8 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 			BrowserCookie: true,
 		},
 		"cloudflare.turnstile": {
-			HTTP: true,
+			HTTP:           true,
+			BrowserNetwork: true,
 		},
 		"google.recaptcha": {
 			HTTP: true,
@@ -779,11 +805,18 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 			BrowserCookie: true,
 		},
 		"datadome.bot_protection": {
-			HTTP:          true,
-			BrowserScript: true,
-			BrowserIframe: true,
-			BrowserCookie: true,
-			BrowserDOM:    true,
+			HTTP:           true,
+			BrowserScript:  true,
+			BrowserIframe:  true,
+			BrowserCookie:  true,
+			BrowserDOM:     true,
+			BrowserNetwork: true,
+		},
+		"datadome.form_reaction": {
+			HTTP:           true,
+			BrowserDOM:     true,
+			BrowserNetwork: true,
+			BrowserForms:   true,
 		},
 		"akamai.edge": {
 			HTTP: true,
@@ -797,17 +830,19 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 			BrowserDOM:    true,
 		},
 		"hcaptcha.challenge": {
-			HTTP:          true,
-			BrowserScript: true,
-			BrowserIframe: true,
-			BrowserCookie: true,
-			BrowserDOM:    true,
+			HTTP:           true,
+			BrowserScript:  true,
+			BrowserIframe:  true,
+			BrowserCookie:  true,
+			BrowserDOM:     true,
+			BrowserNetwork: true,
 		},
 		"arkoselabs.matchkey": {
-			HTTP:          true,
-			BrowserScript: true,
-			BrowserIframe: true,
-			BrowserDOM:    true,
+			HTTP:           true,
+			BrowserScript:  true,
+			BrowserIframe:  true,
+			BrowserDOM:     true,
+			BrowserNetwork: true,
 		},
 	}
 
@@ -848,6 +883,12 @@ func TestSupportStandardObservationCapabilitiesMatrix(t *testing.T) {
 			}
 			if reqs.BrowserDOM && !tested.BrowserDOM {
 				t.Errorf("rule %q claims BrowserDOM channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserNetwork && !tested.BrowserNetwork {
+				t.Errorf("rule %q claims BrowserNetwork channel but is not registered as tested", rule.ID)
+			}
+			if reqs.BrowserForms && !tested.BrowserForms {
+				t.Errorf("rule %q claims BrowserForms channel but is not registered as tested", rule.ID)
 			}
 		})
 	}

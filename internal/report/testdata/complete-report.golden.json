@@ -1,124 +1,129 @@
 {
   "schema_version": 6,
   "tool_version": "1.2.3",
-  "requested_url": "https://example.test/start?redacted",
-  "final_url": "https://example.test/final?redacted",
-  "http": {
-    "status_code": 403,
-    "body_truncated": true,
-    "redirects": [
-      {
-        "from": "https://example.test/start?redacted",
-        "to": "https://example.test/final?redacted",
-        "status": 302
-      }
-    ],
-    "warnings": [
-      "response body was truncated at 2097152 bytes"
-    ]
-  },
-  "analyzers": [
+  "pages": [
     {
-      "source": "http_analyzer",
-      "status": "complete",
-      "warnings": [
-        "response body was truncated at 2097152 bytes"
-      ]
-    },
-    {
-      "source": "dns_tls_analyzer",
-      "status": "complete",
-      "warnings": []
-    },
-    {
-      "source": "browser_analyzer",
-      "status": "partial",
-      "warnings": [
-        "browser observation was incomplete"
-      ]
-    }
-  ],
-  "detections": [
-    {
-      "id": "test.complete",
-      "name": "Complete synthetic detector",
-      "category": "captcha_challenge",
-      "vendor": "Example",
-      "product": "Widget",
-      "detected": true,
-      "status": "detected",
-      "incomplete_sources": [],
-      "condition_matched": true,
-      "minimum_evidence_met": true,
-      "evidence_score": 82.5,
-      "score": 82.5,
-      "level": "high",
-      "evidence": {
-        "positive": [
+      "requested_url": "https://example.test/start?redacted",
+      "failed": false,
+      "final_url": "https://example.test/final?redacted",
+      "http": {
+        "status_code": 403,
+        "body_truncated": true,
+        "redirects": [
           {
-            "id": "client-script",
-            "group": "static_integration",
-            "description": "Documented client script",
-            "type": "script_url",
-            "source": "http_analyzer",
-            "key": "src",
-            "value": "https://challenges.cloudflare.com/turnstile/v0/api.js?redacted",
-            "url": "https://example.test/final?redacted",
-            "confidence": 1,
-            "weight": 100,
-            "raw_contribution": 100,
-            "contribution": 100
+            "from": "https://example.test/start?redacted",
+            "to": "https://example.test/final?redacted",
+            "status": 302
           }
         ],
-        "negative": [
-          {
-            "id": "conflicting-cookie",
-            "description": "Synthetic conflicting cookie",
-            "type": "cookie",
-            "source": "http_analyzer",
-            "key": "session",
-            "url": "https://example.test/final?redacted",
-            "confidence": 0.8,
-            "weight": 12.5,
-            "raw_contribution": -10,
-            "contribution": -10
-          }
-        ],
-        "ambiguous": [
-          {
-            "id": "shared-host",
-            "description": "Shared infrastructure host",
-            "type": "resource_host",
-            "source": "http_analyzer",
-            "key": "host",
-            "value": "shared.example",
-            "url": "https://shared.example/frame?redacted",
-            "confidence": 0.5,
-            "weight": 5,
-            "raw_contribution": -2.5,
-            "contribution": -2.5
-          }
+        "warnings": [
+          "response body was truncated at 2097152 bytes"
         ]
       },
-      "positive_evidence_groups": [
+      "analyzers": [
         {
-          "id": "static_integration",
-          "evidence_ids": [
-            "client-script"
-          ],
-          "selected_evidence_id": "client-script",
-          "raw_contribution": 100,
-          "contribution": 100
+          "source": "http_analyzer",
+          "status": "complete",
+          "warnings": [
+            "response body was truncated at 2097152 bytes"
+          ]
+        },
+        {
+          "source": "dns_tls_analyzer",
+          "status": "complete",
+          "warnings": []
+        },
+        {
+          "source": "browser_analyzer",
+          "status": "partial",
+          "warnings": [
+            "browser observation was incomplete"
+          ]
         }
       ],
-      "missing_evidence": [
-        "html-marker"
-      ],
-      "missing_dependencies": [],
-      "applied_conflicts": [
+      "detections": [
         {
-          "rule_id": "other.product",
-          "penalty": 5
+          "id": "test.complete",
+          "name": "Complete synthetic detector",
+          "category": "captcha_challenge",
+          "vendor": "Example",
+          "product": "Widget",
+          "detected": true,
+          "status": "detected",
+          "incomplete_sources": [],
+          "condition_matched": true,
+          "minimum_evidence_met": true,
+          "evidence_score": 82.5,
+          "score": 82.5,
+          "level": "high",
+          "evidence": {
+            "positive": [
+              {
+                "id": "client-script",
+                "group": "static_integration",
+                "description": "Documented client script",
+                "type": "script_url",
+                "source": "http_analyzer",
+                "key": "src",
+                "value": "https://challenges.cloudflare.com/turnstile/v0/api.js?redacted",
+                "url": "https://example.test/final?redacted",
+                "confidence": 1,
+                "weight": 100,
+                "raw_contribution": 100,
+                "contribution": 100
+              }
+            ],
+            "negative": [
+              {
+                "id": "conflicting-cookie",
+                "description": "Synthetic conflicting cookie",
+                "type": "cookie",
+                "source": "http_analyzer",
+                "key": "session",
+                "url": "https://example.test/final?redacted",
+                "confidence": 0.8,
+                "weight": 12.5,
+                "raw_contribution": -10,
+                "contribution": -10
+              }
+            ],
+            "ambiguous": [
+              {
+                "id": "shared-host",
+                "description": "Shared infrastructure host",
+                "type": "resource_host",
+                "source": "http_analyzer",
+                "key": "host",
+                "value": "shared.example",
+                "url": "https://shared.example/frame?redacted",
+                "confidence": 0.5,
+                "weight": 5,
+                "raw_contribution": -2.5,
+                "contribution": -2.5
+              }
+            ]
+          },
+          "positive_evidence_groups": [
+            {
+              "id": "static_integration",
+              "evidence_ids": [
+                "client-script"
+              ],
+              "selected_evidence_id": "client-script",
+              "raw_contribution": 100,
+              "contribution": 100
+            }
+          ],
+          "missing_evidence": [
+            "html-marker"
+          ],
+          "missing_dependencies": [],
+          "applied_conflicts": [
+            {
+              "rule_id": "other.product",
+              "penalty": 5
+            }
+          ]
         }
       ]
     }

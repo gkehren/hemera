@@ -826,6 +826,7 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 	if len(gotResponses) != 0 {
 		t.Errorf("capture contains unexpected responses: %#v", gotResponses)
 	}
+	assertFixtureTransactions(t, fixture, result, wantURLByRoute)
 	served, unexpected := fixture.snapshot()
 	if err := validateFixtureTraffic(served, fixtureCase.Traffic, fixtureCase.TrafficDependencies); err != nil {
 		t.Errorf("fixture server traffic violates fixture contract: %v; observed %#v", err, served)
@@ -840,6 +841,47 @@ func assertFixtureCapture(t *testing.T, fixture *fixtureServer, fixtureCase fixt
 		if strings.Contains(metadata, forbidden) {
 			t.Errorf("minimized capture metadata contains synthetic secret or fragment %q: %s", forbidden, metadata)
 		}
+	}
+}
+
+// assertFixtureTransactions verifies that every declared response was
+// correlated into a bounded transaction row with deterministic invariants:
+// fixture routes are served over HTTP/1.1, methods are GET, and every captured
+// duration stays within the global timing ceiling.
+func assertFixtureTransactions(t *testing.T, fixture *fixtureServer, result CaptureResult, wantURLByRoute map[string]string) {
+	t.Helper()
+	transactionsByURL := make(map[string][]CaptureTransaction, len(result.Transactions))
+	for _, transaction := range result.Transactions {
+		assertDeclaredCaptureURL(t, fixture, transaction.URL)
+		if transaction.Method != "GET" {
+			t.Errorf("fixture transaction method = %q for %q, want GET", transaction.Method, transaction.URL)
+		}
+		if transaction.Protocol != "http/1.1" {
+			t.Errorf("fixture transaction protocol = %q for %q, want http/1.1", transaction.Protocol, transaction.URL)
+		}
+		for _, duration := range []int64{
+			transaction.Timing.QueueMs, transaction.Timing.DNSMs, transaction.Timing.ConnectMs,
+			transaction.Timing.TLSMs, transaction.Timing.TTFBMs, transaction.Timing.TotalMs,
+		} {
+			if duration < 0 || duration > maxTimingMs {
+				t.Errorf("fixture transaction duration %d out of bounds for %q", duration, transaction.URL)
+			}
+		}
+		transactionsByURL[transaction.URL] = append(transactionsByURL[transaction.URL], transaction)
+	}
+	for routeName, wantURL := range wantURLByRoute {
+		transactions := transactionsByURL[wantURL]
+		if len(transactions) == 0 {
+			t.Errorf("fixture route %q has no correlated transaction", routeName)
+			continue
+		}
+		if fixture.corpus.route(routeName).Status > 0 && transactions[0].Status == 0 {
+			t.Errorf("fixture route %q transaction has no response status", routeName)
+		}
+		delete(transactionsByURL, wantURL)
+	}
+	if len(transactionsByURL) != 0 {
+		t.Errorf("capture contains transactions for undeclared traffic: %#v", transactionsByURL)
 	}
 }
 

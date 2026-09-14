@@ -163,7 +163,7 @@ func TestProgressModelNeutralizesUnknownSourceLabels(t *testing.T) {
 		t.Fatalf("stageLabel = %q, want readable label", label)
 	}
 
-	model := newProgressModel([]string{"weird\x1b[31m_analyzer\r"}, "https://example.test/", nil)
+	model := newProgressModel([]string{"weird\x1b[31m_analyzer\r"}, "https://example.test/", "", nil)
 	if content := model.View().Content; !strings.Contains(content, "weird analyzer") {
 		t.Errorf("view lost sanitized label: %q", content)
 	}

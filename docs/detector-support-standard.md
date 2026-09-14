@@ -285,6 +285,7 @@ The following detector families currently meet the support standard:
 | --- | --- | --- | --- | --- | --- | --- |
 | `turnstile-client-script` | `static_integration` | `script_url` | `^https://challenges\.cloudflare\.com/turnstile/v0/api\.js` | 75 | Decisive | Documented Cloudflare Turnstile JavaScript API script location ([Cloudflare docs](https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/)). |
 | `turnstile-html-marker` | `static_integration` | `page_content` | `cf-turnstile` marker | 30 | Supporting | Standard container class name used for explicit and implicit widget rendering. |
+| `turnstile-challenge-api-post` | `challenge_api_post` | `network_request` | key `POST`, value contains `cdn-cgi/challenge-platform` | 40 | Supporting | Observed POST request to the documented Turnstile challenge-platform API endpoints; supporting evidence that cannot reach the threshold alone ([Turnstile docs](https://developers.cloudflare.com/turnstile/)). |
 
 #### Scoring and threshold rationale
 
@@ -486,6 +487,7 @@ The following detector families currently meet the support standard:
 | `datadome-interstitial-script` | `static_integration` | `script_url` | `^https://ct\.captcha-delivery\.com/` | 75 | Decisive | DataDome response page script URL on documented script host `ct.captcha-delivery.com` ([DataDome docs](https://docs.datadome.co/docs/javascript-tag)). |
 | `datadome-cookie` | `cookies` | `cookie` | `datadome` | 40 | Supporting | DataDome tracking cookie. |
 | `datadome-marker` | `static_integration` | `page_content` | `window\.datadomeOptions` or `datadome\.init` | 35 | Supporting | Client-side tag initialization configuration. |
+| `datadome-challenge-api-post` | `challenge_api_post` | `network_request` | key `POST`, value contains `datadome` | 40 | Supporting | Observed POST request to a DataDome interceptor or device-check endpoint; supporting evidence only ([DataDome docs](https://docs.datadome.co/)). |
 
 #### Scoring and threshold rationale
 
@@ -615,6 +617,7 @@ The following detector families currently meet the support standard:
 | `hcaptcha-challenge-iframe` | `static_integration` | `iframe_url` | `^https://(?:newassets\.)?hcaptcha\.com/captcha/` | 75 | Decisive | Official hCaptcha interactive challenge widget iframe URL. |
 | `hcaptcha-html-marker` | `static_integration` | `page_content` | `h-captcha` | 30 | Supporting | Standard widget container class name. |
 | `hcaptcha-inline-call` | `static_integration` | `page_content` | `hcaptcha\.(execute\|render\|reset)\(` | 35 | Supporting | Client-side JavaScript API invocation pattern. |
+| `hcaptcha-challenge-api-post` | `challenge_api_post` | `network_request` | key `POST`, value matches `hcaptcha\.com/(?:checksiteconfig\|checkcaptcha)` | 40 | Supporting | Observed POST request to the documented hCaptcha siteconfig or checkcaptcha endpoints ([hCaptcha docs](https://docs.hcaptcha.com/)). |
 
 #### Scoring and threshold rationale
 
@@ -655,6 +658,7 @@ The following detector families currently meet the support standard:
 | `arkose-challenge-iframe` | `static_integration` | `iframe_url` | `^https://(?:[a-z0-9-]+\.)?(?:arkoselabs\.com\|funcaptcha\.com)/fc/gc/` | 75 | Decisive | Official Arkose Labs challenge frame URL. |
 | `arkose-html-marker` | `static_integration` | `page_content` | `arkose-enforcement`, `fc-token`, `arkose-matchkey` | 30 | Supporting | Standard widget container identifiers. |
 | `arkose-inline-call` | `static_integration` | `page_content` | `(?:setupArkose\|arkose\.run\|myArkose)\(` | 35 | Supporting | Client-side initialization callback invocation. |
+| `arkose-challenge-api-post` | `challenge_api_post` | `network_request` | key `POST`, value matches `(?:arkoselabs\|funcaptcha)\.com/fc/(?:gc\|ca)/` | 40 | Supporting | Observed POST request to the documented Arkose Labs challenge issuance endpoints ([Arkose Labs docs](https://developer.arkoselabs.com/)). |
 
 #### Scoring and threshold rationale
 
@@ -677,6 +681,58 @@ The following detector families currently meet the support standard:
 
 - **Known false positives:** Negligible.
 - **Known false negatives:** Custom proxy domains or enterprise deployments using fully self-hosted wrapper scripts.
+
+---
+
+### 13. DataDome Form Submission Reaction (`datadome.form_reaction`)
+
+- **Category:** `bot_management`
+- **Vendor:** `DataDome`
+- **Product:** `DataDome`
+- **Rule ID:** `datadome.form_reaction`
+
+#### Evidence rationale
+
+| Evidence ID | Group | Type | Pattern | Weight | Role | Rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| `datadome-form-submitted` | `form_interaction` | `form_submission` | key `action` | 30 | Supporting | The opt-in bounded interaction phase submitted one eligible same-origin form; this anchors the reaction context and carries no vendor meaning alone. |
+| `datadome-form-post-denied` | `form_post_outcome` | `network_transaction` | key `POST`, value `403` | 30 | Supporting | The correlated form POST was answered with a denied status; a denied POST alone is common and not vendor-attributable. |
+| `datadome-reaction-marker` | `reaction_dom` | `page_content` | `captcha-delivery\.com` or `datadome` (case-insensitive) | 30 | Supporting | DataDome marker in the post-submission DOM ([DataDome docs](https://docs.datadome.co/)). |
+
+#### Scoring and threshold rationale
+
+- `minimum_score`: 75 (`high`).
+- `minimum_evidence`: 3 groups.
+- All three independent groups are mandatory (30 + 30 + 30 = 90). No single
+  group or pair can reach the threshold, so a passive scan without the opt-in
+  `--forms` interaction phase can never fire this rule.
+
+#### Vendor vs. product separation
+
+- The rule identifies a DataDome reaction to one submitted form only. It makes
+  no claim about the CDN, WAF, or hosting stack in front of the origin.
+
+#### Fixture coverage
+
+- **Positive:** browser integration suite (real Chromium, opt-in form phase) &
+mdash; a synthetic form POST answered with `403` and a DataDome interstitial
+  marker in the post-submission DOM (`detected: true`). The passive HTTP
+  fixture corpus cannot exercise this rule by design; it is exempted from the
+  positive/ambiguity corpus intent in
+  `internal/detectors/support_standard_test.go` (`interactionPhaseRules`) and
+  must be exercised there by name.
+- **Hard negative:** `datadome-positive.html`, `datadome cookie ambiguity`,
+  `documentation text regression`, and `adversarial lookalike domains` &mdash;
+  DataDome markers without any interaction phase (`score: 0`, `detected: false`).
+
+#### Known false positives and false negatives
+
+- **Known false positives:** Negligible; the three-group conjunction requires
+  a denied response to a Hemera-submitted form plus a DataDome marker.
+- **Known false negatives:** Deployments reacting with statuses other than
+  `403`; credential, upload, or auth-path forms (never submitted); pages where
+  the reaction loads only after multiple submissions; interaction phase
+  disabled (the default).
 
 ---
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"slices"
@@ -20,15 +21,60 @@ const (
 	maxDOMWorkItems  = 100000
 	maxCaptureItems  = 4096
 	maxMetadataBytes = 8192
+	// maxTimingMs bounds every captured duration. A request cannot outlive the
+	// navigation window, so this generous ceiling only absorbs clock skew in
+	// relative CDP timing data.
+	maxTimingMs = 60000
 
-	warningDOMLimit      = "final DOM reached the capture limit"
-	warningRequestLimit  = "browser requests reached the capture limit"
-	warningResponseLimit = "browser responses reached the capture limit"
-	warningCookieLimit   = "browser cookie names reached the capture limit"
-	warningScriptLimit   = "browser script URLs reached the capture limit"
-	warningIframeLimit   = "browser iframe URLs reached the capture limit"
-	warningURLLimit      = "a browser URL exceeded the capture limit and was omitted"
+	warningDOMLimit         = "final DOM reached the capture limit"
+	warningRequestLimit     = "browser requests reached the capture limit"
+	warningResponseLimit    = "browser responses reached the capture limit"
+	warningCookieLimit      = "browser cookie names reached the capture limit"
+	warningScriptLimit      = "browser script URLs reached the capture limit"
+	warningIframeLimit      = "browser iframe URLs reached the capture limit"
+	warningURLLimit         = "a browser URL exceeded the capture limit and was omitted"
+	warningTransactionLimit = "browser network transactions reached the capture limit"
 )
+
+// CaptureTiming holds bounded integer millisecond durations for one browser
+// request. Zero marks a phase that was not observed. Only relative durations
+// are retained; absolute timestamps are discarded at the CDP boundary.
+type CaptureTiming struct {
+	QueueMs   int64
+	DNSMs     int64
+	ConnectMs int64
+	TLSMs     int64
+	TTFBMs    int64
+	TotalMs   int64
+}
+
+// CaptureTransaction is one correlated browser request/response observation.
+// Status is zero when no response was observed. It exists only between the CDP
+// boundary and normalization: CDP request identifiers are used for in-memory
+// correlation and are never retained.
+type CaptureTransaction struct {
+	Method           string
+	URL              string
+	Status           int64
+	MIMEType         string
+	ResourceType     string
+	Protocol         string
+	ConnectionReused bool
+	WireBytes        int64
+	Timing           CaptureTiming
+}
+
+// responseObservation is the minimized CDP response data the collector needs.
+type responseObservation struct {
+	rawURL           string
+	status           int64
+	mimeType         string
+	resourceType     string
+	protocol         string
+	connectionReused bool
+	requestTime      float64
+	timing           CaptureTiming
+}
 
 // CaptureRequest is a minimized browser request observation.
 type CaptureRequest struct {
@@ -58,15 +104,17 @@ type CaptureCookie struct {
 // evidence channel so capability-level coverage never has to parse warnings
 // or interpret aggregated errors.
 type CaptureResult struct {
-	FinalURL     string
-	DOM          string
-	DOMTruncated bool
-	Requests     []CaptureRequest
-	Responses    []CaptureResponse
-	ScriptURLs   []string
-	IframeURLs   []string
-	Cookies      []CaptureCookie
-	Warnings     []string
+	FinalURL        string
+	DOM             string
+	DOMTruncated    bool
+	Requests        []CaptureRequest
+	Responses       []CaptureResponse
+	Transactions    []CaptureTransaction
+	FormSubmissions []FormSubmission
+	ScriptURLs      []string
+	IframeURLs      []string
+	Cookies         []CaptureCookie
+	Warnings        []string
 	// FinalURLIncomplete reports that the navigation's final URL could not be
 	// sanitized within the capture contract or was never observed, so signals
 	// whose provenance URL would have come from it cannot support conclusive
@@ -169,6 +217,8 @@ func wrapCaptureError(operation string, err error) error {
 func cloneCaptureResult(result CaptureResult) CaptureResult {
 	result.Requests = slices.Clone(result.Requests)
 	result.Responses = slices.Clone(result.Responses)
+	result.Transactions = slices.Clone(result.Transactions)
+	result.FormSubmissions = slices.Clone(result.FormSubmissions)
 	result.ScriptURLs = slices.Clone(result.ScriptURLs)
 	result.IframeURLs = slices.Clone(result.IframeURLs)
 	result.Cookies = slices.Clone(result.Cookies)
@@ -177,12 +227,22 @@ func cloneCaptureResult(result CaptureResult) CaptureResult {
 }
 
 type captureCollector struct {
-	mu        sync.Mutex
-	requests  []CaptureRequest
-	responses []CaptureResponse
-	truncated channelTruncation
-	warnings  []string
-	warned    map[string]struct{}
+	mu           sync.Mutex
+	requests     []CaptureRequest
+	responses    []CaptureResponse
+	transactions []CaptureTransaction
+	pending      map[string]*pendingTransaction
+	truncated    channelTruncation
+	warnings     []string
+	warned       map[string]struct{}
+	progress     func(ObservationCounters)
+}
+
+// pendingTransaction correlates CDP request identifiers with their in-flight
+// transaction entry. The identifier is never retained in results.
+type pendingTransaction struct {
+	index          int
+	startTimestamp float64
 }
 
 // channelTruncation records which bounded capture channels did not run to
@@ -197,7 +257,130 @@ type channelTruncation struct {
 }
 
 func newCaptureCollector() *captureCollector {
-	return &captureCollector{warned: make(map[string]struct{})}
+	return &captureCollector{pending: make(map[string]*pendingTransaction), warned: make(map[string]struct{})}
+}
+
+// beginRequest records one request observation and starts its transaction
+// correlation. The id is a CDP request identifier and timestamp a relative CDP
+// monotonic time; neither is retained in results.
+func (c *captureCollector) beginRequest(id, method, rawURL, resourceType string, timestamp float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cleanMethod := cleanMetadata(method)
+	cleanURL, ok := c.cleanURL(rawURL)
+	if ok {
+		c.appendRequestLocked(CaptureRequest{
+			Method: cleanMethod, URL: cleanURL, ResourceType: cleanMetadata(resourceType),
+		})
+	}
+	if id == "" || !utf8.ValidString(rawURL) {
+		return
+	}
+	if _, active := c.pending[id]; active {
+		return
+	}
+	if len(c.pending) >= maxCaptureItems {
+		c.warn(warningTransactionLimit)
+		return
+	}
+	index := len(c.transactions)
+	if !c.appendTransactionLocked(CaptureTransaction{
+		Method: cleanMethod, URL: cleanURL, ResourceType: cleanMetadata(resourceType),
+	}) {
+		return
+	}
+	c.pending[id] = &pendingTransaction{index: index, startTimestamp: timestamp}
+}
+
+// observeResponse records one response observation and patches the correlated
+// transaction with status, protocol, reuse, and timing phases.
+func (c *captureCollector) observeResponse(id string, response responseObservation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.appendResponseLocked(response)
+	if pending := c.pending[id]; pending != nil && pending.index < len(c.transactions) {
+		c.patchTransactionLocked(&c.transactions[pending.index], response, pending.startTimestamp)
+	}
+}
+
+// observeRedirect records one intermediate redirect response, closes the
+// current transaction hop, and leaves the identifier free for the next hop
+// that the accompanying request event opens.
+func (c *captureCollector) observeRedirect(id string, response responseObservation, timestamp float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.appendResponseLocked(response)
+	if pending := c.pending[id]; pending != nil && pending.index < len(c.transactions) {
+		c.patchTransactionLocked(&c.transactions[pending.index], response, pending.startTimestamp)
+		if totalMs := boundedDurationMs(timestamp - pending.startTimestamp); totalMs > 0 {
+			c.transactions[pending.index].Timing.TotalMs = totalMs
+		}
+	}
+	delete(c.pending, id)
+}
+
+// finishRequest patches the correlated transaction with the transferred wire
+// size and total duration, then ends its correlation window.
+func (c *captureCollector) finishRequest(id string, wireBytes int64, timestamp float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pending := c.pending[id]; pending != nil && pending.index < len(c.transactions) {
+		entry := &c.transactions[pending.index]
+		if wireBytes > 0 {
+			entry.WireBytes = wireBytes
+		}
+		if totalMs := boundedDurationMs(timestamp - pending.startTimestamp); totalMs > 0 {
+			entry.Timing.TotalMs = totalMs
+		}
+	}
+	delete(c.pending, id)
+}
+
+// failRequest ends the correlation window of a request that never completed.
+func (c *captureCollector) failRequest(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.pending, id)
+}
+
+func (c *captureCollector) patchTransactionLocked(entry *CaptureTransaction, response responseObservation, startTimestamp float64) {
+	entry.Status = response.status
+	if mimeType := cleanMetadata(response.mimeType); mimeType != "" {
+		entry.MIMEType = mimeType
+	}
+	if protocol := cleanMetadata(response.protocol); protocol != "" {
+		entry.Protocol = protocol
+	}
+	entry.ConnectionReused = response.connectionReused
+	if response.timing.DNSMs > 0 {
+		entry.Timing.DNSMs = response.timing.DNSMs
+	}
+	if response.timing.ConnectMs > 0 {
+		entry.Timing.ConnectMs = response.timing.ConnectMs
+	}
+	if response.timing.TLSMs > 0 {
+		entry.Timing.TLSMs = response.timing.TLSMs
+	}
+	if response.timing.TTFBMs > 0 {
+		entry.Timing.TTFBMs = response.timing.TTFBMs
+	}
+	if queueMs := boundedDurationMs(response.requestTime - startTimestamp); queueMs > 0 {
+		entry.Timing.QueueMs = queueMs
+	}
+}
+
+// boundedDurationMs converts a relative CDP duration in seconds into bounded
+// integer milliseconds. Non-finite, zero, and negative values collapse to zero
+// and the result never exceeds maxTimingMs.
+func boundedDurationMs(seconds float64) int64 {
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
+		return 0
+	}
+	milliseconds := math.Round(seconds * 1000)
+	if milliseconds > maxTimingMs {
+		return maxTimingMs
+	}
+	return int64(milliseconds)
 }
 
 func (c *captureCollector) addRequest(method, rawURL, resourceType string) {
@@ -210,20 +393,41 @@ func (c *captureCollector) addRequest(method, rawURL, resourceType string) {
 	if status != urlAccepted {
 		return
 	}
+	c.appendRequestLocked(CaptureRequest{
+		Method: cleanMetadata(method), URL: cleanURL, ResourceType: cleanMetadata(resourceType),
+	})
+}
+
+func (c *captureCollector) appendRequestLocked(request CaptureRequest) {
 	if len(c.requests) >= maxCaptureItems {
 		c.truncated.requests = true
 		c.warn(warningRequestLimit)
 		return
 	}
-	c.requests = append(c.requests, CaptureRequest{
-		Method: cleanMetadata(method), URL: cleanURL, ResourceType: cleanMetadata(resourceType),
-	})
+	c.requests = append(c.requests, request)
+}
+
+// appendTransactionLocked stores one transaction observation and reports
+// whether it fit within the capture budget.
+func (c *captureCollector) appendTransactionLocked(transaction CaptureTransaction) bool {
+	if len(c.transactions) >= maxCaptureItems {
+		c.warn(warningTransactionLimit)
+		return false
+	}
+	c.transactions = append(c.transactions, transaction)
+	return true
 }
 
 func (c *captureCollector) addResponse(rawURL string, status int64, mimeType, resourceType string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cleanURL, urlStatus := c.classifyURL(rawURL)
+	c.appendResponseLocked(responseObservation{
+		rawURL: rawURL, status: status, mimeType: mimeType, resourceType: resourceType,
+	})
+}
+
+func (c *captureCollector) appendResponseLocked(response responseObservation) {
+	cleanURL, urlStatus := c.classifyURL(response.rawURL)
 	if urlStatus == urlOversizedDropped {
 		c.truncated.responses = true
 	}
@@ -236,8 +440,18 @@ func (c *captureCollector) addResponse(rawURL string, status int64, mimeType, re
 		return
 	}
 	c.responses = append(c.responses, CaptureResponse{
-		URL: cleanURL, Status: status, MIMEType: cleanMetadata(mimeType), ResourceType: cleanMetadata(resourceType),
+		URL: cleanURL, Status: response.status, MIMEType: cleanMetadata(response.mimeType),
+		ResourceType: cleanMetadata(response.resourceType),
 	})
+}
+
+// counterSnapshot returns a presentation-safe aggregate snapshot of the
+// capture volume. The caller-provided progress callback must be invoked
+// outside the collector lock, so this returns a value copy.
+func (c *captureCollector) counterSnapshot() ObservationCounters {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return ObservationCounters{Requests: len(c.requests), Responses: len(c.responses)}
 }
 
 func (c *captureCollector) snapshot(finalURL, dom string, cookies []CaptureCookie) CaptureResult {
@@ -253,6 +467,7 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 	defer c.mu.Unlock()
 	result := CaptureResult{
 		Requests: slices.Clone(c.requests), Responses: slices.Clone(c.responses),
+		Transactions: c.sortedTransactionsLocked(),
 	}
 	if cleaned, ok := c.cleanURL(finalURL); ok {
 		result.FinalURL = cleaned
@@ -298,6 +513,41 @@ func (c *captureCollector) snapshotInternal(finalURL string, snapshot boundedDOM
 	result.CookiesTruncated = c.truncated.cookies
 	result.Warnings = slices.Clone(c.warnings)
 	return result
+}
+
+// sortedTransactionsLocked returns a deterministic canonical ordering of the
+// captured transactions. Capture order is wall-clock dependent, so reports
+// must not depend on it.
+func (c *captureCollector) sortedTransactionsLocked() []CaptureTransaction {
+	transactions := slices.Clone(c.transactions)
+	sort.Slice(transactions, func(i, j int) bool {
+		left, right := transactions[i], transactions[j]
+		leftFields := [...][]string{
+			{left.URL, left.Method, left.MIMEType, left.ResourceType, left.Protocol},
+			{right.URL, right.Method, right.MIMEType, right.ResourceType, right.Protocol},
+		}
+		for index := range leftFields[0] {
+			if leftFields[0][index] != leftFields[1][index] {
+				return leftFields[0][index] < leftFields[1][index]
+			}
+		}
+		leftNumbers := [...]int64{left.Status, left.WireBytes,
+			left.Timing.QueueMs, left.Timing.DNSMs, left.Timing.ConnectMs,
+			left.Timing.TLSMs, left.Timing.TTFBMs, left.Timing.TotalMs}
+		rightNumbers := [...]int64{right.Status, right.WireBytes,
+			right.Timing.QueueMs, right.Timing.DNSMs, right.Timing.ConnectMs,
+			right.Timing.TLSMs, right.Timing.TTFBMs, right.Timing.TotalMs}
+		for index := range leftNumbers {
+			if leftNumbers[index] != rightNumbers[index] {
+				return leftNumbers[index] < rightNumbers[index]
+			}
+		}
+		if left.ConnectionReused != right.ConnectionReused {
+			return !left.ConnectionReused
+		}
+		return false
+	})
+	return transactions
 }
 
 func (c *captureCollector) cleanResourceURLs(rawURLs []string, limitWarning string, truncated *bool) []string {
@@ -368,6 +618,20 @@ func (c *captureCollector) classifyURL(raw string) (string, int) {
 		return "", urlOversizedDropped
 	}
 	return cleaned, urlAccepted
+}
+
+// sameOrigin reports whether an already-cleaned action URL targets the same
+// origin as an already-cleaned page URL.
+func sameOrigin(pageURL, actionURL string) bool {
+	page, err := url.Parse(pageURL)
+	if err != nil {
+		return false
+	}
+	action, err := url.Parse(actionURL)
+	if err != nil {
+		return false
+	}
+	return page.Scheme == action.Scheme && page.Host == action.Host
 }
 
 func (c *captureCollector) extractResourceURLs(dom, finalURL string) ([]string, []string) {

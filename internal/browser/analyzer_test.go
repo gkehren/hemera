@@ -29,6 +29,12 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 			{URL: "https://api.example.test/z?redacted", Status: 204},
 			{URL: "https://api.example.test/a", Status: 200},
 		},
+		Transactions: []CaptureTransaction{
+			{Method: "POST", URL: "https://api.example.test/z?redacted", Status: 204, Protocol: "h2"},
+		},
+		FormSubmissions: []FormSubmission{
+			{ActionURL: "https://example.test/contact", Method: "POST"},
+		},
 		ScriptURLs: []string{"https://cdn.example.test/z.js", "https://cdn.example.test/a.js", "https://cdn.example.test/a.js"},
 		IframeURLs: []string{"https://frame.example.test/widget"},
 		Cookies: []CaptureCookie{
@@ -45,6 +51,7 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 	want := []model.Signal{
 		{Type: model.SignalTypeNetworkRequest, Source: analysis.SourceBrowser, Key: "GET", Value: "https://api.example.test/a", URL: result.FinalURL, Confidence: 1},
 		{Type: model.SignalTypeNetworkRequest, Source: analysis.SourceBrowser, Key: "POST", Value: "https://api.example.test/z?redacted", URL: result.FinalURL, Confidence: 1},
+		{Type: model.SignalTypeNetworkTransaction, Source: analysis.SourceBrowser, Key: "POST", Value: "204", URL: "https://api.example.test/z?redacted", Confidence: 1},
 		{Type: model.SignalTypeNetworkResponse, Source: analysis.SourceBrowser, Key: "status", Value: "200", URL: "https://api.example.test/a", Confidence: 1},
 		{Type: model.SignalTypeNetworkResponse, Source: analysis.SourceBrowser, Key: "status", Value: "204", URL: "https://api.example.test/z?redacted", Confidence: 1},
 		{Type: model.SignalTypePageContent, Source: analysis.SourceBrowser, Key: "dom", Value: result.DOM, URL: result.FinalURL, Confidence: 1},
@@ -54,6 +61,7 @@ func TestNormalizeCaptureProducesDeterministicMinimizedSignals(t *testing.T) {
 		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "alpha", Value: ".third.example.test", URL: result.FinalURL, Confidence: 1},
 		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "alpha", Value: "example.test", URL: result.FinalURL, Confidence: 1},
 		{Type: model.SignalTypeCookie, Source: analysis.SourceBrowser, Key: "zeta", Value: "example.test", URL: result.FinalURL, Confidence: 1},
+		{Type: model.SignalTypeFormSubmission, Source: analysis.SourceBrowser, Key: "action", Value: "https://example.test/contact", URL: result.FinalURL, Confidence: 1},
 	}
 	if !reflect.DeepEqual(signals, want) {
 		t.Fatalf("signals = %#v\nwant %#v", signals, want)

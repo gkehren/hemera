@@ -16,9 +16,11 @@ type Capability struct {
 
 var implementedCapabilities = []Capability{
 	{Source: SourceBrowser, SignalType: model.SignalTypeCookie},
+	{Source: SourceBrowser, SignalType: model.SignalTypeFormSubmission},
 	{Source: SourceBrowser, SignalType: model.SignalTypeIframeURL},
 	{Source: SourceBrowser, SignalType: model.SignalTypeNetworkRequest},
 	{Source: SourceBrowser, SignalType: model.SignalTypeNetworkResponse},
+	{Source: SourceBrowser, SignalType: model.SignalTypeNetworkTransaction},
 	{Source: SourceBrowser, SignalType: model.SignalTypePageContent},
 	{Source: SourceBrowser, SignalType: model.SignalTypeScriptURL},
 	{Source: SourceDNSTLS, SignalType: model.SignalTypeDNSRecord},

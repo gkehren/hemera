@@ -17,12 +17,15 @@ import (
 
 	"github.com/gkehren/hemera/internal/networkguard"
 	"github.com/gkehren/hemera/internal/safeoutput"
+	"github.com/gkehren/hemera/internal/scanner"
 )
 
 // Options holds the scan configuration collected by the interactive wizard.
 type Options struct {
-	URL  string
-	Deep bool
+	URL   string
+	Pages []string
+	Deep  bool
+	Forms bool
 }
 
 // ErrAborted reports that the user canceled the wizard before submitting it.
@@ -30,8 +33,9 @@ var ErrAborted = errors.New("interactive scan canceled")
 
 const accessibleWizardShutdownTimeout = time.Second
 
-// RunWizard collects the scan mode and target URL with an interactive form.
-// It returns ErrAborted when the user exits before submitting.
+// RunWizard collects the scan mode, target URL, optional additional pages,
+// and the form-submission toggle with an interactive form. It returns
+// ErrAborted when the user exits before submitting.
 func RunWizard(ctx context.Context) (Options, error) {
 	if ctx == nil {
 		return Options{}, errors.New("run wizard: nil context")
@@ -41,7 +45,9 @@ func RunWizard(ctx context.Context) (Options, error) {
 	}
 
 	var opts Options
+	var pagesInput string
 	mode := "default"
+	forms := "no"
 	accessible := accessibleMode()
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -62,6 +68,25 @@ func RunWizard(ctx context.Context) (Options, error) {
 				CharLimit(2048).
 				Validate(validateTargetURL).
 				Value(&opts.URL),
+		),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Additional pages (optional)").
+				Description(fmt.Sprintf("Comma-separated http(s) URLs scanned after the target, up to %d pages in total. Hemera scans exactly the pages you list; it never crawls.", scanner.MaxPages)).
+				Placeholder("https://example.com/pricing, https://example.com/login").
+				CharLimit(2048).
+				Validate(validateOptionalPages).
+				Value(&pagesInput),
+		),
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Form submission").
+				Description("Opt-in: after the passive observation window, Hemera fills and submits exactly one eligible same-origin form with fixed benign synthetic data. Credential, upload, and auth forms are never submitted.").
+				Options(
+					huh.NewOption("No (passive only)", "no"),
+					huh.NewOption("Yes (one form per page)", "yes"),
+				).
+				Value(&forms),
 		),
 	).WithAccessible(accessible)
 
@@ -91,7 +116,9 @@ func RunWizard(ctx context.Context) (Options, error) {
 		return Options{}, fmt.Errorf("run wizard: %w", err)
 	}
 	opts.URL = strings.TrimSpace(opts.URL)
+	opts.Pages = parseOptionalPages(pagesInput)
 	opts.Deep = mode == "deep"
+	opts.Forms = forms == "yes"
 	return opts, nil
 }
 
@@ -120,6 +147,37 @@ func runAccessibleForm(ctx context.Context, form *huh.Form, input io.Closer) err
 	case <-timer.C:
 		return fmt.Errorf("stop accessible wizard within %s: %w", accessibleWizardShutdownTimeout, ctx.Err())
 	}
+}
+
+// MaxWizardExtraPages is the room left for wizard-listed pages beside the
+// mandatory target URL.
+const MaxWizardExtraPages = scanner.MaxPages - 1
+
+func parseOptionalPages(raw string) []string {
+	var pages []string
+	for _, candidate := range strings.Split(raw, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			pages = append(pages, candidate)
+		}
+	}
+	return pages
+}
+
+func validateOptionalPages(raw string) error {
+	pages := parseOptionalPages(raw)
+	if len(pages) > MaxWizardExtraPages {
+		return fmt.Errorf("at most %d additional pages are allowed beside the target", MaxWizardExtraPages)
+	}
+	for _, page := range pages {
+		if _, err := networkguard.ParseURL(page); err != nil {
+			// net/url parse failures can embed fragments of the raw input
+			// in their message text. Render only bounded, control-free
+			// text; the static policy wording passes through unchanged.
+			return errors.New(safeoutput.SanitizeDiagnostic(err))
+		}
+	}
+	return nil
 }
 
 func validateTargetURL(raw string) error {

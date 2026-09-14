@@ -97,6 +97,15 @@ func (o Observation) Clone() Observation {
 		}
 		cloned.Metadata.HTTP = &httpMetadata
 	}
+	if o.Metadata.Network != nil {
+		networkMetadata := *o.Metadata.Network
+		networkMetadata.POSTEndpoints = append([]string{}, o.Metadata.Network.POSTEndpoints...)
+		networkMetadata.Protocols = append([]NetworkNameCount{}, o.Metadata.Network.Protocols...)
+		networkMetadata.StatusClasses = append([]NetworkNameCount{}, o.Metadata.Network.StatusClasses...)
+		networkMetadata.Hosts = append([]NetworkHostTraffic{}, o.Metadata.Network.Hosts...)
+		networkMetadata.Transactions = append([]NetworkTransaction{}, o.Metadata.Network.Transactions...)
+		cloned.Metadata.Network = &networkMetadata
+	}
 	return cloned
 }
 
@@ -106,24 +115,30 @@ type MetadataKind string
 const (
 	// MetadataKindHTTP identifies bounded HTTP navigation metadata.
 	MetadataKindHTTP MetadataKind = "http"
+	// MetadataKindNetwork identifies bounded browser network traffic metadata.
+	MetadataKindNetwork MetadataKind = "network"
 )
 
 // Metadata is the typed envelope for source-specific diagnostic data. New
 // analyzer metadata belongs here rather than in unstructured maps or signals.
 type Metadata struct {
-	HTTP *HTTPMetadata
+	HTTP    *HTTPMetadata
+	Network *NetworkMetadata
 }
 
 // Empty reports whether the envelope contains no source-specific metadata.
 func (m Metadata) Empty() bool {
-	return m.HTTP == nil
+	return m.HTTP == nil && m.Network == nil
 }
 
 // Kinds returns the populated metadata contracts in stable field order.
 func (m Metadata) Kinds() []MetadataKind {
-	kinds := make([]MetadataKind, 0, 1)
+	kinds := make([]MetadataKind, 0, 2)
 	if m.HTTP != nil {
 		kinds = append(kinds, MetadataKindHTTP)
+	}
+	if m.Network != nil {
+		kinds = append(kinds, MetadataKindNetwork)
 	}
 	return kinds
 }
@@ -154,4 +169,59 @@ type HTTPRedirect struct {
 	From   string
 	To     string
 	Status int
+}
+
+// NetworkMetadata contains bounded browser network diagnostics from one
+// navigation. Durations are integer milliseconds derived from relative CDP
+// timing phases. Absolute timestamps, remote addresses, connection
+// identifiers, headers, bodies, and POST data are never retained.
+type NetworkMetadata struct {
+	FinalURL       string
+	RequestCount   int
+	ResponseCount  int
+	POSTEndpoints  []string
+	Protocols      []NetworkNameCount
+	StatusClasses  []NetworkNameCount
+	Hosts          []NetworkHostTraffic
+	QueueTiming    NetworkTimingStats
+	TTFBTiming     NetworkTimingStats
+	WireBytesTotal int64
+	Transactions   []NetworkTransaction
+	Truncated      bool
+}
+
+// NetworkNameCount counts observations sharing one bounded label.
+type NetworkNameCount struct {
+	Name  string
+	Count int
+}
+
+// NetworkHostTraffic summarizes the browser requests observed for one host.
+// It records only aggregate counts, never connection identifiers.
+type NetworkHostTraffic struct {
+	Host           string
+	Requests       int
+	ReusedRequests int
+}
+
+// NetworkTimingStats summarizes one bounded duration family in integer
+// milliseconds using nearest-rank percentiles over observed requests.
+type NetworkTimingStats struct {
+	P50Ms int64
+	P95Ms int64
+	MaxMs int64
+}
+
+// NetworkTransaction is one correlated browser request/response observation.
+// Status is zero when no response was observed before capture ended.
+type NetworkTransaction struct {
+	Method           string
+	URL              string
+	Status           int
+	Protocol         string
+	ConnectionReused bool
+	WireBytes        int64
+	QueueMs          int64
+	TTFBMs           int64
+	TotalMs          int64
 }

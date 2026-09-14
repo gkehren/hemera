@@ -163,7 +163,8 @@ mode. Press `Ctrl+C` during the progress view to cancel the running scan.
 
 ```text
 Usage:
-  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep]
+              [--pages urls] [--pages-file file] [--forms] <url>
   hemera [--help] [--version]
 
 Options:
@@ -175,13 +176,20 @@ Options:
 
 ```text
 Usage:
-  hemera scan [--format text|json] [--deep] [--mode default|deep] <url>
+  hemera scan [--format text|json] [--deep] [--mode default|deep]
+              [--pages urls] [--pages-file file] [--forms] <url>
 
 Options:
-  --deep      Enable deep scan with maximal observation budgets and timeouts
-  --format    Report format: text (default) or json
-  --mode      Scan mode: default or deep
-  -h, --help  Show this help message
+  --deep        Enable deep scan with maximal observation budgets and timeouts
+  --format      Report format: text (default) or json
+  --mode        Scan mode: default or deep
+  --pages       Comma-separated additional page URLs scanned after the target
+                (bounded list of at most 10 pages total, no crawling)
+  --pages-file  File with one additional page URL per line; empty lines and
+                #-comments are ignored
+  --forms       Submit one eligible same-origin form per page with fixed
+                benign synthetic data; never credential or upload forms
+  -h, --help    Show this help message
 ```
 
 ### Exit codes
@@ -244,6 +252,59 @@ checked-in [complete V6 golden report](../internal/report/testdata/complete-repo
 is an exact, test-validated example of the current field names and value shapes.
 In particular, a detection's identifier field is `id`; `rule_id` is used only
 inside an applied cross-rule conflict object.
+; per-page content lives under `pages`:
+The JSON report follows the [JSON report schema V6](report-schema.md) specification;
+per-page content lives under `pages`:
+
+```json
+{
+  "schema_version": 6,
+  "tool_version": "dev",
+  "pages": [
+    {
+      "requested_url": "https://example.com/",
+      "failed": false,
+      "final_url": "https://example.com/",
+      "http": {
+        "status_code": 200,
+        "body_truncated": false,
+        "redirects": [],
+        "warnings": []
+      },
+      "analyzers": [
+        {
+          "source": "http_analyzer",
+          "status": "complete",
+          "warnings": []
+        },
+        {
+          "source": "dns_tls_analyzer",
+          "status": "complete",
+          "warnings": []
+        },
+        {
+          "source": "browser_analyzer",
+          "status": "complete",
+          "warnings": []
+        }
+      ],
+      "detections": [
+        {
+          "id": "cloudflare.turnstile",
+          "name": "Cloudflare Turnstile",
+          "vendor": "Cloudflare",
+          "category": "captcha",
+          "detected": false,
+          "status": "not_detected",
+          "incomplete_sources": [],
+          "score": 0,
+          "level": "NONE"
+        }
+      ]
+    }
+  ]
+}
+```
 
 ---
 
@@ -258,7 +319,7 @@ List all detected protections with their confidence score and confidence level:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.detected == true) | {id, name, score, level}'
+  | jq '.pages[0].detections[] | select(.detected == true) | {id, name, score, level}'
 ```
 
 ### Filter high-confidence detections
@@ -267,8 +328,7 @@ Select detections with score at least 75 (`high` or `very_high`):
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.level == "high" or .level == "very_high") | {id, name, score, level}'
-```
+  | jq '.pages[0].detections[] | select(.level == "high" or .level == "very_high") | {id, name, score, level}' ```
 
 ### Inspect analyzer execution status and warnings
 
@@ -277,7 +337,7 @@ errors:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.analyzers[] | {source, status, warnings}'
+  | jq '.pages[0].analyzers[] | {source, status, warnings}'
 ```
 
 ### Check for insufficient observation coverage
@@ -287,7 +347,7 @@ analyzer observations:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.status == "insufficient_coverage") | {id, name, incomplete_sources}'
+  | jq '.pages[0].detections[] | select(.status == "insufficient_coverage") | {id, name, incomplete_sources}'
 ```
 
 ---
@@ -321,10 +381,10 @@ if [ "${SCHEMA_VERSION}" -ne 6 ]; then
 fi
 
 # Check for detected bot management or WAF
-DETECTED_COUNT=$(jq '[.detections[] | select(.detected == true)] | length' "${REPORT_FILE}")
-echo "Scan complete. Positive detections: ${DETECTED_COUNT}"
+DETECTED_COUNT=$(jq '[.pages[0].detections[] | select(.detected == true)] | length' "${REPORT_FILE}")
+echo "Scan complete. Active protections detected: ${DETECTED_COUNT}"
 
-jq -r '.detections[] | select(.detected == true) | " - \(.name) (\(.id)): score \(.score) [\(.level)]"' "${REPORT_FILE}"
+jq -r '.pages[0].detections[] | select(.detected == true) | " - \(.name) (\(.id)): score \(.score) [\(.level)]"' "${REPORT_FILE}"
 ```
 
 ### GitHub Actions workflow step
@@ -358,7 +418,7 @@ jobs:
 
       - name: Inspect Detections
         run: |
-          jq '.detections[] | select(.detected == true)' scan-report.json
+          jq '.pages[0].detections[] | select(.detected == true)' scan-report.json
 
       - name: Archive Scan Report
         uses: actions/upload-artifact@v4

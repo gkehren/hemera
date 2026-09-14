@@ -162,8 +162,10 @@ explicit close also has a fixed shutdown deadline.
 At most one recorder and one navigation are active per session. Cancellation,
 explicit recorder close, CDP loss, and session shutdown all stop collection.
 Requests and responses retain only cleaned HTTP(S) URLs, methods, statuses, MIME
-types, and resource types. Redirect responses are recorded, but headers, bodies,
-POST data,
+types, and resource types, plus bounded relative durations (integer
+milliseconds), protocol labels, transferred wire sizes, and a connection-reuse
+flag for explainability. Redirect responses are recorded, but headers, bodies,
+POST data, absolute
 timestamps, CDP identifiers, remote addresses, and cookie values are never
 retained. Final cookie values are discarded immediately; only validated domains
 are retained with names, sorted, and deduplicated. This minimum provenance keeps
@@ -223,6 +225,34 @@ extend it, and caller cancellation remains immediate. This bounded window may
 miss behavior intentionally delayed beyond the deadline; extending it without a
 detector-driven need would increase scan cost and exposure.
 
+### Implemented bounded form interaction boundary
+
+An optional, explicitly opt-in interaction phase (`--forms`, disabled by
+default) may run once per navigation after the passive post-load window has
+settled. It inspects the settled page, selects at most one eligible form, fills
+it with fixed benign synthetic values attributed to the scan, and submits it
+exactly once with normal navigation semantics; there are no retries. The phase
+runs inside the unchanged navigation lifecycle, so every fetch interception,
+request, redirect, concurrency, transfer, and decoded-byte budget remains
+enforced, and a second bounded quiet window observes the outcome. This is a
+normal, bounded page visit action, not active probing: Hemera submits only
+what a human visitor would submit, never sends exploit-oriented content, and
+never attempts to defeat any control the response presents.
+
+Eligibility is deliberately conservative and enforced in code:
+
+- the action must be same-origin http(s) with the scanned page;
+- forms with password or file inputs are never touched, so credential attacks
+  and uploads are impossible;
+- actions whose path suggests a credential flow (login, sign-in, register,
+  password, token, OAuth, session, and similar markers) are skipped;
+- forms without a submit button or with more than 32 fields are skipped;
+- hidden fields are left untouched so anti-CSRF tokens keep working.
+
+Only the cleaned action URL and method are recorded; field names, field values,
+and submitted data are never collected. At most one form per page can ever be
+submitted, so the capability cannot iterate into crawling.
+
 Dedicated/shared workers and service workers are fail-closed as paused child
 targets before their code executes. Their startup requests still pass through
 the proxy and count toward request, concurrency, transfer, and decoded-byte
@@ -251,7 +281,9 @@ and cookie names with validated domains. It sorts and deduplicates these signals
 never emits cookie values, and uses generic warnings for incomplete or
 unavailable coverage. Page
 content remains bounded and in memory for rule matching, while reporters
-suppress its value even when a rule selects it as evidence. Raw analyzer errors
+suppress its value even when a rule selects it as evidence. Form submissions are
+recorded only as a cleaned action URL and method; field names and values are
+never collected. Raw analyzer errors
 are retained only internally. Report V6 distinguishes `insufficient_coverage`
 from `not_detected` when a rule could reach its detection threshold if missing
 observation capabilities had completed, preventing bounded observation or

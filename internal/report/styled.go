@@ -39,36 +39,68 @@ var (
 // WriteText and performs no detection of its own.
 func WriteStyled(writer io.Writer, report Report) error {
 	var b strings.Builder
-	writeStyledHeader(&b, report)
-	writeStyledDetections(&b, report)
+	writeStyledBanner(&b, report)
+	multi := len(report.Pages) > 1
+	for index, page := range report.Pages {
+		if multi {
+			b.WriteString("\n" + styledNameStyle.Render(fmt.Sprintf("── Page %d of %d ──", index+1, len(report.Pages))) + "\n\n")
+		}
+		writeStyledPage(&b, page)
+	}
+	writeStyledSummary(&b, report.Summary)
 	if _, err := io.WriteString(writer, b.String()); err != nil {
 		return fmt.Errorf("write styled report: %w", err)
 	}
 	return nil
 }
 
-func writeStyledHeader(b *strings.Builder, report Report) {
+func writeStyledBanner(b *strings.Builder, report Report) {
 	b.WriteString(styledBannerStyle.Render("Hemera scan report"))
-	b.WriteString("\n\n")
-	styledKeyValue(b, "Target", report.RequestedURL)
-	if report.HTTP == nil {
+	b.WriteString("\n")
+	if len(report.Pages) > 1 && report.Summary != nil {
+		styledKeyValue(b, "Pages", fmt.Sprintf("%d scanned · %d failed",
+			report.Summary.PageCount-report.Summary.FailedPages, report.Summary.FailedPages))
+	}
+	b.WriteString("\n")
+}
+
+func writeStyledPage(b *strings.Builder, page PageReport) {
+	styledKeyValue(b, "Target", page.RequestedURL)
+	if page.Failed {
+		styledKeyValue(b, "Result", styledWarnMark.Render("page scan failed (no observations)"))
+		b.WriteString("\n")
+		return
+	}
+	if page.HTTP == nil {
 		styledKeyValue(b, "HTTP", "observation unavailable")
 	} else {
-		if report.FinalURL != nil && *report.FinalURL != report.RequestedURL {
-			styledKeyValue(b, "Final URL", *report.FinalURL)
+		if page.FinalURL != nil && *page.FinalURL != page.RequestedURL {
+			styledKeyValue(b, "Final URL", *page.FinalURL)
 		}
-		status := fmt.Sprintf("%d", report.HTTP.StatusCode)
-		if report.HTTP.BodyTruncated {
+		status := fmt.Sprintf("%d", page.HTTP.StatusCode)
+		if page.HTTP.BodyTruncated {
 			status += " · body truncated"
 		}
 		styledKeyValue(b, "Status", status)
-		for _, redirect := range report.HTTP.Redirects {
+		for _, redirect := range page.HTTP.Redirects {
 			styledKeyValue(b, "Redirect", fmt.Sprintf("%d %s -> %s", redirect.Status, redirect.From, redirect.To))
 		}
 	}
 
+	if page.Network != nil {
+		network := fmt.Sprintf("%d requests · %d responses · %d bytes",
+			page.Network.RequestCount, page.Network.ResponseCount, page.Network.WireBytesTotal)
+		styledKeyValue(b, "Network", network)
+		if p95 := page.Network.TTFBTiming.P95Ms; p95 > 0 {
+			styledKeyValue(b, "TTFB p95", fmt.Sprintf("%d ms", p95))
+		}
+		if len(page.Network.POSTEndpoints) > 0 {
+			styledKeyValue(b, "POST", fmt.Sprintf("%d endpoint(s)", len(page.Network.POSTEndpoints)))
+		}
+	}
+
 	detected, inconclusive := 0, 0
-	for _, detection := range report.Detections {
+	for _, detection := range page.Detections {
 		switch {
 		case detection.Detected:
 			detected++
@@ -77,16 +109,37 @@ func writeStyledHeader(b *strings.Builder, report Report) {
 		}
 	}
 	styledKeyValue(b, "Detections", fmt.Sprintf("%d detected · %d not detected · %d inconclusive",
-		detected, len(report.Detections)-detected-inconclusive, inconclusive))
+		detected, len(page.Detections)-detected-inconclusive, inconclusive))
 	b.WriteString("\n")
+	writeStyledDetections(b, page)
+}
+
+func writeStyledSummary(b *strings.Builder, summary *SummaryReport) {
+	if summary == nil {
+		return
+	}
+	b.WriteString("\n")
+	b.WriteString(styledValueStyle.Render("Σ Summary across pages"))
+	b.WriteString("\n")
+	for _, detection := range summary.Detections {
+		if detection.DetectedPages == 0 {
+			continue
+		}
+		line := "  " + styledDetectedMark.Render("✔") + " " + styledNameStyle.Render(detection.Name)
+		line += "   " + styledLevelBadge(detection.MaxLevel)
+		line += styledDimStyle.Render(fmt.Sprintf(" on %d/%d pages · max score %.1f",
+			detection.DetectedPages, summary.PageCount-summary.FailedPages, detection.MaxScore))
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 }
 
 func styledKeyValue(b *strings.Builder, key, value string) {
 	fmt.Fprintf(b, "%s %s\n", styledKeyStyle.Render(key), styledValueStyle.Render(value))
 }
 
-func writeStyledDetections(b *strings.Builder, report Report) {
-	detected, notDetected, insufficient := splitByStatus(report.Detections)
+func writeStyledDetections(b *strings.Builder, page PageReport) {
+	detected, notDetected, insufficient := splitByStatus(page.Detections)
 
 	b.WriteString(styledDetectedMark.Render("✔ Detections"))
 	b.WriteString("\n")
@@ -128,15 +181,15 @@ func writeStyledDetections(b *strings.Builder, report Report) {
 		writeStyledEvidence(b, detection)
 	}
 
-	if report.HTTP != nil && len(report.HTTP.Warnings) > 0 {
+	if page.HTTP != nil && len(page.HTTP.Warnings) > 0 {
 		b.WriteString("\n")
 		b.WriteString(styledWarnMark.Render("⚠ Warnings"))
 		b.WriteString("\n")
-		for _, warning := range report.HTTP.Warnings {
+		for _, warning := range page.HTTP.Warnings {
 			fmt.Fprintf(b, "  %s %s\n", styledWarnMark.Render("⚠"), warning)
 		}
 	}
-	writeStyledIncompleteAnalyzers(b, report.Analyzers)
+	writeStyledIncompleteAnalyzers(b, page.Analyzers)
 }
 
 func splitByStatus(detections []DetectionReport) (detected, notDetected, insufficient []DetectionReport) {

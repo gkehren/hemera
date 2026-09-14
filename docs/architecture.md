@@ -170,13 +170,34 @@ cookie names and domains from the isolated profile. Values are overwritten
 before the minimized cookie object is constructed. Malformed domains are
 omitted; cookies are sorted and deduplicated by name and domain so first- and
 third-party observations with the same name remain distinguishable.
-The raw result retains no headers, bodies, POST data, timestamps, CDP IDs, remote
-addresses, or cookie values. HTTP(S) URLs have credentials and fragments removed
-and query strings replaced with `?redacted`; non-web URLs are omitted.
+The raw result retains no headers, bodies, POST data, absolute timestamps, CDP
+IDs, remote addresses, or cookie values. The one deliberate exception to timing
+data is bounded relative duration: per-request queuing, DNS, connect, TLS,
+time-to-first-byte, and total durations are retained as integer milliseconds
+for explainability, together with the response protocol label, the transferred
+wire size, a connection-reuse flag, and correlated request/response
+transactions. Durations never participate in rule matching because network
+timing is not reproducible evidence. HTTP(S) URLs have credentials and fragments
+removed and query strings replaced with `?redacted`; non-web URLs are omitted.
+
+When the opt-in bounded form interaction phase is enabled (`Config.Forms`), the
+navigation inspects the settled page after the passive post-load window,
+selects at most one eligible form, fills it with fixed benign synthetic values,
+and submits it exactly once inside the still-enforced navigation lifecycle:
+every fetch interception, request, byte, redirect, and concurrency budget
+remains active, and a second bounded quiet window observes the outcome.
+Eligibility is deliberately conservative: same-origin http(s) actions only, and
+never forms with password or file inputs, auth-suggesting action paths, missing
+submit buttons, or more than 32 fields. Only the cleaned action URL and method
+are retained; field names, field values, and submitted data are never
+collected. Hidden fields are left untouched so anti-CSRF tokens keep working.
+The phase is disabled by default and can only be enabled explicitly; it
+submits at most one form per page without retries, so Hemera cannot iterate
+into crawling behavior.
 
 Capture storage is fixed at 2 MiB of serialized final DOM, 100,000 DOM traversal
-work items, 4096 entries for each traffic or resource collection, and 8192 bytes
-per URL. Generic, deduplicated warnings mark truncation without embedding
+work items, 4096 entries for each traffic, transaction, or resource collection,
+and 8192 bytes per URL. Generic, deduplicated warnings mark truncation without embedding
 page-controlled data. Results are cloned at the recorder boundary. No unbounded
 serialized DOM is constructed in Chromium or Go, and the bounded internal
 observation is not sent directly to reporters.
@@ -303,7 +324,7 @@ production matrix is:
 | --- | --- | --- |
 | `http_analyzer` | `response_header`, `cookie`, `script_url`, `network_response`, `iframe_url`, `redirect`, `page_content`, `resource_host` | Bounded response/redirect metadata and static final-document extraction. `resource_host` is derived only from referenced script and iframe URLs; it does not represent another request. |
 | `dns_tls_analyzer` | `dns_record`, `tls_property` | One final-host CNAME observation plus bounded properties copied from the verified HTTP TLS connection. |
-| `browser_analyzer` | `network_request`, `network_response`, `page_content`, `script_url`, `iframe_url`, `cookie` | Bounded Chromium network capture and final DOM, resource URL, and cookie-name normalization. |
+| `browser_analyzer` | `network_request`, `network_response`, `network_transaction`, `form_submission`, `page_content`, `script_url`, `iframe_url`, `cookie` | Bounded Chromium network capture (including correlated non-GET request/status transactions) and final DOM, resource URL, and cookie-name normalization; `form_submission` is produced only by the opt-in bounded interaction phase. |
 
 `dom_selector` and `js_global` remain valid common-model types for future
 producers, but no production analyzer currently supports them. Browser also
@@ -413,7 +434,7 @@ rule and predicate order. A vendor-level result never automatically implies a
 product-level result.
 
 `internal/detectors` embeds the validated V2 rules shipped with the binary.
-Hemera includes 12 built-in rules across 7 vendor families (Cloudflare, Google,
+Hemera includes 13 built-in rules across 7 vendor families (Cloudflare, Google,
 AWS, DataDome, Akamai, hCaptcha, and Arkose Labs) with strict product-level
 separation. They use decisive evidence (headers, scripts, block page DOM, DNS/TLS)
 and supporting markers grouped by correlation. Every supported rule adheres to the
@@ -499,6 +520,16 @@ those errors for control flow and diagnostics, but reporters never serialize
 their text. Structured capability coverage, rather than warning text, carries
 incomplete-observation semantics.
 
+`Scanner.ScanPages` runs one complete bounded scan per explicitly requested
+page, strictly sequentially and in request order. The list is user-specified
+and hard-capped at 10 pages; Hemera never discovers or follows additional
+pages, so multi-page scanning cannot become crawling. Every page receives the
+full analyzer pipeline and its own resource budgets. A page-level failure (an
+abort-policy analyzer error on that page) records a failed page result without
+blocking the remaining pages; caller cancellation stops before the next page.
+Reporters fold per-page detections into an aggregate summary that only restates
+already-computed per-page outcomes.
+
 Before each analyzer runs, the scanner supplies cloned observations from earlier
 analyzers in `analysis.Target.Prior`. This preserves configured ordering and lets
 later analyzers reuse bounded typed metadata without implementation-specific
@@ -509,13 +540,14 @@ dependencies or mutable aliasing. The current CLI configures HTTP first with
 The CLI renders that model as human-oriented text by default or as versioned,
 deterministic JSON with `--format json`. Both formats explain detected and
 non-detected rules, including raw positive evidence, its correlation group, the
-selected maximum contribution, and later penalties. JSON V6 also records each
-analyzer's source, coverage status, and producer-safe warnings. They omit
-HTML, header/cookie values, and analyzer error details and sanitize every emitted
-URL. The JSON schema is experimental until the first stable release; breaking
-pre-release changes still require a documented schema-version increment. The
-contract and text-output expectations are documented in
-[JSON report schema V6](report-schema.md).
+selected maximum contribution, and later penalties. JSON V6 records each page
+under `pages` with its analyzer coverage, bounded network diagnostics, and
+producer-safe warnings, and aggregates multi-page scans in an optional
+`summary`. They omit HTML, header/cookie values, and analyzer error details and
+sanitize every emitted URL. The JSON schema is experimental until the first
+stable release; breaking pre-release changes still require a documented
+schema-version increment. The contract and text-output expectations are
+documented in [JSON report schema V6](report-schema.md).
 
 Terminal presentation follows one explicit invariant: raw analyzer errors and
 raw target URLs are never written directly to terminal output. CLI diagnostics
@@ -569,12 +601,19 @@ indefinitely.
 When launched without arguments on a terminal (stdin and stdout are both character
 devices), the CLI runs an interactive wizard built with the Charm v2 stack
 (`charm.land/huh/v2`, `bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`) in
-`internal/tui`. The wizard collects the scan mode and target URL — syntactically
-validated with the same canonical URL parser (`networkguard.ParseURL`) the
-scanner uses, while the public-destination policy remains enforced
-authoritatively at scan time — then a
+`internal/tui`. The wizard collects the scan mode, the target URL, an optional
+bounded list of additional pages, and the opt-in form-submission toggle — URLs
+syntactically validated with the same canonical URL parser
+(`networkguard.ParseURL`) the scanner uses, while the public-destination policy
+remains enforced authoritatively at scan time — then a
 bubbletea view renders live per-analyzer progress driven by the scanner's
-optional `Progress` callback. On completion it prints the styled report
+optional `Progress` callback. During the browser stage the view also shows
+live aggregate request and response counters delivered as
+`ScanEventProgress` events: integer counts only, never URLs or observed
+content. During multi-page scans each page runs behind a labeled progress view
+("Page N of M") and the run finishes with one aggregated styled report
+including the cross-page summary; a user cancellation keeps the report of the
+completed pages. On completion the CLI prints the styled report
 produced by `report.WriteStyled`, which presents the same secret-minimized
 report model as the plain text renderer with the visual language of the
 progress view. The TUI is presentation only: it performs no detection, adds no

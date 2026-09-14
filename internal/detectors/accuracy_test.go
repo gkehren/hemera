@@ -212,7 +212,7 @@ func TestDetectorCorpusAccuracyAndRegressionMetrics(t *testing.T) {
 		if m.FN > 0 {
 			t.Errorf("rule %q has %d false negatives in synthetic regression corpus (FNR = %.2f%%)", rule.ID, m.FN, m.FNR()*100)
 		}
-		if m.TP == 0 {
+		if m.TP == 0 && !interactionPhaseRules[rule.ID] {
 			t.Errorf("rule %q has no true positive coverage in synthetic regression corpus", rule.ID)
 		}
 	}

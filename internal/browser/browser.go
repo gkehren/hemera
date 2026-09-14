@@ -61,6 +61,14 @@ var (
 	ErrUnsupportedTarget = errors.New("unsupported browser child target")
 )
 
+// ObservationCounters is a bounded, presentation-safe snapshot of live
+// capture volume during one navigation. It never carries URLs or any other
+// observed content.
+type ObservationCounters struct {
+	Requests  int
+	Responses int
+}
+
 // Config controls local Chromium startup. ExecutablePath may be empty to use
 // chromedp's platform-specific executable discovery.
 type Config struct {
@@ -76,6 +84,15 @@ type Config struct {
 	MaxConcurrentRequests int
 	Resolver              networkguard.Resolver
 	Dialer                networkguard.Dialer
+	// Forms enables the bounded interaction phase: after the passive
+	// post-load window, Hemera fills and submits exactly one eligible
+	// same-origin form with fixed benign synthetic data, once, without
+	// retries. It is opt-in and stays within every navigation budget.
+	Forms bool
+	// ObservationProgress, when non-nil, receives live aggregate counter
+	// snapshots during capture. It is invoked on CDP event goroutines and
+	// must not block: a slow callback stalls browser event processing.
+	ObservationProgress func(ObservationCounters)
 }
 
 // DefaultConfig returns the browser startup defaults and safety ceiling.

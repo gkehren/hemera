@@ -42,9 +42,10 @@ const (
 )
 
 type stage struct {
-	source string
-	label  string
-	state  stageState
+	source   string
+	label    string
+	state    stageState
+	counters scanner.ObservationCounters
 }
 
 // failedStageDetail is the only text ever shown for a failed stage. Progress
@@ -88,17 +89,21 @@ func stageLabel(source string) string {
 }
 
 type progressModel struct {
-	stages   []stage
-	target   string
-	spinner  spinner.Model
-	progress progress.Model
-	outcome  *Outcome
-	percent  float64
-	canceled bool
-	msgs     <-chan Msg
+	stages    []stage
+	target    string
+	pageLabel string
+	spinner   spinner.Model
+	progress  progress.Model
+	outcome   *Outcome
+	percent   float64
+	canceled  bool
+	msgs      <-chan Msg
 }
 
-func newProgressModel(sources []string, target string, msgs <-chan Msg) progressModel {
+// newProgressModel builds the live progress view. pageLabel is an optional
+// bounded presentation string (for example "Page 2 of 3") shown beside the
+// target during multi-page scans.
+func newProgressModel(sources []string, target, pageLabel string, msgs <-chan Msg) progressModel {
 	stages := make([]stage, 0, len(sources))
 	for _, source := range sources {
 		stages = append(stages, stage{source: source, label: stageLabel(source)})
@@ -108,10 +113,11 @@ func newProgressModel(sources []string, target string, msgs <-chan Msg) progress
 		// Defense in depth: the view renders only the minimized display
 		// form, even if a caller passes a raw target. Network execution
 		// keeps the exact original URL; this copy is presentation-only.
-		target:   safeoutput.DisplayURL(target),
-		spinner:  spinner.New(spinner.WithSpinner(spinner.Dot)),
-		progress: progress.New(progress.WithWidth(40)),
-		msgs:     msgs,
+		target:    safeoutput.DisplayURL(target),
+		pageLabel: safeoutput.PlainText(pageLabel),
+		spinner:   spinner.New(spinner.WithSpinner(spinner.Dot)),
+		progress:  progress.New(progress.WithWidth(40)),
+		msgs:      msgs,
 	}
 }
 
@@ -194,6 +200,8 @@ func (m *progressModel) applyEvent(event scanner.ScanEvent) {
 			default:
 				m.stages[index].state = stageFailed
 			}
+		case scanner.ScanEventProgress:
+			m.stages[index].counters = event.Counters
 		}
 		return
 	}
@@ -225,12 +233,19 @@ func (m progressModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Hemera scan"))
 	b.WriteString("\n")
+	if m.pageLabel != "" {
+		b.WriteString(pendingStyle.Render(m.pageLabel + " · "))
+	}
 	b.WriteString(pendingStyle.Render(m.target))
 	b.WriteString("\n\n")
 
 	for _, s := range m.stages {
 		b.WriteString(renderStage(s, m.spinner.View()))
 		b.WriteString("\n")
+		if counters := stageCounters(s); counters != "" {
+			b.WriteString(pendingStyle.Render("    " + counters))
+			b.WriteString("\n")
+		}
 		switch s.state {
 		case stageFailed:
 			b.WriteString(errDetailStyle.Render("    " + failedStageDetail))
@@ -258,6 +273,15 @@ func (m progressModel) View() tea.View {
 	return tea.NewView(b.String())
 }
 
+// stageCounters renders the live observation counters of one stage, or an
+// empty string before any counter event arrived.
+func stageCounters(s stage) string {
+	if s.counters.Requests == 0 && s.counters.Responses == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d requests · %d responses observed", s.counters.Requests, s.counters.Responses)
+}
+
 func renderStage(s stage, spinnerView string) string {
 	switch s.state {
 	case stageRunning:
@@ -281,14 +305,14 @@ func renderStage(s stage, spinnerView string) string {
 var ErrViewCanceled = errors.New("progress view canceled")
 
 // RunProgress renders live analyzer progress until the program exits because
-// the scan finished or the user canceled it. The target is display-only and
-// is minimized before rendering; the scanner's exact target never passes
-// through here. The msgs channel must deliver exactly one final Msg (with
-// Final set) and then be closed by the producer. It returns ErrViewCanceled
-// when the view exits early; the authoritative scan outcome stays with the
-// caller's own completion channel.
-func RunProgress(ctx context.Context, output io.Writer, sources []string, target string, msgs <-chan Msg) error {
-	model := newProgressModel(sources, target, msgs)
+// the scan finished or the user canceled it. The target and pageLabel are
+// display-only and are minimized before rendering; the scanner's exact target
+// never passes through here. The msgs channel must deliver exactly one final
+// Msg (with Final set) and then be closed by the producer. It returns
+// ErrViewCanceled when the view exits early; the authoritative scan outcome
+// stays with the caller's own completion channel.
+func RunProgress(ctx context.Context, output io.Writer, sources []string, target, pageLabel string, msgs <-chan Msg) error {
+	model := newProgressModel(sources, target, pageLabel, msgs)
 	program := tea.NewProgram(
 		model,
 		tea.WithOutput(output),

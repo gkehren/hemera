@@ -42,9 +42,11 @@ func TestImplementedCapabilityContract(t *testing.T) {
 			source: SourceBrowser,
 			want: []model.SignalType{
 				model.SignalTypeCookie,
+				model.SignalTypeFormSubmission,
 				model.SignalTypeIframeURL,
 				model.SignalTypeNetworkRequest,
 				model.SignalTypeNetworkResponse,
+				model.SignalTypeNetworkTransaction,
 				model.SignalTypePageContent,
 				model.SignalTypeScriptURL,
 			},

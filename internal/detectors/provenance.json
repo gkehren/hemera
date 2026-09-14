@@ -126,6 +126,13 @@
           "role": "supporting",
           "source": "https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/",
           "rationale": "Explicit Turnstile container element with cf-turnstile class name."
+        },
+        "turnstile-challenge-api-post": {
+          "weight": 40,
+          "group": "challenge_api_post",
+          "role": "supporting",
+          "source": "https://developers.cloudflare.com/turnstile/",
+          "rationale": "POST requests to the /cdn-cgi/challenge-platform/ endpoints are emitted by the Turnstile client during challenge processing; the URL substring alone is supporting evidence and cannot reach the detection threshold without the client script or widget marker."
         }
       }
     },
@@ -301,6 +308,13 @@
           "role": "supporting",
           "source": "https://docs.datadome.co/docs/javascript-tag",
           "rationale": "DataDome client configuration object datadomeOptions or datadome_client marker."
+        },
+        "datadome-challenge-api-post": {
+          "weight": 40,
+          "group": "challenge_api_post",
+          "role": "supporting",
+          "source": "https://docs.datadome.co/",
+          "rationale": "POST requests to DataDome interceptor endpoints are emitted by the DataDome client tag during device check; the URL substring alone is supporting evidence and cannot reach the detection threshold alone."
         }
       }
     },
@@ -427,6 +441,13 @@
           "role": "supporting",
           "source": "https://docs.hcaptcha.com/configuration",
           "rationale": "Client-side invocation hcaptcha.render or hcaptcha.execute."
+        },
+        "hcaptcha-challenge-api-post": {
+          "weight": 40,
+          "group": "challenge_api_post",
+          "role": "supporting",
+          "source": "https://docs.hcaptcha.com/",
+          "rationale": "POST requests to the hCaptcha checksiteconfig and checkcaptcha endpoints are emitted by the hCaptcha client during challenge evaluation; the URL pattern alone is supporting evidence."
         }
       }
     },
@@ -462,6 +483,41 @@
           "role": "supporting",
           "source": "https://developer.arkoselabs.com/docs/client-side-integration",
           "rationale": "Client-side invocation setupArkoseEnforcement or arkoseCallback."
+        },
+        "arkose-challenge-api-post": {
+          "weight": 40,
+          "group": "challenge_api_post",
+          "role": "supporting",
+          "source": "https://docs.arkoselabs.com/",
+          "rationale": "POST requests to the Arkose Labs challenge issuance endpoints (fc/gc, fc/ca) are emitted by the FunCAPTCHA client; the URL pattern alone is supporting evidence."
+        }
+      }
+    },
+    "datadome.form_reaction": {
+      "minimum_score": 75,
+      "minimum_evidence": 3,
+      "scoring_rationale": "Three independent groups are mandatory: an opt-in Hemera-initiated form submission (30), a denied 403 outcome for the form POST (30), and a DataDome marker in the post-submission DOM (30). No single group or pair can reach the 75-point threshold, so passive scans without the interaction phase can never fire this rule.",
+      "evidence": {
+        "datadome-form-submitted": {
+          "weight": 30,
+          "group": "form_interaction",
+          "role": "supporting",
+          "source": "https://docs.datadome.co/",
+          "rationale": "The bounded form interaction phase submitted one eligible same-origin form; this alone carries no vendor meaning and only anchors the reaction context."
+        },
+        "datadome-form-post-denied": {
+          "weight": 30,
+          "group": "form_post_outcome",
+          "role": "supporting",
+          "source": "https://docs.datadome.co/",
+          "rationale": "The correlated form POST transaction was answered with 403; a denied POST alone is common on the web and is not vendor-attributable."
+        },
+        "datadome-reaction-marker": {
+          "weight": 30,
+          "group": "reaction_dom",
+          "role": "supporting",
+          "source": "https://docs.datadome.co/",
+          "rationale": "A DataDome or captcha-delivery.com marker in the post-submission DOM; combined with the denied form POST and the submission context it identifies the DataDome reaction flow."
         }
       }
     }

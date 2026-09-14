@@ -133,6 +133,45 @@ baseline, not yet a broad measurement of false-positive and false-negative rates
 **Exit criterion:** at least five protection families meet the documented
 evidence, fixture, rationale, and regression-measurement standards.
 
+## Milestone 2.5 — Deep observation, bounded multi-page scans, and opt-in interaction
+
+This milestone deepens per-page observation, adds explicit bounded multi-page
+scans, and introduces the project's first — and only — active capability: an
+opt-in, tightly bounded form submission phase. Every safety ceiling from
+Milestones 0-2 remains unchanged and configuration can still only lower limits.
+
+- [x] Enrich browser network capture with response protocol, transferred wire
+  size, connection-reuse flags, correlated request/response transactions, and
+  bounded integer-millisecond durations (queuing, DNS, connect, TLS,
+  time-to-first-byte, total) that never enter rule matching.
+- [x] Derive bounded typed `NetworkMetadata` (method, protocol, and status-class
+  counts, per-host reuse, POST endpoints, duration percentiles) and expose a
+  bounded network waterfall in reports.
+- [x] Restructure reports as schema V6 `pages` with an aggregate multi-page
+  summary; update golden fixtures and the schema document.
+- [x] Add bounded multi-page scans (`--pages`, `--pages-file`, wizard field)
+  with a hard ceiling of 10 user-specified URLs, sequential execution, full
+  per-page budgets, and per-page failure isolation; no crawling.
+- [x] Add the opt-in bounded form interaction phase (`--forms`, wizard toggle):
+  inspect the settled page, fill one eligible same-origin form with fixed
+  benign synthetic data, submit it once inside the unchanged navigation
+  budgets, and observe the outcome in a second bounded quiet window. Password,
+  file-upload, and auth-suggesting forms are never submitted; field names and
+  values are never collected.
+- [x] Add the `network_transaction` and `form_submission` signal types with
+  validation, normalization, coverage-capability, and report sanitization
+  updates in the same change.
+- [x] Enrich the Turnstile, DataDome, hCaptcha, and Arkose detectors with
+  supporting challenge-API POST evidence, and add the three-group
+  `datadome.form_reaction` detector, each with provenance, documentation, and
+  fixture or integration coverage per the support standard.
+
+**Exit criterion:** deep per-page network diagnostics are exposed without
+weakening the minimization contract, multi-page scans remain an explicit
+bounded list, the interaction phase can never fire without explicit opt-in and
+can never iterate into crawling, and all detectors added or extended meet the
+documented support standard.
+
 ## Milestone 3 — Public open-source release
 
 The detector schema is already documented. This milestone adds the contributor

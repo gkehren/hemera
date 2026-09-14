@@ -23,7 +23,15 @@ Consequently, Hemera's detectors rely on observable, public signals:
 2. Client-side SDK script and iframe URLs;
 3. Standard DOM markup (challenge widgets, error wrappers);
 4. Diagnostic and session cookie names (never values);
-5. Canonical DNS CNAME records and TLS certificate metadata.
+5. Canonical DNS CNAME records and TLS certificate metadata;
+6. Page-initiated HTTP request methods and correlated response statuses (for
+   example, POST requests a challenge script sends by itself);
+7. On strict opt-in, one bounded same-origin form submission per page with
+   fixed benign synthetic data (see `datadome.form_reaction`).
+
+The bounded form interaction phase is disabled by default and never submits
+credential, file-upload, or auth-suggesting forms; it stays within every
+navigation budget and performs no retries.
 
 ---
 
@@ -47,7 +55,8 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 #### `cloudflare.turnstile` (Category: `captcha_challenge`)
 - **Self-Hosted Proxy Wrappers:** If a website proxies the Turnstile client library through a first-party path (e.g. `/assets/turnstile.js`) to prevent ad-blocker filtering, passive HTTP analysis will not detect the script URL unless DOM markers (`cf-turnstile`) are present.
-- **Post-Hydration Dynamic Loading:** In Single Page Applications (SPAs), if the Turnstile script and widget container are only created after user interaction (e.g. clicking a modal button), initial page analysis will not observe it.
+- **Post-Hydration Dynamic Loading:** In Single Page Applications (SPAs), if the Turnstile script and widget container are only created after user interaction (e.g. clicking a modal button), initial page analysis will not observe it. The opt-in form interaction phase does not close this blind spot: it never clicks modals or buttons outside a form submission.
+- **Challenge API POST Supporting Evidence:** POST requests to `/cdn-cgi/challenge-platform/` endpoints observed during the navigation window add supporting evidence (40 points), but cannot reach the detection threshold without the documented client script or widget marker.
 
 ---
 
@@ -74,12 +83,18 @@ Consequently, Hemera's detectors rely on observable, public signals:
 
 ---
 
-### 2.4 DataDome (`datadome.bot_protection`)
+### 2.4 DataDome (`datadome.bot_protection`, `datadome.form_reaction`)
 
 #### `datadome.bot_protection` (Category: `bot_management`)
 - **Server-Side API Enforcer Mode:** DataDome modules running on NGINX/HAProxy or cloud middleware that only inspect backend requests and do not inject the client-side JavaScript tag (`js.datadome.co/tags.js` or `js.datadome.co/vX.Y.Z/tags.js`), `x-datadome` headers, or CAPTCHA delivery iframes cannot be detected on benign requests.
 - **First-Party JS Tag & Reverse Proxy Aliases:** Deployments serving the JavaScript tag under custom first-party domains (e.g. `https://<first_party_domain>/tags.js` or `https://<first_party_domain>/vX.Y.Z/tags.js`) or via reverse-proxy aliases are known false negatives for script-URL matching. Detection may still succeed when another decisive DataDome signal is present (such as `x-datadome` response headers or challenge interstitials); the `datadome` cookie remains supporting evidence only (score 40) and cannot trigger detection by itself.
 - **Cookie Ambiguity Protection:** A standalone `datadome` cookie alone only awards a score of 40 (Low confidence), deliberately below the 75 threshold, to prevent false positives from stale cookies.
+
+#### `datadome.form_reaction` (Category: `bot_management`)
+- **Interaction-Gated Evidence:** All three evidence groups require the opt-in browser form interaction phase (`--forms`). Passive scans and `--format json` automation without the flag can never fire this rule; the HTTP fixture corpus reports it as a hard negative by construction.
+- **Single Submission Budget:** Hemera submits at most one eligible same-origin form per page, once, without retries. Sites requiring multiple submissions to surface a DataDome reaction are not fully evaluated.
+- **Eligibility Exclusions:** Credential, file-upload, and auth-suggesting forms (login, register, password reset, OAuth, token, session paths) are never submitted, so DataDome reactions that surface only on those flows remain undetected.
+- **Denied-Response Dependence:** The rule requires the correlated form POST to be answered with `403`. Deployments reacting with alternate codes (`429`, `302` redirects to `captcha-delivery.com`) fall outside this rule.
 
 ---
 

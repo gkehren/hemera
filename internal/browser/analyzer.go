@@ -69,6 +69,7 @@ func (a *Analyzer) Observe(ctx context.Context, target analysis.Target) (analysi
 
 	result, observeErr := a.capture(ctx, target.URL)
 	observation.Warnings = append([]string{}, result.Warnings...)
+	observation.Metadata.Network = buildNetworkMetadata(result)
 	signals, signalErr := normalizeCapture(result)
 	observation.Signals = signals
 	combinedErr := errors.Join(observeErr, signalErr)
@@ -151,6 +152,29 @@ func normalizeCapture(result CaptureResult) ([]model.Signal, error) {
 			Key: method, Value: request.URL, URL: finalURL, Confidence: 1,
 		})
 	}
+	// Non-GET transactions pair a method with its response status for the
+	// same URL, which the separate request and response signals cannot
+	// express. GET traffic stays covered by those existing signals.
+	for _, transaction := range result.Transactions {
+		method := strings.ToUpper(strings.TrimSpace(transaction.Method))
+		if method == "" || method == "GET" || transaction.Status <= 0 || transaction.URL == "" {
+			continue
+		}
+		signals = append(signals, model.Signal{
+			Type: model.SignalTypeNetworkTransaction, Source: analysis.SourceBrowser,
+			Key: method, Value: strconv.FormatInt(transaction.Status, 10),
+			URL: transaction.URL, Confidence: 1,
+		})
+	}
+	for _, submission := range result.FormSubmissions {
+		if submission.ActionURL == "" {
+			continue
+		}
+		signals = append(signals, model.Signal{
+			Type: model.SignalTypeFormSubmission, Source: analysis.SourceBrowser,
+			Key: "action", Value: submission.ActionURL, URL: finalURL, Confidence: 1,
+		})
+	}
 	for _, response := range result.Responses {
 		if response.Status <= 0 || response.URL == "" {
 			continue
@@ -228,18 +252,22 @@ func browserSignalRank(signalType model.SignalType) int {
 	switch signalType {
 	case model.SignalTypeNetworkRequest:
 		return 0
-	case model.SignalTypeNetworkResponse:
+	case model.SignalTypeNetworkTransaction:
 		return 1
-	case model.SignalTypePageContent:
+	case model.SignalTypeNetworkResponse:
 		return 2
-	case model.SignalTypeScriptURL:
+	case model.SignalTypePageContent:
 		return 3
-	case model.SignalTypeIframeURL:
+	case model.SignalTypeScriptURL:
 		return 4
-	case model.SignalTypeCookie:
+	case model.SignalTypeIframeURL:
 		return 5
-	default:
+	case model.SignalTypeCookie:
 		return 6
+	case model.SignalTypeFormSubmission:
+		return 7
+	default:
+		return 8
 	}
 }
 

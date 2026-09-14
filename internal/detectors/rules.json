@@ -223,7 +223,7 @@
     {
       "id": "cloudflare.turnstile",
       "name": "Cloudflare Turnstile",
-      "description": "Detects the documented Turnstile client script; static HTML markers are supporting evidence only.",
+      "description": "Detects the documented Turnstile client script; static HTML markers are supporting evidence only. Observed challenge API POST requests are supporting evidence.",
       "category": "captcha_challenge",
       "vendor": "Cloudflare",
       "product": "Turnstile",
@@ -261,6 +261,22 @@
                 "case_insensitive": true
               },
               "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "turnstile-challenge-api-post",
+              "group": "challenge_api_post",
+              "description": "Turnstile challenge-platform API POST request",
+              "type": "network_request",
+              "key": {
+                "exact": "POST"
+              },
+              "value": {
+                "contains": "cdn-cgi/challenge-platform",
+                "case_insensitive": true
+              },
+              "weight": 40
             }
           }
         ]
@@ -517,7 +533,7 @@
     {
       "id": "datadome.bot_protection",
       "name": "DataDome",
-      "description": "Detects DataDome bot management client tag, challenge interstitial pages, response headers, or tracking cookies.",
+      "description": "Detects DataDome bot management client tag, challenge interstitial pages, response headers, or tracking cookies. Observed challenge API POST requests are supporting evidence.",
       "category": "bot_management",
       "vendor": "DataDome",
       "product": "DataDome",
@@ -614,6 +630,22 @@
                 "case_insensitive": true
               },
               "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-challenge-api-post",
+              "group": "challenge_api_post",
+              "description": "DataDome interceptor API POST request",
+              "type": "network_request",
+              "key": {
+                "exact": "POST"
+              },
+              "value": {
+                "contains": "datadome",
+                "case_insensitive": true
+              },
+              "weight": 40
             }
           }
         ]
@@ -807,7 +839,7 @@
     {
       "id": "hcaptcha.challenge",
       "name": "hCaptcha",
-      "description": "Detects the documented hCaptcha client script; static HTML markers and inline API calls are supporting evidence only.",
+      "description": "Detects the documented hCaptcha client script; static HTML markers and inline API calls are supporting evidence only. Observed challenge API POST requests are supporting evidence.",
       "category": "captcha_challenge",
       "vendor": "hCaptcha",
       "product": "hCaptcha",
@@ -866,6 +898,22 @@
               },
               "weight": 35
             }
+          },
+          {
+            "signal": {
+              "id": "hcaptcha-challenge-api-post",
+              "group": "challenge_api_post",
+              "description": "hCaptcha siteconfig or checkcaptcha API POST request",
+              "type": "network_request",
+              "key": {
+                "exact": "POST"
+              },
+              "value": {
+                "regex": "hcaptcha\\.com/(?:checksiteconfig|checkcaptcha)",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
           }
         ]
       }
@@ -873,7 +921,7 @@
     {
       "id": "arkoselabs.matchkey",
       "name": "Arkose MatchKey",
-      "description": "Detects documented Arkose Labs / FunCAPTCHA client API scripts; static widget containers and callback calls are supporting evidence only.",
+      "description": "Detects documented Arkose Labs / FunCAPTCHA client API scripts; static widget containers and callback calls are supporting evidence only. Observed challenge API POST requests are supporting evidence.",
       "category": "captcha_challenge",
       "vendor": "Arkose Labs",
       "product": "Arkose MatchKey",
@@ -931,6 +979,76 @@
                 "case_insensitive": true
               },
               "weight": 35
+            }
+          },
+          {
+            "signal": {
+              "id": "arkose-challenge-api-post",
+              "group": "challenge_api_post",
+              "description": "Arkose Labs challenge issuance API POST request",
+              "type": "network_request",
+              "key": {
+                "exact": "POST"
+              },
+              "value": {
+                "regex": "(?:arkoselabs|funcaptcha)\\.com/fc/(?:gc|ca)/",
+                "case_insensitive": true
+              },
+              "weight": 40
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "datadome.form_reaction",
+      "name": "DataDome Form Submission Reaction",
+      "description": "Detects DataDome reacting to a submitted form with a denied POST response and a DataDome challenge marker in the post-submission DOM. Requires the opt-in bounded form interaction phase and three independent evidence groups.",
+      "category": "bot_management",
+      "vendor": "DataDome",
+      "product": "DataDome",
+      "minimum_evidence": 3,
+      "minimum_score": 75,
+      "match": {
+        "all": [
+          {
+            "signal": {
+              "id": "datadome-form-submitted",
+              "group": "form_interaction",
+              "description": "Hemera submitted one eligible same-origin form during the bounded interaction phase",
+              "type": "form_submission",
+              "key": {
+                "exact": "action"
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-form-post-denied",
+              "group": "form_post_outcome",
+              "description": "The submitted form's POST response was denied",
+              "type": "network_transaction",
+              "key": {
+                "exact": "POST"
+              },
+              "value": {
+                "exact": "403"
+              },
+              "weight": 30
+            }
+          },
+          {
+            "signal": {
+              "id": "datadome-reaction-marker",
+              "group": "reaction_dom",
+              "description": "DataDome challenge marker in the post-submission DOM",
+              "type": "page_content",
+              "value": {
+                "regex": "(?:captcha-delivery\\.com|datadome)",
+                "case_insensitive": true
+              },
+              "weight": 30
             }
           }
         ]

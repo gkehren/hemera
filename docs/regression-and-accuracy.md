@@ -18,7 +18,7 @@ measured against a versioned synthetic regression corpus comprising:
 
 ### Synthetic Regression Corpus Baseline Metrics
 
-The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 29-scenario synthetic regression corpus across all 12 built-in rules.
+The automated benchmark in `internal/detectors/accuracy_test.go` evaluates the 29-scenario synthetic regression corpus across all 13 built-in rules. The interaction-gated `datadome.form_reaction` rule is hard-negative tested by this corpus by construction (it can never fire passively) and positively covered by the browser integration suite.
 
 > [!WARNING]
 > These metrics measure the versioned synthetic regression corpus only and are not estimates of real-world precision, recall, FPR, or FNR.

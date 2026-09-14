@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -147,16 +149,36 @@ func TestRunRejectsUnexpectedArguments(t *testing.T) {
 type fakeScanner struct {
 	result scanner.Result
 	err    error
+
+	pages       scanner.MultiResult
+	pagesErr    error
+	pagesCalled bool
+	pagesInput  []string
 }
 
-func (f fakeScanner) Scan(context.Context, string) (scanner.Result, error) {
+func (f *fakeScanner) Scan(context.Context, string) (scanner.Result, error) {
 	return f.result, f.err
+}
+
+func (f *fakeScanner) ScanPages(_ context.Context, rawURLs []string) (scanner.MultiResult, error) {
+	f.pagesCalled = true
+	f.pagesInput = rawURLs
+	return f.pages, f.pagesErr
 }
 
 type scanRunnerFunc func(context.Context, string) (scanner.Result, error)
 
 func (f scanRunnerFunc) Scan(ctx context.Context, target string) (scanner.Result, error) {
 	return f(ctx, target)
+}
+
+func (f scanRunnerFunc) ScanPages(ctx context.Context, targets []string) (scanner.MultiResult, error) {
+	pages := make([]scanner.PageResult, 0, len(targets))
+	for _, target := range targets {
+		result, err := f(ctx, target)
+		pages = append(pages, scanner.PageResult{URL: target, Result: result, Err: err})
+	}
+	return scanner.MultiResult{Pages: pages}, nil
 }
 
 type errorWriter struct{}
@@ -169,10 +191,10 @@ func TestRunScanRequiresExactlyOneURL(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{nil, {"one", "two"}} {
 		var stdout, stderr bytes.Buffer
-		if code := runScan(context.Background(), args, &stdout, &stderr, fakeScanner{}); code != 2 {
+		if code := runScan(context.Background(), args, &stdout, &stderr, &fakeScanner{}); code != 2 {
 			t.Errorf("runScan(%v) code = %d, want 2", args, code)
 		}
-		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "exactly one URL") {
+		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "exactly one target URL") {
 			t.Errorf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
 		}
 	}
@@ -204,7 +226,7 @@ func TestRunScanPrintsTextReportForAnyHTTPStatus(t *testing.T) {
 		}},
 	}}
 	var stdout, stderr bytes.Buffer
-	if code := runScan(context.Background(), []string{"https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
+	if code := runScan(context.Background(), []string{"https://example.test/"}, &stdout, &stderr, &fakeScanner{result: result}); code != 0 {
 		t.Fatalf("code = %d", code)
 	}
 	if stderr.Len() != 0 {
@@ -224,7 +246,7 @@ func TestRunScanPrintsJSONOnlyOnStdout(t *testing.T) {
 		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 404,
 	})
 	var stdout, stderr bytes.Buffer
-	if code := runScan(context.Background(), []string{"--format", "json", "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
+	if code := runScan(context.Background(), []string{"--format", "json", "https://example.test/"}, &stdout, &stderr, &fakeScanner{result: result}); code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -247,7 +269,7 @@ func TestRunScanHelpAndInvalidFormat(t *testing.T) {
 		args := args
 		t.Run("help "+strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := runScan(context.Background(), args, &stdout, &stderr, fakeScanner{}); code != 0 {
+			if code := runScan(context.Background(), args, &stdout, &stderr, &fakeScanner{}); code != 0 {
 				t.Fatalf("code = %d", code)
 			}
 			if !strings.Contains(stdout.String(), "--format") || stderr.Len() != 0 {
@@ -257,7 +279,7 @@ func TestRunScanHelpAndInvalidFormat(t *testing.T) {
 	}
 	t.Run("invalid format", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		if code := runScan(context.Background(), []string{"--format", "xml", "https://example.test/"}, &stdout, &stderr, fakeScanner{}); code != 2 {
+		if code := runScan(context.Background(), []string{"--format", "xml", "https://example.test/"}, &stdout, &stderr, &fakeScanner{}); code != 2 {
 			t.Fatalf("code = %d", code)
 		}
 		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unsupported report format") {
@@ -272,7 +294,7 @@ func TestRunScanReportsOutputFailure(t *testing.T) {
 		RequestedURL: "https://example.test/", FinalURL: "https://example.test/", StatusCode: 200,
 	})
 	var stderr bytes.Buffer
-	if code := runScan(context.Background(), []string{"https://example.test/"}, errorWriter{}, &stderr, fakeScanner{result: result}); code != 1 {
+	if code := runScan(context.Background(), []string{"https://example.test/"}, errorWriter{}, &stderr, &fakeScanner{result: result}); code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "write report") {
@@ -294,7 +316,7 @@ func TestRunScanClassifiesFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			if code := runScan(context.Background(), []string{"https://example.test"}, &stdout, &stderr, fakeScanner{err: tt.err}); code != tt.code {
+			if code := runScan(context.Background(), []string{"https://example.test"}, &stdout, &stderr, &fakeScanner{err: tt.err}); code != tt.code {
 				t.Errorf("code = %d, want %d", code, tt.code)
 			}
 			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "scan failed") {
@@ -426,7 +448,7 @@ func TestRunScanSanitizesDiagnosticsAndPreservesClassification(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			if code := runScan(context.Background(), []string{"https://example.test"}, &stdout, &stderr, fakeScanner{err: tt.err}); code != tt.code {
+			if code := runScan(context.Background(), []string{"https://example.test"}, &stdout, &stderr, &fakeScanner{err: tt.err}); code != tt.code {
 				t.Fatalf("code = %d, want %d", code, tt.code)
 			}
 			stderrText := stderr.String()
@@ -463,17 +485,36 @@ func TestRunScanSupportsDeepModeAndRejectsInvalidMode(t *testing.T) {
 	})
 	for _, flag := range []string{"--deep", "--mode=deep", "--mode=default"} {
 		var stdout, stderr bytes.Buffer
-		if code := runScan(context.Background(), []string{flag, "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 0 {
+		if code := runScan(context.Background(), []string{flag, "https://example.test/"}, &stdout, &stderr, &fakeScanner{result: result}); code != 0 {
 			t.Fatalf("runScan(%q) code = %d, want 0; stderr = %q", flag, code, stderr.String())
 		}
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runScan(context.Background(), []string{"--mode=invalid", "https://example.test/"}, &stdout, &stderr, fakeScanner{result: result}); code != 2 {
+	if code := runScan(context.Background(), []string{"--mode=invalid", "https://example.test/"}, &stdout, &stderr, &fakeScanner{result: result}); code != 2 {
 		t.Fatalf("runScan(invalid mode) code = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), `unsupported scan mode "invalid"`) {
 		t.Errorf("stderr = %q, want unsupported scan mode error", stderr.String())
+	}
+}
+
+func TestNewScannerEngineDefaultAndDeep(t *testing.T) {
+	t.Parallel()
+	defaultEngine, err := newScannerEngine(false, false, nil)
+	if err != nil {
+		t.Fatalf("newScannerEngine(false) error = %v", err)
+	}
+	if defaultEngine == nil {
+		t.Fatal("newScannerEngine(false) returned nil")
+	}
+
+	deepEngine, err := newScannerEngine(true, false, nil)
+	if err != nil {
+		t.Fatalf("newScannerEngine(true) error = %v", err)
+	}
+	if deepEngine == nil {
+		t.Fatal("newScannerEngine(true) returned nil")
 	}
 }
 
@@ -548,7 +589,7 @@ func TestNewScannerEngineUsesChromiumEnvironment(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			lookup := func(string) string { return test.chromiumPath }
-			engine, err := newScannerEngineWithEnvironment(test.deep, nil, lookup)
+			engine, err := newScannerEngineWithEnvironment(test.deep, false, nil, lookup)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("newScannerEngineWithEnvironment() error = %v, want %v", err, test.wantErr)
 			}
@@ -607,4 +648,98 @@ func scanResultWithHTTP(result httpanalyzer.Result) scanner.Result {
 		},
 		Status: scanner.AnalyzerStatusComplete,
 	}}}
+}
+
+func TestRunScanRejectsOversizedPageList(t *testing.T) {
+	t.Parallel()
+	extra := make([]string, scanner.MaxPages)
+	for index := range extra {
+		extra[index] = "https://example.test/p" + strconv.Itoa(index)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runScan(context.Background(),
+		[]string{"--pages", strings.Join(extra, ","), "https://example.test/"},
+		&stdout, &stderr, &fakeScanner{})
+	if code != 2 {
+		t.Errorf("runScan() code = %d, want 2 for a target plus %d extra pages", code, len(extra))
+	}
+	if !strings.Contains(stderr.String(), "multi-page ceiling") {
+		t.Errorf("stderr = %q, want the ceiling explanation", stderr.String())
+	}
+}
+
+func TestRunScanParsesPagesFileAndRunsMultiPageScan(t *testing.T) {
+	t.Parallel()
+	content := "# commentary line\nhttps://a.test/\n\n   https://b.test/   \n# more\n"
+	file := filepath.Join(t.TempDir(), "pages.txt")
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := scanner.Result{Target: analysis.Target{URL: "https://target.test/"}}
+	second := scanner.Result{Target: analysis.Target{URL: "https://a.test/"}}
+	engine := &fakeScanner{pages: scanner.MultiResult{Pages: []scanner.PageResult{
+		{URL: "https://target.test/", Result: first},
+		{URL: "https://a.test/", Result: second},
+	}}}
+	var stdout, stderr bytes.Buffer
+	code := runScan(context.Background(),
+		[]string{"--pages-file", file, "https://target.test/"},
+		&stdout, &stderr, engine)
+	if code != 0 {
+		t.Fatalf("runScan() code = %d, stderr: %s", code, stderr.String())
+	}
+	if !engine.pagesCalled {
+		t.Fatal("ScanPages was not called")
+	}
+	want := []string{"https://target.test/", "https://a.test/", "https://b.test/"}
+	if !slices.Equal(engine.pagesInput, want) {
+		t.Errorf("ScanPages input = %#v, want %#v", engine.pagesInput, want)
+	}
+	if !strings.Contains(stdout.String(), "=== Page 1 of 2 ===") {
+		t.Errorf("stdout = %q, want a multi-page text report", stdout.String())
+	}
+}
+
+func TestRunScanPagesFileReadFailureIsUsageError(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	code := runScan(context.Background(),
+		[]string{"--pages-file", filepath.Join(t.TempDir(), "missing.txt"), "https://example.test/"},
+		&stdout, &stderr, &fakeScanner{})
+	if code != 2 {
+		t.Errorf("runScan() code = %d, want 2 for an unreadable pages file", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty output", stdout.String())
+	}
+}
+
+func TestRunMultiPageScanReportsFailuresAndAggregatedReport(t *testing.T) {
+	t.Parallel()
+	ok := scanner.Result{Target: analysis.Target{URL: "https://a.test/"}}
+	engine := &fakeScanner{pages: scanner.MultiResult{Pages: []scanner.PageResult{
+		{URL: "https://a.test/", Result: ok},
+		{URL: "https://broken.test/", Err: errors.New("connection refused")},
+	}}}
+	var stdout, stderr bytes.Buffer
+	code := runMultiPageScan(context.Background(), engine,
+		[]string{"https://a.test/", "https://broken.test/"}, "text", &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("runMultiPageScan() code = %d, want 0 when at least one page succeeded", code)
+	}
+	if !strings.Contains(stderr.String(), "page 2 (https://broken.test/) failed") {
+		t.Errorf("stderr = %q, want the failed page summary", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Summary across 2 pages") {
+		t.Errorf("stdout = %q, want the aggregate summary", stdout.String())
+	}
+
+	allFailed := &fakeScanner{pages: scanner.MultiResult{Pages: []scanner.PageResult{
+		{URL: "https://broken.test/", Err: errors.New("connection refused")},
+	}}}
+	code = runMultiPageScan(context.Background(), allFailed,
+		[]string{"https://broken.test/"}, "text", &bytes.Buffer{}, &bytes.Buffer{})
+	if code != 1 {
+		t.Errorf("runMultiPageScan() code = %d, want 1 when every page failed", code)
+	}
 }

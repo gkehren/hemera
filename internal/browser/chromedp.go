@@ -33,6 +33,8 @@ const (
 	maxDOMDiagnosticBytes      = 1024
 	maxDOMDiagnosticFieldBytes = 192
 	maxDOMDiagnosticFrames     = 3
+
+	formSubmissionStage = "form_submission"
 )
 
 type chromedpBackend struct {
@@ -89,11 +91,12 @@ func (b chromedpBackend) start(ctx context.Context, config Config) (backendSessi
 		}
 		return errors.Join(cleanupErrors...)
 	})
+	forms := newFormSubmissionLog()
 	session.startCapture = func(ctx context.Context) (captureSource, error) {
-		return beginChromedpCapture(taskCtx, ctx)
+		return beginChromedpCapture(taskCtx, ctx, forms, config.ObservationProgress)
 	}
 	session.navigateTarget = func(ctx context.Context, rawURL string) error {
-		return navigateChromedp(taskCtx, ctx, rawURL, proxy, config)
+		return navigateChromedp(taskCtx, ctx, rawURL, proxy, config, forms)
 	}
 	go func() {
 		<-taskCtx.Done()
@@ -267,7 +270,7 @@ func (s *chromedpSession) navigate(ctx context.Context, rawURL string) error {
 	return s.navigateTarget(ctx, rawURL)
 }
 
-func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *safeProxy, config Config) error {
+func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *safeProxy, config Config, forms *formSubmissionLog) error {
 	navigationCtx, cancelNavigation := context.WithTimeout(callerCtx, config.NavigationTimeout)
 	defer cancelNavigation()
 	if err := navigationCtx.Err(); err != nil {
@@ -470,6 +473,18 @@ func navigateChromedp(taskCtx, callerCtx context.Context, rawURL string, proxy *
 	} else {
 		navigationStage = "post_load_wait"
 		navigationErr = waitForNetworkQuiet(runCtx, activity, requestTracker, config.NetworkIdleTime, config.PostLoadTimeout)
+		if navigationErr == nil && config.Forms {
+			// Bounded interaction phase: one eligible same-origin form,
+			// filled with synthetic values and submitted once. Every request,
+			// byte, redirect, and concurrency budget stays enforced because
+			// the fetch interception and listener remain active.
+			navigationStage = formSubmissionStage
+			if submitErr := submitBoundedForm(taskCtx, runCtx, targetURL, forms); submitErr != nil {
+				navigationErr = submitErr
+			} else {
+				navigationErr = waitForNetworkQuiet(runCtx, activity, requestTracker, config.NetworkIdleTime, config.PostLoadTimeout)
+			}
+		}
 	}
 
 	stopListener()
@@ -627,6 +642,7 @@ func (t *browserRequestTracker) activeCount() int {
 
 type chromedpCapture struct {
 	collector *captureCollector
+	forms     *formSubmissionLog
 	stop      context.CancelFunc
 	run       func(context.Context, chromedp.Action) error
 	once      sync.Once
@@ -635,9 +651,10 @@ type chromedpCapture struct {
 	err       error
 }
 
-func beginChromedpCapture(taskCtx, callerCtx context.Context) (captureSource, error) {
+func beginChromedpCapture(taskCtx, callerCtx context.Context, forms *formSubmissionLog, progress func(ObservationCounters)) (captureSource, error) {
 	listenerCtx, stopListener := context.WithCancel(taskCtx)
 	collector := newCaptureCollector()
+	collector.progress = progress
 	chromedp.ListenTarget(listenerCtx, func(event any) {
 		recordNetworkEvent(collector, event)
 	})
@@ -648,6 +665,7 @@ func beginChromedpCapture(taskCtx, callerCtx context.Context) (captureSource, er
 	}
 	return &chromedpCapture{
 		collector: collector,
+		forms:     forms,
 		stop:      stopListener,
 		run: func(ctx context.Context, action chromedp.Action) error {
 			return runChromedpWithCaller(taskCtx, ctx, action)
@@ -657,29 +675,94 @@ func beginChromedpCapture(taskCtx, callerCtx context.Context) (captureSource, er
 }
 
 func recordNetworkEvent(collector *captureCollector, value any) {
+	notify := false
 	switch event := value.(type) {
 	case *network.EventRequestWillBeSent:
 		if event.RedirectResponse != nil {
-			collector.addResponse(
-				event.RedirectResponse.URL,
-				event.RedirectResponse.Status,
-				event.RedirectResponse.MimeType,
-				event.Type.String(),
-			)
+			collector.observeRedirect(string(event.RequestID), responseObservation{
+				rawURL:           event.RedirectResponse.URL,
+				status:           event.RedirectResponse.Status,
+				mimeType:         event.RedirectResponse.MimeType,
+				resourceType:     event.Type.String(),
+				protocol:         event.RedirectResponse.Protocol,
+				connectionReused: event.RedirectResponse.ConnectionReused,
+				requestTime:      requestTimeSeconds(event.RedirectResponse.Timing),
+				timing:           captureResourceTiming(event.RedirectResponse.Timing),
+			}, eventSeconds(event.Timestamp))
 		}
 		if event.Request != nil {
-			collector.addRequest(event.Request.Method, event.Request.URL, event.Type.String())
+			collector.beginRequest(string(event.RequestID), event.Request.Method,
+				event.Request.URL, event.Type.String(), eventSeconds(event.Timestamp))
 		}
+		notify = true
 	case *network.EventResponseReceived:
 		if event.Response != nil {
-			collector.addResponse(
-				event.Response.URL,
-				event.Response.Status,
-				event.Response.MimeType,
-				event.Type.String(),
-			)
+			collector.observeResponse(string(event.RequestID), responseObservation{
+				rawURL:           event.Response.URL,
+				status:           event.Response.Status,
+				mimeType:         event.Response.MimeType,
+				resourceType:     event.Type.String(),
+				protocol:         event.Response.Protocol,
+				connectionReused: event.Response.ConnectionReused,
+				requestTime:      requestTimeSeconds(event.Response.Timing),
+				timing:           captureResourceTiming(event.Response.Timing),
+			})
 		}
+		notify = true
+	case *network.EventLoadingFinished:
+		collector.finishRequest(string(event.RequestID), int64(event.EncodedDataLength), eventSeconds(event.Timestamp))
+	case *network.EventLoadingFailed:
+		collector.failRequest(string(event.RequestID))
 	}
+	// Notify outside the collector lock. The callback contract requires a
+	// non-blocking implementation; a blocking one would only stall this CDP
+	// listener, never corrupt collector state.
+	if notify && collector.progress != nil {
+		collector.progress(collector.counterSnapshot())
+	}
+}
+
+// eventSeconds converts a CDP monotonic event timestamp into seconds for
+// duration arithmetic. The conversion exists only to compute differences;
+// individual timestamps are never retained.
+func eventSeconds(timestamp *cdp.MonotonicTime) float64 {
+	if timestamp == nil || timestamp.Time().IsZero() {
+		return 0
+	}
+	return float64(timestamp.Time().UnixNano()) / float64(time.Second)
+}
+
+// requestTimeSeconds returns the response timing baseline, which shares the
+// monotonic base of event timestamps, or zero when timing is unavailable.
+func requestTimeSeconds(timing *network.ResourceTiming) float64 {
+	if timing == nil {
+		return 0
+	}
+	return timing.RequestTime
+}
+
+// captureResourceTiming converts relative CDP resource timing into bounded
+// integer millisecond durations. Inapplicable phases, which CDP marks with
+// negative values, collapse to zero.
+func captureResourceTiming(timing *network.ResourceTiming) CaptureTiming {
+	if timing == nil {
+		return CaptureTiming{}
+	}
+	return CaptureTiming{
+		DNSMs:     capturePhaseDurationMs(timing.DNSStart, timing.DNSEnd),
+		ConnectMs: capturePhaseDurationMs(timing.ConnectStart, timing.ConnectEnd),
+		TLSMs:     capturePhaseDurationMs(timing.SslStart, timing.SslEnd),
+		TTFBMs:    boundedDurationMs(timing.ReceiveHeadersEnd / 1000),
+	}
+}
+
+// capturePhaseDurationMs bounds one relative timing phase given in
+// milliseconds.
+func capturePhaseDurationMs(start, end float64) int64 {
+	if start < 0 || end < 0 || end <= start {
+		return 0
+	}
+	return boundedDurationMs((end - start) / 1000)
 }
 
 func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
@@ -738,6 +821,7 @@ func (c *chromedpCapture) finish(ctx context.Context) (CaptureResult, error) {
 		if !domObserved {
 			c.result.DOMIncomplete = true
 		}
+		c.result.FormSubmissions = c.forms.snapshot()
 		close(c.done)
 	})
 	<-c.done

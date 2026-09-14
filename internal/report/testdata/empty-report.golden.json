@@ -1,20 +1,25 @@
 {
   "schema_version": 6,
   "tool_version": "1.2.3",
-  "requested_url": "https://example.test/",
-  "final_url": "https://example.test/",
-  "http": {
-    "status_code": 200,
-    "body_truncated": false,
-    "redirects": [],
-    "warnings": []
-  },
-  "analyzers": [
+  "pages": [
     {
-      "source": "http_analyzer",
-      "status": "complete",
-      "warnings": []
+      "requested_url": "https://example.test/",
+      "failed": false,
+      "final_url": "https://example.test/",
+      "http": {
+        "status_code": 200,
+        "body_truncated": false,
+        "redirects": [],
+        "warnings": []
+      },
+      "analyzers": [
+        {
+          "source": "http_analyzer",
+          "status": "complete",
+          "warnings": []
+        }
+      ],
+      "detections": []
     }
-  ],
-  "detections": []
+  ]
 }

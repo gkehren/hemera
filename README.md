@@ -9,10 +9,12 @@ security services.
 > Hemera is in early development. Safe HTTP scanning, bounded DNS/TLS
 > observation, sandboxed Chromium/CDP navigation, deterministic multi-analyzer
 > orchestration, normalized signal matching, correlation-aware confidence
-> scoring, and text/JSON V6 reports are implemented. The built-in rules cover
-> Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs with
-> explicit infrastructure-versus-product separation and fixture-backed
-> limitations.
+> scoring, thirteen documented detectors across 7 vendor families, text/JSON
+> V6 reports, bounded multi-page scans, and enriched network observation
+> (protocol, wire sizes, integer-millisecond durations, connection reuse) are
+> implemented. The built-in rules cover Cloudflare, Google, AWS, DataDome,
+> Akamai, hCaptcha, and Arkose Labs with explicit infrastructure-versus-product
+> separation and fixture-backed limitations.
 
 ## What Hemera aims to provide
 
@@ -70,8 +72,10 @@ detailed setup instructions, Chromium configuration, and troubleshooting.
 ## Quick start
 
 Launch Hemera without arguments in a terminal for the interactive experience:
-it asks for the scan mode and target URL, shows live analyzer progress, and
-finishes with a styled full report in the same visual language:
+it asks for the scan mode, the target URL, optional additional pages (up to
+10), and the opt-in form-submission toggle, shows live analyzer progress with
+request counters, and finishes with a styled full report — aggregated with a
+cross-page summary when several pages were requested:
 
 ```sh
 hemera
@@ -93,7 +97,25 @@ Filter positive detections with `jq`:
 
 ```sh
 hemera scan --format json https://example.com/ \
-  | jq '.detections[] | select(.detected == true) | {id, name, score, level}'
+  | jq '.pages[0].detections[] | select(.detected == true) | {id, name, score, level}'
+```
+
+Scan an explicit, bounded list of pages (at most 10, sequential, no crawling)
+with one aggregated report:
+
+```sh
+hemera scan https://example.com/ --pages https://example.com/pricing,https://example.com/login
+# or read the list from a file, one URL per line:
+hemera scan https://example.com/ --pages-file pages.txt
+```
+
+Opt in to the bounded form interaction phase: after the passive observation
+window, Hemera fills and submits exactly one eligible same-origin form per page
+with fixed benign synthetic data. Credential, upload, and auth forms are never
+submitted, and every navigation budget stays enforced:
+
+```sh
+hemera scan --forms https://example.com/contact
 ```
 
 The interactive wizard requires a terminal on both stdin and stdout. Piped or
@@ -114,14 +136,18 @@ with exit code `0`.
    to a large catalogue of approximate signatures.
 3. **Safe by design.** URL validation, redirect revalidation, resource limits,
    and private-network protections are core requirements.
-4. **Passive observation only.** Hemera does not bypass CAPTCHA, solve challenges,
-   spoof fingerprints, probe WAFs with attack payloads, or scan aggressively.
+4. **Passive-first, low-impact.** Hemera does not bypass CAPTCHA, solve
+   challenges, spoof fingerprints, or probe WAFs with attack payloads. It scans
+   one page per navigation, or an explicit bounded list of user-specified
+   pages, and never crawls. The single active capability is opt-in: one
+   same-origin form submission per page with benign synthetic data, inside the
+   normal navigation budgets.
 5. **Automation-friendly.** The CLI, JSON schema, rules, and fixtures should be
    deterministic and suitable for CI and other tools.
 
 ## Detector coverage
 
-Hemera ships 12 built-in detector rules with explicit product-level separation
+Hemera ships 13 built-in detector rules with explicit product-level separation
 across 7 vendor families:
 
 - **Cloudflare:**
@@ -135,7 +161,8 @@ across 7 vendor families:
   - `aws.cloudfront` (Amazon CloudFront);
   - `aws.waf` (AWS WAF).
 - **DataDome:**
-  - `datadome.bot_protection` (DataDome).
+  - `datadome.bot_protection` (DataDome);
+  - `datadome.form_reaction` (DataDome Form Submission Reaction) — requires the opt-in form interaction phase.
 - **Akamai:**
   - `akamai.edge` (Akamai Edge);
   - `akamai.bot_manager` (Akamai Bot Manager).

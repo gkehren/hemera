@@ -47,13 +47,18 @@ Hemera is in early development. The repository currently contains:
 - sandboxed Chromium/CDP session startup, bounded post-load capture, validated
   resource-bounded navigation, fail-closed child targets, normalized browser
   signals, production-configured local executable selection, and scanner
-  integration;
+  integration, plus enriched network observation (correlated transactions,
+  protocol, wire sizes, bounded integer-millisecond durations, connection
+  reuse), bounded multi-page scans over explicit user-specified URL lists, and
+  an opt-in bounded same-origin form submission phase;
 - a versioned, synthetic browser fixture corpus with hermetic dynamic, negative,
   delayed post-load, adversarial security, and resource-limit coverage, using
   partial-order traffic contracts and explicit completion barriers;
 - the normalized signal model, detector rule matching, and confidence scoring;
-- 12 built-in rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha,
-  and Arkose Labs with explicit infrastructure-versus-product separation;
+- 13 built-in rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha,
+  and Arkose Labs with explicit infrastructure-versus-product separation,
+  including an interaction-gated rule that requires the opt-in bounded form
+  submission phase;
 - deterministic multi-analyzer orchestration, typed HTTP metadata, and
   a validated static producer-capability registry kept separate from
   capability-level coverage tracking for bounded analyzer observations;

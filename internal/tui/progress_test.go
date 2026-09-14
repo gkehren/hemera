@@ -17,6 +17,7 @@ func newTestModel() progressModel {
 	return newProgressModel(
 		[]string{"http_analyzer", "dns_tls_analyzer", "browser_analyzer"},
 		"https://example.test/",
+		"",
 		nil,
 	)
 }
@@ -25,7 +26,7 @@ func TestRunProgressReturnsApplicationContextCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := RunProgress(ctx, io.Discard, nil, "https://example.test/", make(chan Msg))
+	err := RunProgress(ctx, io.Discard, nil, "https://example.test/", "", make(chan Msg))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunProgress() error = %v, want context.Canceled", err)
 	}
@@ -235,7 +236,7 @@ func TestStageLabelFallback(t *testing.T) {
 func TestProgressModelRedactsTargetQuery(t *testing.T) {
 	t.Parallel()
 	model := newProgressModel([]string{"http_analyzer"},
-		"https://example.test/api?token=SUPER_SECRET", nil)
+		"https://example.test/api?token=SUPER_SECRET", "", nil)
 	content := model.View().Content
 	if strings.Contains(content, "SUPER_SECRET") || strings.Contains(content, "token=") {
 		t.Errorf("view leaks the target query: %q", content)
@@ -248,7 +249,7 @@ func TestProgressModelRedactsTargetQuery(t *testing.T) {
 func TestProgressModelRemovesCredentialsAndFragments(t *testing.T) {
 	t.Parallel()
 	model := newProgressModel([]string{"http_analyzer"},
-		"https://user:password@example.test/path?x=y#fragment", nil)
+		"https://user:password@example.test/path?x=y#fragment", "", nil)
 	content := model.View().Content
 	for _, leaked := range []string{"user:", "password", "x=y", "#fragment", "fragment"} {
 		if strings.Contains(content, leaked) {
@@ -262,7 +263,7 @@ func TestProgressModelRemovesCredentialsAndFragments(t *testing.T) {
 
 func TestProgressModelKeepsPlainTargetsReadable(t *testing.T) {
 	t.Parallel()
-	model := newProgressModel([]string{"http_analyzer"}, "https://example.test/path", nil)
+	model := newProgressModel([]string{"http_analyzer"}, "https://example.test/path", "", nil)
 	if content := model.View().Content; !strings.Contains(content, "https://example.test/path") {
 		t.Errorf("view over-redacted plain target: %q", content)
 	}
@@ -271,7 +272,7 @@ func TestProgressModelKeepsPlainTargetsReadable(t *testing.T) {
 func TestProgressModelReplacesUnparseableTarget(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"not a url", "", "ftp://example.test/"} {
-		model := newProgressModel([]string{"http_analyzer"}, raw, nil)
+		model := newProgressModel([]string{"http_analyzer"}, raw, "", nil)
 		content := model.View().Content
 		if !strings.Contains(content, safeoutput.InvalidTargetPlaceholder) {
 			t.Errorf("view for %q lacks placeholder: %q", raw, content)
@@ -279,5 +280,32 @@ func TestProgressModelReplacesUnparseableTarget(t *testing.T) {
 		if strings.Contains(content, raw) && raw != "" {
 			t.Errorf("view echoed unparseable target %q: %q", raw, content)
 		}
+	}
+}
+
+func TestProgressModelShowsPageLabelAndLiveCounters(t *testing.T) {
+	t.Parallel()
+	model := newProgressModel([]string{"browser_analyzer"}, "https://example.test/", "Page 2 of 3", nil)
+	model = update(t, model, startedEvent("browser_analyzer"))
+	model = update(t, model, eventMsg(scanner.ScanEvent{
+		Source:   "browser_analyzer",
+		Kind:     scanner.ScanEventProgress,
+		Counters: scanner.ObservationCounters{Requests: 12, Responses: 9},
+	}))
+	content := model.View().Content
+	if !strings.Contains(content, "Page 2 of 3") {
+		t.Errorf("view lacks the page label: %q", content)
+	}
+	if !strings.Contains(content, "12 requests · 9 responses observed") {
+		t.Errorf("view lacks live counters: %q", content)
+	}
+}
+
+func TestProgressModelHidesCountersBeforeAnyProgressEvent(t *testing.T) {
+	t.Parallel()
+	model := newProgressModel([]string{"browser_analyzer"}, "https://example.test/", "", nil)
+	model = update(t, model, startedEvent("browser_analyzer"))
+	if content := model.View().Content; strings.Contains(content, "requests observed") {
+		t.Errorf("view fabricated counters before any progress event: %q", content)
 	}
 }

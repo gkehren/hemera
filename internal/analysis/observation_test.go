@@ -105,3 +105,32 @@ func TestCapabilityCoverageValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestObservationCloneOwnsNetworkMetadata(t *testing.T) {
+	t.Parallel()
+	original := Observation{
+		Source: "fixture",
+		Metadata: Metadata{Network: &NetworkMetadata{
+			FinalURL:      "https://example.test/",
+			POSTEndpoints: []string{"https://api.example.test/submit"},
+			Protocols:     []NetworkNameCount{{Name: "h2", Count: 2}},
+			Hosts:         []NetworkHostTraffic{{Host: "example.test", Requests: 2}},
+			Transactions:  []NetworkTransaction{{Method: "POST", URL: "https://api.example.test/submit", Status: 403}},
+		}},
+	}
+	cloned := original.Clone()
+	original.Metadata.Network.POSTEndpoints[0] = "changed"
+	original.Metadata.Network.Protocols[0].Count = 99
+	original.Metadata.Network.Hosts[0].Requests = 99
+	original.Metadata.Network.Transactions[0].Status = 0
+
+	network := cloned.Metadata.Network
+	if network == nil || network.POSTEndpoints[0] != "https://api.example.test/submit" ||
+		network.Protocols[0].Count != 2 || network.Hosts[0].Requests != 2 ||
+		network.Transactions[0].Status != 403 {
+		t.Fatalf("Clone() retained network metadata slices: %#v", network)
+	}
+	if !slices.Equal(cloned.Metadata.Kinds(), []MetadataKind{MetadataKindNetwork}) || cloned.Metadata.Empty() {
+		t.Errorf("metadata kinds/empty = %v/%t", cloned.Metadata.Kinds(), cloned.Metadata.Empty())
+	}
+}

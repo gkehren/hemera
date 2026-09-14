@@ -11,8 +11,7 @@ original additive positive-evidence semantics; correlation metadata requires V2.
 
 ## Built-in detectors
 
-Hemera ships 12 built-in detector rules across Cloudflare, Google, AWS,
-DataDome, Akamai, hCaptcha, and Arkose Labs:
+Hemera ships 13 built-in detector rules across Cloudflare, Google, AWS, DataDome, Akamai, hCaptcha, and Arkose Labs:
 
 | Rule ID | Category | Detector name | Decisive evidence | Supporting evidence |
 | --- | --- | --- | --- | --- |
@@ -24,6 +23,7 @@ DataDome, Akamai, hCaptcha, and Arkose Labs:
 | `aws.cloudfront` | `cdn_reverse_proxy` | Amazon CloudFront | `Server: CloudFront`, `x-amz-cf-id`, or `x-amz-cf-pop` header | `x-cache`, `*.cloudfront.net` CNAME, Amazon TLS |
 | `aws.waf` | `waf` | AWS WAF | Official SDK script, `x-amzn-waf-action`, block page | `aws-waf-token` cookie, `aws-waf-` marker |
 | `datadome.bot_protection` | `bot_management` | DataDome | `js.datadome.co/tags.js` (unversioned/versioned), `x-datadome`, challenge iframe | `datadome` cookie, `window.datadomeOptions` marker |
+| `datadome.form_reaction` | `bot_management` | DataDome Form Submission Reaction | (opt-in) submitted form + denied 403 POST + interstitial marker | none; never fires without the opt-in form interaction phase |
 | `akamai.edge` | `cdn_reverse_proxy` | Akamai Edge | `Server: AkamaiGHost`, `x-akamai-transformed`, or Akamai CNAME | `x-akamai-request-id`, `x-check-cacheable`, `x-akamai-session-info`, Akamai TLS |
 | `akamai.bot_manager` | `bot_management` | Akamai Bot Manager | `/_sec/verify.js`, `/akam/13/` sensor script | `_abck`, `ak_bmsc`, `bm_sv` cookies |
 | `hcaptcha.challenge` | `captcha_challenge` | hCaptcha | Official `js.hcaptcha.com/1/api.js` script or challenge iframe | `h-captcha` container marker, `hcaptcha.render()` call |
@@ -305,6 +305,14 @@ stable channel order:
 
 - `network_request`: the uppercase HTTP method is the key and the cleaned
   request URL is the value;
+- `network_transaction`: for non-GET requests only, the uppercase method is the
+  key, the decimal response status is the value, and the cleaned request URL is
+  the signal URL. It pairs a method with its own response status, which the
+  separate request and response signals cannot express. Requests without an
+  observed response are omitted;
+- `form_submission`: the key is `action` and the cleaned submitted action URL is
+  the value. It is produced only when the opt-in bounded form interaction phase
+  is enabled and exactly one eligible same-origin form was submitted;
 - `network_response`: the key is `status`, the value is the decimal status, and
   the cleaned response URL is the signal URL;
 - `page_content`: the key is `dom` and the bounded final DOM is the internal

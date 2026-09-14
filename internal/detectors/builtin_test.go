@@ -15,8 +15,8 @@ func TestLoadBuiltInRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ruleSet.Rules) != 12 {
-		t.Fatalf("built-in rules = %d, want 12", len(ruleSet.Rules))
+	if len(ruleSet.Rules) != 13 {
+		t.Fatalf("built-in rules = %d, want 13", len(ruleSet.Rules))
 	}
 	if ruleSet.SchemaVersion != rules.CurrentSchemaVersion {
 		t.Errorf("built-in schema version = %d, want %d", ruleSet.SchemaVersion, rules.CurrentSchemaVersion)
@@ -34,6 +34,7 @@ func TestLoadBuiltInRules(t *testing.T) {
 		"akamai.bot_manager",
 		"hcaptcha.challenge",
 		"arkoselabs.matchkey",
+		"datadome.form_reaction",
 	}
 	for i, want := range wantIDs {
 		if got := ruleSet.Rules[i].ID; got != want {

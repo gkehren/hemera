@@ -15,11 +15,26 @@ top-level `schema_version` is mandatory and is currently `6`.
 | --- | --- | --- |
 | `schema_version` | integer | Report contract version. |
 | `tool_version` | string | Hemera build identity, shared with `hemera --version`. |
+
+| `tool_version` | string | Hemera binary version. |
+| `pages` | array | One entry per requested page, in scan order. |
+| `summary` | object or null | Cross-page aggregate for multi-page scans; absent for single-page scans. |
+
+A multi-page scan is an explicit, bounded list of at most 10 user-specified
+URLs scanned sequentially; Hemera never crawls. Page-level failures do not
+abort the remaining pages: a failed page contributes a `failed: true` entry
+with empty collections and counts toward `summary.failed_pages`.
+
+Each `pages` entry contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
 | `requested_url` | string | Initial URL with query values masked. |
+| `failed` | boolean | True when the page scan failed; other fields then describe nothing. |
 | `final_url` | string or null | Final observed HTTP URL with query values masked, or `null` when unavailable. |
 | `http` | object or null | Final HTTP status, truncation, redirects, and warnings, or `null` when unavailable. |
-| `analyzers` | array | Ordered analyzer coverage and producer-safe warnings. |
-| `detections` | array | One explained result for every embedded rule, in rule order. |
+| `network` | object or null | Bounded browser network diagnostics, or absent when unavailable. |
+| `analyzers` | array | Ordered analyzer coverage and producer-safe warnings. || `detections` | array | One explained result for every embedded rule, in rule order. |
 
 When HTTP metadata is available, the `http` object contains `status_code`,
 `body_truncated`, `redirects`, and `warnings`. Redirect objects contain `from`,
@@ -37,6 +52,23 @@ strict semantic-version syntax. Explicit release-time injection takes
 precedence over the embedded Go module and development metadata. The derivation
 reads no repository path, username, environment variable, or unrelated build
 setting.
+
+The optional `network` object contains bounded browser network diagnostics:
+`request_count`, `response_count`, `wire_bytes_total`, `post_endpoints`
+(cleaned URLs), `protocols` and `status_classes` (`name`/`count` pairs),
+per-`hosts` request and reuse counts, `queue_timing` and `ttfb_timing`
+(`p50_ms`, `p95_ms`, `max_ms` integer millisecond statistics), a bounded
+`transactions` waterfall (`method`, `url`, `status`, `protocol`,
+`connection_reused`, `wire_bytes`, `queue_ms`, `ttfb_ms`, `total_ms`), and a
+`truncated` flag. Durations are the only timing data ever retained; absolute
+timestamps, remote addresses, headers, bodies, POST data, and connection
+identifiers are not exposed.
+
+The optional `summary` object contains `page_count`, `failed_pages`, and one
+`detections` entry per rule seen on any page, in first-seen rule order: `id`,
+`name`, `category`, `vendor`, `product`, `detected_pages`, `max_score`, and
+`max_level`. The summary only folds per-page detections and adds no detection
+semantics.
 
 Each `analyzers` entry contains:
 
@@ -200,17 +232,20 @@ changes.
 
 ### Schema history
 
-Report V6 refines `status` and `incomplete_sources` from analyzer-level to
-capability-level coverage. Analyzers now declare structured per-`SignalType`
-observation completeness derived from bounded capture state, so a successful
-analyzer observation with a truncated evidence channel (bounded HTTP body or
-resource extraction, bounded browser DOM, request, response, script, iframe, or
-cookie capture) no longer produces a false conclusive `not_detected` for
-evidence beyond the truncation point; such rules become
-`insufficient_coverage`. Incomplete capabilities that a rule does not depend on
-do not downgrade it, and retained decisive evidence still detects. V5 consumers
-must not interpret V6 as V5.
-
+Report V6 restructures the document for bounded multi-page scans and deepens
+capability-level coverage at the same time. Per-page content (`requested_url`,
+`final_url`, `http`, `network`, `analyzers`, `detections`) moves under a
+required `pages` array, failed pages become explicit entries, and an optional
+`summary` object aggregates multi-page detection outcomes. V6 also adds the
+bounded `network` diagnostics section (protocol, wire sizes,
+integer-millisecond durations, connection-reuse counts, POST endpoints,
+transaction waterfall); durations are relative integer milliseconds only and
+the pre-existing prohibition on absolute timestamps, remote addresses, and
+connection identifiers is unchanged. Finally, V6 refines `status` and
+`incomplete_sources` from analyzer-level to capability-level coverage:
+analyzers declare structured per-`SignalType` observation completeness derived
+from bounded capture state, so a truncated evidence channel no longer produces
+a false conclusive `not_detected`. V5 consumers must not interpret V6 as V5.
 Report V5 refines detection `status` and `incomplete_sources` with score-aware,
 capability-based condition coverage. An incomplete analyzer no longer causes
 false `not_detected` when supporting evidence is observed alongside unobserved

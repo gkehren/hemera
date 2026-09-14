@@ -13,35 +13,39 @@ import (
 type SignalType string
 
 const (
-	SignalTypeResponseHeader  SignalType = "response_header"
-	SignalTypeCookie          SignalType = "cookie"
-	SignalTypeScriptURL       SignalType = "script_url"
-	SignalTypeNetworkRequest  SignalType = "network_request"
-	SignalTypeNetworkResponse SignalType = "network_response"
-	SignalTypeDOMSelector     SignalType = "dom_selector"
-	SignalTypeIframeURL       SignalType = "iframe_url"
-	SignalTypeJSGlobal        SignalType = "js_global"
-	SignalTypeDNSRecord       SignalType = "dns_record"
-	SignalTypeTLSProperty     SignalType = "tls_property"
-	SignalTypeRedirect        SignalType = "redirect"
-	SignalTypePageContent     SignalType = "page_content"
-	SignalTypeResourceHost    SignalType = "resource_host"
+	SignalTypeResponseHeader     SignalType = "response_header"
+	SignalTypeCookie             SignalType = "cookie"
+	SignalTypeScriptURL          SignalType = "script_url"
+	SignalTypeNetworkRequest     SignalType = "network_request"
+	SignalTypeNetworkResponse    SignalType = "network_response"
+	SignalTypeNetworkTransaction SignalType = "network_transaction"
+	SignalTypeFormSubmission     SignalType = "form_submission"
+	SignalTypeDOMSelector        SignalType = "dom_selector"
+	SignalTypeIframeURL          SignalType = "iframe_url"
+	SignalTypeJSGlobal           SignalType = "js_global"
+	SignalTypeDNSRecord          SignalType = "dns_record"
+	SignalTypeTLSProperty        SignalType = "tls_property"
+	SignalTypeRedirect           SignalType = "redirect"
+	SignalTypePageContent        SignalType = "page_content"
+	SignalTypeResourceHost       SignalType = "resource_host"
 )
 
 var validSignalTypes = map[SignalType]struct{}{
-	SignalTypeResponseHeader:  {},
-	SignalTypeCookie:          {},
-	SignalTypeScriptURL:       {},
-	SignalTypeNetworkRequest:  {},
-	SignalTypeNetworkResponse: {},
-	SignalTypeDOMSelector:     {},
-	SignalTypeIframeURL:       {},
-	SignalTypeJSGlobal:        {},
-	SignalTypeDNSRecord:       {},
-	SignalTypeTLSProperty:     {},
-	SignalTypeRedirect:        {},
-	SignalTypePageContent:     {},
-	SignalTypeResourceHost:    {},
+	SignalTypeResponseHeader:     {},
+	SignalTypeCookie:             {},
+	SignalTypeScriptURL:          {},
+	SignalTypeNetworkRequest:     {},
+	SignalTypeNetworkResponse:    {},
+	SignalTypeNetworkTransaction: {},
+	SignalTypeFormSubmission:     {},
+	SignalTypeDOMSelector:        {},
+	SignalTypeIframeURL:          {},
+	SignalTypeJSGlobal:           {},
+	SignalTypeDNSRecord:          {},
+	SignalTypeTLSProperty:        {},
+	SignalTypeRedirect:           {},
+	SignalTypePageContent:        {},
+	SignalTypeResourceHost:       {},
 }
 
 var (
