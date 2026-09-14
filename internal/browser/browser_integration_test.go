@@ -453,7 +453,13 @@ func TestSandboxedChromiumBoundedDOMAndRequestConcurrency(t *testing.T) {
 
 	config, explicit := integrationConfig(t)
 	targetURL := configureIntegrationFixture(t, &config, fixture.server)
-	config.MaxConcurrentRequests = 2
+	// The post-load DOM fixture keeps its completion-barrier fetch in flight
+	// for the whole navigation by design, so this client's ceiling must leave
+	// headroom for the document and the completion fetch even when event
+	// delivery is slow on loaded runners. Dedicated low-ceiling concurrency
+	// coverage follows below with its own clients and explicit
+	// ErrConcurrencyLimit assertions.
+	config.MaxConcurrentRequests = 8
 	client, err := New(config)
 	if err != nil {
 		t.Fatal(err)
